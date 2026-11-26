@@ -49,6 +49,7 @@ interface SessionFinalizationContext {
     readonly serializedContext: Record<string, unknown>;
     readonly sessionState: DurableSessionState | undefined;
   };
+  readonly directTaskOwner?: TurnCaller;
   readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
@@ -96,12 +97,14 @@ export async function finalizeSession(
   const latestTurnId = latestTurnIdOf(stored);
   const latest = latestTurnId === undefined ? undefined : turnCoordinatesOf(stored, latestTurnId);
   const settled = settledResult(outcome, context);
-  if (outcome.kind === "done" && context.caller !== undefined) {
+  const terminalCaller = context.caller ?? context.directTaskOwner;
+  if (outcome.kind === "done" && terminalCaller !== undefined) {
     const sessionId = sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string);
+    const totalUsage = terminalCaller.directTask !== undefined ? settled.sessionUsage : undefined;
     const [closeResult, notifyResult] = await Promise.allSettled([
       closeSessionStreamStep({ sessionWritable: context.sessionWritable }),
       notifyTurnCallerStep({
-        caller: context.caller,
+        caller: terminalCaller,
         lifecycle: "terminal",
         sessionId,
         settled: {
@@ -109,6 +112,7 @@ export async function finalizeSession(
           output: settled.output,
           usage: settled.turnUsage,
         },
+        ...(totalUsage !== undefined && { totalUsage }),
       }),
     ]);
     if (closeResult.status === "rejected") throw closeResult.reason;
@@ -141,19 +145,29 @@ export async function finalizeSession(
     await closeSessionStreamStep({ sessionWritable: context.sessionWritable });
   }
 
-  if (context.caller !== undefined) {
+  if (terminalCaller !== undefined) {
     const sessionId = sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string);
+    const totalUsage = terminalCaller.directTask !== undefined ? settled.sessionUsage : undefined;
     if (outcome.kind === "ended" && outcome.cancelled !== undefined) {
       const notification = {
-        caller: context.caller,
+        caller: terminalCaller,
         lifecycle: "terminal" as const,
         sessionId,
+        ...(totalUsage !== undefined && { totalUsage }),
       };
       await notifyCancelledTaskCallerStep(
         outcome.cancelled.usage === undefined
           ? notification
           : { ...notification, usage: outcome.cancelled.usage },
       );
+    } else if (context.caller === undefined && outcome.kind === "expired") {
+      await notifyCancelledTaskCallerStep({
+        caller: terminalCaller,
+        lifecycle: "terminal",
+        reason: "The agent session expired while idle.",
+        sessionId,
+        ...(totalUsage !== undefined && { totalUsage }),
+      });
     } else {
       const notification: { isError?: boolean; output: unknown; usage?: TokenUsage } = {
         output: settled.output,
@@ -161,10 +175,11 @@ export async function finalizeSession(
       };
       if (settled.isError) notification.isError = true;
       await notifyTurnCallerStep({
-        caller: context.caller,
+        caller: terminalCaller,
         lifecycle: "terminal",
         sessionId,
         settled: notification,
+        ...(totalUsage !== undefined && { totalUsage }),
       });
     }
   }

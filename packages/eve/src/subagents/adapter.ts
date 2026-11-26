@@ -3,7 +3,12 @@ import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import { ContinuationTokenKey, SessionIdKey, SessionInboxKey } from "#context/keys.js";
 import { relayedInteractionEvents } from "#harness/interaction-relay.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import { SUBAGENT_ADAPTER_KIND, isSubagentAdapterState } from "#subagents/adapter-state.js";
+import {
+  isDirectSubagentTaskRef,
+  SUBAGENT_ADAPTER_KIND,
+  isSubagentAdapterState,
+} from "#subagents/adapter-state.js";
+import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
 import { formatCapabilityError } from "#internal/capability-error.js";
 
@@ -49,31 +54,58 @@ async function relay(event: SessionEvent, ctx: ChannelAdapterContext): Promise<v
       },
     }),
   };
+  const directTask = isDirectSubagentTaskRef(state.directTask) ? state.directTask : undefined;
+  const payload: SubagentInteractionHookPayload | WorkflowToolRunMessage =
+    directTask === undefined
+      ? hookPayload
+      : {
+          from: {
+            callId: state.callId,
+            runId: childSessionId,
+            sequence: directTask.sequence,
+            stepIndex: directTask.stepIndex,
+            taskId: directTask.taskId,
+            toolName: directTask.toolName,
+            turnId: directTask.turnId,
+          },
+          kind: "request",
+          request: { event: hookPayload, kind: "relay" },
+        };
   await forwardToParentStep({
-    hookPayload,
+    callId: hookPayload.callId,
+    childContinuationToken: hookPayload.route?.childContinuationToken,
+    childSessionId: hookPayload.childSessionId,
+    eventTypes: hookPayload.events.map((fact) => fact.type),
+    payload,
     parentContinuationToken: state.parentContinuationToken,
+    subagentName: hookPayload.subagentName,
   });
 }
 
 async function forwardToParentStep(input: {
-  readonly hookPayload: SubagentInteractionHookPayload;
+  readonly callId: string;
+  readonly childContinuationToken?: string;
+  readonly childSessionId: string;
+  readonly eventTypes: readonly string[];
+  readonly payload: SubagentInteractionHookPayload | WorkflowToolRunMessage;
   readonly parentContinuationToken: string;
+  readonly subagentName: string;
 }): Promise<void> {
   "use step";
 
   try {
     const { resumeRoutedHook } = await import("#execution/hosts.js");
-    await resumeRoutedHook(input.parentContinuationToken, input.hookPayload);
+    await resumeRoutedHook(input.parentContinuationToken, input.payload);
   } catch (error) {
     log.warn("failed to forward a child's interaction to its parent", {
-      callId: input.hookPayload.callId,
-      childSessionId: input.hookPayload.childSessionId,
+      callId: input.callId,
+      childSessionId: input.childSessionId,
       errorId: createErrorId(),
-      eventTypes: input.hookPayload.events.map((fact) => fact.type),
-      subagentName: input.hookPayload.subagentName,
+      eventTypes: input.eventTypes,
+      subagentName: input.subagentName,
       error: formatCapabilityError(error, [
         input.parentContinuationToken,
-        input.hookPayload.route?.childContinuationToken,
+        input.childContinuationToken,
       ]),
     });
     throw error;

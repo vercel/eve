@@ -129,4 +129,65 @@ describe("runPreparedSession deferred session timeout", () => {
       expect.anything(),
     );
   });
+
+  it("recovers directTaskOwner from serializedContext when a successor boots parked", async () => {
+    const timeout: SessionTimeoutControl = {
+      dispose: vi.fn(async () => {}),
+      getDeadline: () => new Date(),
+      handleTimerElapsed: async () => "expired",
+      recordActivity: vi.fn(),
+      start: vi.fn(async () => {}),
+    };
+    const directTask = {
+      sequence: 1,
+      stepIndex: 0,
+      taskId: "agent-abc123",
+      toolName: "agent",
+      turnId: "turn_0",
+    };
+    const boot: SessionBoot = {
+      ...makeBoot(timeout),
+      caller: undefined,
+      serializedContext: {
+        "eve.channel": {
+          kind: "subagent",
+          state: {
+            callId: "call-1",
+            directTask,
+            parentContinuationToken: "eve:inbox:v1:eve:session:parent:inbox",
+            parentSessionId: "parent",
+            subagentName: "agent",
+          },
+        },
+      },
+      start: { kind: "parked" },
+    };
+    const inbox = createSessionInbox({
+      confirm: async () => {},
+      dispose: async () => {},
+      isTakenOver: () => false,
+      open: (token) => ({
+        async *[Symbol.asyncIterator]() {
+          yield { kind: "session-timeout", ownerRunId: "owner-1" };
+        },
+        token,
+      }),
+      ownerRunId: () => "owner-1",
+    });
+    await inbox.claimSessionHook("eve:session:session-1:inbox");
+
+    await runPreparedSession(boot, inbox, makeHost("parked"));
+
+    expect(finalizeSession).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "expired" }),
+      expect.objectContaining({
+        directTaskOwner: {
+          callId: "call-1",
+          directTask,
+          replyTo: { kind: "hook", token: "eve:inbox:v1:eve:session:parent:inbox" },
+          subagentName: "agent",
+        },
+      }),
+    );
+  });
 });

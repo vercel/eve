@@ -33,6 +33,7 @@ export interface InProcessRunsHost {
 }
 
 export interface InProcessRuns {
+  readonly localSessions: LocalAgentSessions;
   readonly startRun: StartWorkflowToolRun;
   runEnded(runId: string): boolean | undefined;
   cancelRun(runId: string, reason: string): boolean | undefined;
@@ -100,6 +101,7 @@ export function createInProcessRuns(host: InProcessRunsHost): InProcessRuns {
   };
 
   return {
+    localSessions,
     async startRun(input) {
       const hookToken = workflowToolRunHookToken(input);
       const runId = `wrun_in_process_${createUlid()}`;

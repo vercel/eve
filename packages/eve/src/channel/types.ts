@@ -1,4 +1,5 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
+import type { DirectSubagentTaskRef } from "#subagents/adapter-state.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelDelivery } from "#shared/channel-delivery.js";
 
@@ -118,6 +119,7 @@ export interface SessionAuthContext {
 
 export interface TurnCaller {
   readonly callId: string;
+  readonly directTask?: DirectSubagentTaskRef;
   readonly subagentName: string;
   readonly replyTo:
     | { readonly kind: "hook"; readonly token: string }

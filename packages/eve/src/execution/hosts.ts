@@ -34,6 +34,7 @@ export interface DurableHost {
   runStatus(runId: string): Promise<string>;
   cancelRun(runId: string, reason: string): Promise<void>;
   readonly lineStore: SessionLineStore;
+  resolveSessionOwnerRunId?(continuationToken: string): Promise<string | undefined>;
   stepAttempt(): number | undefined;
   callbackBaseUrl(): string | undefined;
   readonly createRuntime: CreateRuntime;
@@ -75,6 +76,14 @@ function durableHostFor(id: string): DurableHost {
   return durable;
 }
 
+export async function resolveRoutedSessionOwnerRunId(
+  continuationToken: string,
+): Promise<string | undefined> {
+  const durable = hosts().durable;
+  if (durable?.resolveSessionOwnerRunId === undefined) return undefined;
+  return await durable.resolveSessionOwnerRunId(continuationToken);
+}
+
 export function installedDurableHost(): DurableHost | undefined {
   return hosts().durable;
 }
@@ -92,10 +101,10 @@ export function sessionSignInCallbacks(sessionId: string): SignInCallbacks | und
 }
 
 export function isRetriedStep(): boolean {
-  return (stepAttempt() ?? 1) > 1;
+  return (currentStepAttempt() ?? 1) > 1;
 }
 
-function stepAttempt(): number | undefined {
+export function currentStepAttempt(): number | undefined {
   for (const route of hosts().routes) {
     const attempt = route.stepAttempt?.();
     if (attempt !== undefined) return attempt;

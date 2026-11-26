@@ -11,6 +11,7 @@ import type { AgentSessionModelSelection } from "#tools/workflow-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SubagentParentContext } from "#subagents/invocation.js";
 import type { DynamicRemoteBinding } from "#definitions/remote.js";
+import type { DirectSubagentTaskRef } from "#subagents/adapter-state.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 import { stubToolPath } from "#tool-stubs/target.js";
@@ -76,7 +77,7 @@ export type RemoteAgentSession = OpenedAgentSession & {
 };
 
 export function localAgentSendCommand(
-  input: AgentSessionMessage & LocalAgentSession,
+  input: AgentSessionMessage & LocalAgentSession & { readonly directTask?: DirectSubagentTaskRef },
   deliveryId: string,
 ) {
   const { address, context } = input;
@@ -85,6 +86,7 @@ export function localAgentSendCommand(
     schedule: context.schedule,
     caller: {
       callId: context.parent.callId,
+      ...(input.directTask !== undefined && { directTask: input.directTask }),
       replyTo: { kind: "hook", token: input.replyTo },
       subagentName: address.name,
     },
@@ -129,7 +131,7 @@ export interface PreparedLocalAgentSession {
 }
 
 export function prepareLocalAgentSession(
-  input: SessionStart<LocalStartTarget>,
+  input: SessionStart<LocalStartTarget> & { readonly directTask?: DirectSubagentTaskRef },
 ): PreparedLocalAgentSession {
   const { auth, context, roster, target } = input;
   const { action } = target;
@@ -140,6 +142,7 @@ export function prepareLocalAgentSession(
     schedule: context.schedule,
     channelMetadata: context.channelMetadata,
     continuationKey: input.key,
+    directTask: input.directTask,
     graph: roster.graph,
     inheritedConversation: context.conversation,
     initiatorAuth: auth.initiator,

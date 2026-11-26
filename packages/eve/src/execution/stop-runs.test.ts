@@ -3,8 +3,14 @@ import { installWorkflowHost } from "#execution/workflow-host/host.js";
 
 import { EntityConflictError, HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { resumeSessionStartHook } from "#execution/session-inbox/resume.js";
 import { logError } from "#internal/logging.js";
 import { stopRuns } from "#execution/stop-runs.js";
+
+vi.mock("#execution/session-inbox/resume.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/session-inbox/resume.js")>()),
+  resumeSessionStartHook: vi.fn(),
+}));
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   cancelRun: vi.fn(),
@@ -107,5 +113,28 @@ describe("stopRuns", () => {
 
     expect(cancelRun).toHaveBeenCalledWith(world, address.runId, { cancelReason: reason });
     expect(logError).toHaveBeenCalledTimes(2);
+  });
+
+  it("delivers direct-agent shutdown through the start hook before inbox hooks are claimed", async () => {
+    const directRun = {
+      directAgent: { continuationToken: "subagent:child-1", name: "researcher", nodeId: "child" },
+      hookToken: "eve:inbox:v1:eve:session:child-1:inbox",
+      runId: "child-1",
+    };
+    vi.mocked(resumeHook).mockRejectedValue(new HookNotFoundError(directRun.hookToken));
+    vi.mocked(resumeSessionStartHook).mockResolvedValue({
+      address: directRun.hookToken,
+      runId: "child-1",
+    });
+
+    await expect(
+      stopRuns([{ ends: true, run: directRun }], { kind: "end", reason }, { waitForEnd: false }),
+    ).resolves.toEqual([]);
+
+    expect(resumeSessionStartHook).toHaveBeenCalledWith(
+      "child-1",
+      expect.objectContaining({ kind: "reset", reason }),
+    );
+    expect(cancelRun).not.toHaveBeenCalled();
   });
 });

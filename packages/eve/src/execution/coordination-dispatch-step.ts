@@ -12,6 +12,7 @@ import {
   type WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
+import type { LocalAgentSessions } from "#execution/agent-sessions/sessions-over.js";
 import {
   startWorkflowTask,
   startWorkflowToolCallRun,
@@ -19,10 +20,12 @@ import {
   type StartWorkflowToolRun,
 } from "#execution/tools/workflow/start.js";
 import {
+  isDirectLocalAgentCandidate,
   runEntryToStart,
   sendToTask,
   startsEveryRun,
   startTaskRun,
+  tryStartDirectLocalAgent,
 } from "#execution/tasks/start.js";
 import {
   readTaskTable,
@@ -37,6 +40,8 @@ import { sessionView } from "#harness/session-machine/commit.js";
 import {
   startDispatchedCalls,
   startTask,
+  type DirectChildPublication,
+  type DirectTaskFailure,
   type PendingDispatch,
   type TaskCallStart,
 } from "#harness/session-machine/transitions.js";
@@ -46,13 +51,21 @@ import type { HarnessSessionBase } from "#harness/types.js";
 import { copyView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
+export interface CoordinationDispatchOptions {
+  readonly directSendMaxAttempts?: number;
+}
+
 export function dispatchCoordinationOn(
   startRun: StartWorkflowToolRun,
+  directAgents?: LocalAgentSessions,
+  options?: CoordinationDispatchOptions,
 ): (
   input: CoordinationDispatchInput,
 ) => Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
   return async (input) =>
-    await withSessionStateDelta(input, (state) => dispatchCoordination(state, startRun));
+    await withSessionStateDelta(input, (state) =>
+      dispatchCoordination(state, startRun, directAgents, options),
+    );
 }
 
 export async function publishDispatchedCallsStep(
@@ -67,6 +80,8 @@ export async function publishDispatchedCallsStep(
 async function dispatchCoordination(
   input: CoordinationDispatchInput,
   startRun: StartWorkflowToolRun,
+  directAgents?: LocalAgentSessions,
+  options?: CoordinationDispatchOptions,
 ): Promise<CoordinationDispatchResult> {
   const prepared = await prepareCoordinationDispatch({
     serializedContext: input.serializedContext,
@@ -85,6 +100,8 @@ async function dispatchCoordination(
   let nextSession: HarnessSessionBase = session;
   const results: RuntimeActionResult[] = [];
   const started: TaskCallStart[] = [];
+  const children: DirectChildPublication[] = [];
+  const failedTasks: DirectTaskFailure[] = [];
   const refused: PendingDispatch["refused"][number][] = [];
   const executing: PendingDispatch["executing"][number][] = [];
   const admissionView = copyView(storedProjection(session.state).view);
@@ -125,6 +142,10 @@ async function dispatchCoordination(
         ...(prepared.steeredBy.length > 0 && { steeredBy: prepared.steeredBy }),
       },
       batchEvent: batch.event,
+      directAgents,
+      ...(options?.directSendMaxAttempts !== undefined && {
+        directSendMaxAttempts: options.directSendMaxAttempts,
+      }),
       owner: input.workflowToolRunOwner,
       parentSession: prepared.parentSession,
       session: nextSession,
@@ -145,6 +166,8 @@ async function dispatchCoordination(
     if (dispatched.result !== undefined) results.push(dispatched.result);
     else if (task.entry.entryPoint === "execute")
       executing.push({ callId: task.callId, clearedBy: task.clearedBy });
+    if (dispatched.child !== undefined) children.push(dispatched.child);
+    if (dispatched.failedTask !== undefined) failedTasks.push(dispatched.failedTask);
     if (dispatched.started !== undefined) {
       started.push(dispatched.started);
       const shadow = sessionView(
@@ -180,7 +203,13 @@ async function dispatchCoordination(
       nextSession === session
         ? prepared.sessionState
         : createDurableSessionState({ session: nextSession }),
-    pending: { executing, refused, started },
+    pending: {
+      ...(children.length > 0 && { children }),
+      executing,
+      ...(failedTasks.length > 0 && { failedTasks }),
+      refused,
+      started,
+    },
   };
 }
 
@@ -197,6 +226,11 @@ function withPrestartedRuns(
   return starts.map((start, index) => {
     const entry = entries[index];
     if (entry === undefined) return start;
+    if (entry.entryPoint !== "execute" && isDirectLocalAgentCandidate(start)) {
+      const direct = tryStartDirectLocalAgent({ ...start, taskId: entry.taskId });
+      direct.catch(() => {});
+      return { ...start, prestarted: { direct, entry } };
+    }
     const run = startWorkflowToolCallRun(start, entry);
     run.catch(() => {});
     return { ...start, prestarted: { entry, run } };
@@ -207,6 +241,8 @@ async function dispatchWorkflowCall(
   start: StartWorkflowTaskInput,
   admissionView: SessionView,
 ): Promise<{
+  readonly child?: DirectChildPublication;
+  readonly failedTask?: DirectTaskFailure;
   readonly result?: RuntimeActionResult;
   readonly session: HarnessSessionBase;
   readonly started?: TaskCallStart;

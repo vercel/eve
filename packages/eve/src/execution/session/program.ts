@@ -2,7 +2,7 @@ import { pendingSessionEnd } from "#definitions/continuation.js";
 import { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
-import type { ControlDelivery } from "#harness/types.js";
+import type { ControlDelivery, SettledTurn } from "#harness/types.js";
 import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import { runServingToolStubs, type ToolStubHost } from "#execution/tool-stub-host.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
@@ -16,6 +16,7 @@ import {
 } from "#subagents/parent-notification.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { sessionUsage } from "#harness/session-usage.js";
 import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
 import { turnCoordinates } from "#protocol/session-projection.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
@@ -91,6 +92,7 @@ type SessionActionResult =
 
 interface SessionProgress {
   caller: TurnCaller | undefined;
+  directTaskOwner?: TurnCaller;
   turnId?: string;
 }
 
@@ -138,7 +140,17 @@ export async function runPreparedSession(
     serializedContext: boot.serializedContext,
     sessionState: boot.sessionState,
   });
-  const progress: SessionProgress = { caller: boot.caller };
+  const recoveredDirectOwner =
+    boot.caller?.directTask !== undefined
+      ? boot.caller
+      : (() => {
+          const resolved = resolveLocalInitialTurnCaller(boot.serializedContext);
+          return resolved?.directTask !== undefined ? resolved : undefined;
+        })();
+  const progress: SessionProgress = {
+    caller: boot.caller,
+    ...(recoveredDirectOwner !== undefined && { directTaskOwner: recoveredDirectOwner }),
+  };
   const handoff = host.moves ?? RETAINED;
   let result: WorkflowEntryResult = { output: "", isError: true };
   let loop: SessionLoopOutcome | undefined;
@@ -159,6 +171,7 @@ export async function runPreparedSession(
       result = await finalizeSession(loop.outcome, {
         caller: progress.caller,
         cursor,
+        directTaskOwner: progress.directTaskOwner,
         sessionWritable: boot.sessionWritable,
       });
       return result;
@@ -168,7 +181,12 @@ export async function runPreparedSession(
     if (!finalizing) {
       await finalizeSession(
         { error, kind: "failed", turnId: progress.turnId },
-        { caller: progress.caller, cursor, sessionWritable: boot.sessionWritable },
+        {
+          caller: progress.caller,
+          cursor,
+          directTaskOwner: progress.directTaskOwner,
+          sessionWritable: boot.sessionWritable,
+        },
       );
     }
     throw createSafeOuterWorkflowError();
@@ -341,6 +359,7 @@ async function runSessionLoop(
           queue.pendingCount === 0 &&
           !inbox.hasPending()
         ) {
+          await flushDeferredDirectReply();
           const deadline = sessionTimeout?.getDeadline();
           const result = await handoff.tryPrewarmTransfer(
             transferState(),
@@ -376,6 +395,23 @@ async function runSessionLoop(
     }
   };
 
+  let deferredDirectReply:
+    | { readonly caller: TurnCaller; readonly settled: SettledTurn }
+    | undefined;
+
+  const flushDeferredDirectReply = async (): Promise<void> => {
+    const pending = deferredDirectReply;
+    if (pending === undefined) return;
+    deferredDirectReply = undefined;
+    await notifyTurnCallerStep({
+      caller: pending.caller,
+      lifecycle: "parked",
+      sessionId: boot.sessionId,
+      settled: pending.settled,
+      totalUsage: sessionUsage(cursor.sessionState.snapshot.session),
+    });
+  };
+
   let turnControl =
     boot.initialTurnControl ?? (boot.anchor.kind === "self" ? createTurnControl() : undefined);
   let compactionHandoffDue = false;
@@ -392,7 +428,10 @@ async function runSessionLoop(
     if (control !== undefined) turnControl ??= nextTurnControl(control);
     progress.turnId = undefined;
     sessionTimeout?.recordActivity();
-    if (outcome.caller !== undefined) progress.caller = outcome.caller;
+    if (outcome.caller !== undefined) {
+      progress.caller = outcome.caller;
+      if (outcome.caller.directTask !== undefined) progress.directTaskOwner = outcome.caller;
+    }
     if (outcome.compacted === true) compactionHandoffDue = true;
     return outcome;
   };
@@ -408,6 +447,7 @@ async function runSessionLoop(
     workingTasks(sessionTaskTable(cursor)).length === 0;
   const tryCompactionHandoff = async (): Promise<SessionLoopOutcome | undefined> => {
     if (!compactionHandoffReady() || queue.pendingCount > 0 || inbox.hasPending()) return undefined;
+    await flushDeferredDirectReply();
     const transfer = await handoff.tryCompactionTransfer(transferState());
     return transfer.kind === "transferred" ? transfer : undefined;
   };
@@ -416,7 +456,12 @@ async function runSessionLoop(
   ): Promise<SessionActionResult> => {
     const transfer = await handoff.tryTransfer(next, transferState());
     if (transfer.kind === "transferred") return transfer;
-    if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
+    if (next.delivery.caller !== undefined) {
+      progress.caller = next.delivery.caller;
+      if (next.delivery.caller.directTask !== undefined) {
+        progress.directTaskOwner = next.delivery.caller;
+      }
+    }
     return { action: await runTurn({ delivery: next.delivery }), kind: "action" };
   };
   const settleCancelledTurn = async (reportUsage: boolean, control?: ControlDelivery) => {
@@ -542,7 +587,15 @@ async function runSessionLoop(
           };
         }
         if (caller !== undefined) {
-          const notification = { caller, sessionId: boot.sessionId };
+          const totalUsage =
+            caller.directTask !== undefined
+              ? sessionUsage(cursor.sessionState.snapshot.session)
+              : undefined;
+          const notification = {
+            caller,
+            sessionId: boot.sessionId,
+            ...(totalUsage !== undefined && { totalUsage }),
+          };
           await notifyCancelledTaskCallerStep(
             settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
           );
@@ -557,12 +610,34 @@ async function runSessionLoop(
         }
         if (action.settled !== undefined) {
           if (progress.caller !== undefined) {
-            await notifyTurnCallerStep({
-              caller: progress.caller,
-              lifecycle: "parked",
-              sessionId: boot.sessionId,
-              settled: action.settled,
-            });
+            if (progress.caller.directTask !== undefined && action.settled.isError === true) {
+              return {
+                kind: "terminal",
+                outcome: {
+                  kind: "ended",
+                  settled: action.settled,
+                },
+              };
+            }
+            const coalescedFollowUp =
+              progress.caller.directTask !== undefined &&
+              queue.hasDirectTaskMessage(progress.caller.directTask.taskId);
+            if (coalescedFollowUp) {
+              deferredDirectReply = { caller: progress.caller, settled: action.settled };
+            } else {
+              deferredDirectReply = undefined;
+              const totalUsage =
+                progress.caller.directTask !== undefined
+                  ? sessionUsage(cursor.sessionState.snapshot.session)
+                  : undefined;
+              await notifyTurnCallerStep({
+                caller: progress.caller,
+                lifecycle: "parked",
+                sessionId: boot.sessionId,
+                settled: action.settled,
+                ...(totalUsage !== undefined && { totalUsage }),
+              });
+            }
           }
           progress.caller = undefined;
         }
@@ -578,6 +653,17 @@ async function runSessionLoop(
         timerFailure === undefined
           ? await nextParkedActivity()
           : await Promise.race([nextParkedActivity(), timerFailure]);
+
+      if (next.kind === "turn") {
+        deferredDirectReply = undefined;
+      } else if (
+        next.kind !== "reset" &&
+        next.kind !== "end" &&
+        next.kind !== "closed" &&
+        next.kind !== "expired"
+      ) {
+        await flushDeferredDirectReply();
+      }
 
       switch (next.kind) {
         case "reset":

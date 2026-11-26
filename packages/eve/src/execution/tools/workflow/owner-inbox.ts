@@ -65,7 +65,7 @@ function parseJsonValueOrUndefined(value: unknown): JsonValue | undefined {
 }
 
 export function workflowAskPayload(
-  message: WorkflowToolRunRequestMessage & { readonly request: WorkflowToolAskRequest },
+  message: Extract<WorkflowToolRunRequestMessage, { readonly request: WorkflowToolAskRequest }>,
 ): SubagentInteractionHookPayload {
   const { from, replyTo } = message;
   const authored = message.request.request;
@@ -88,7 +88,7 @@ export function workflowAskPayload(
       relayEvent("interaction.opened", {
         interactionId: replyTo,
         origin: {
-          call: { callId: from.callId, input: from.input, name: from.toolName },
+          call: { callId: from.callId, input: from.input ?? {}, name: from.toolName },
           interactionId: replyTo,
           sessionId: from.runId,
         },

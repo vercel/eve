@@ -1743,15 +1743,16 @@ describe("work delegated to a child session", () => {
         await waitForOwnerGate(session.send("Next turn."), "next turn delivery", session.events);
         await session.next("next turn");
         const taskId = ofType(session.events(), "task.ended")[0]!.data.taskId;
+        const childSessionId = ofType(session.events(), "child.opened")[0]!.data.sessionId;
         const runIds = (await workflowToolRunIds()).filter((id) => !earlierRuns.includes(id));
-        expect(runIds).toHaveLength(1);
+        expect(runIds).toHaveLength(0);
         await waitForOwnerGate(
           resumeRoutedHook(sessionInboxHookToken(`http:edge-cancel-hung-task`), {
             kind: "request",
             from: {
               callId: "call_agent",
               input: { message: "CHILD: work" },
-              runId: runIds[0]!,
+              runId: childSessionId,
               sequence: 0,
               stepIndex: 0,
               taskId,

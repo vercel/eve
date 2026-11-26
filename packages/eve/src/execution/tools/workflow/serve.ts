@@ -95,7 +95,7 @@ class WorkflowServeCalls implements WorkflowBodyControl {
       auth: input.session.auth,
       callId: this.runRef.callId,
       executeInput: input.executeInput,
-      input: this.runRef.input,
+      input: this.runRef.input ?? {},
       sequence: this.runRef.sequence,
       stepIndex: this.runRef.stepIndex,
       turnId: this.runRef.turnId,

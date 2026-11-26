@@ -168,7 +168,7 @@ export function createInProcessHost(
     recordRemoteBinding: async () => unavailable("A remote agent"),
     stopLate,
   });
-  const dispatchRuns = dispatchCoordinationOn(runs.startRun);
+  const dispatchRuns = dispatchCoordinationOn(runs.startRun, runs.localSessions);
   const sessionHost: SessionHost = {
     toolStubs,
     applyRunMessages: (input) => work.count(() => applyRunMessages(input)),

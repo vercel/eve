@@ -408,6 +408,19 @@ export async function dispatchWorkflowSessionCommand<TCommand extends SessionCom
   }
 }
 
+export async function dispatchWorkflowContinuationCommand<TCommand extends SessionCommand>(input: {
+  readonly command: TCommand;
+  readonly continuationToken: string;
+}): Promise<SessionCommandResult<TCommand>> {
+  const command = identifyCommand(input.command);
+  try {
+    return await dispatchWorkflowCommand(input.continuationToken, command);
+  } catch (error) {
+    if (!(error instanceof StrandedSessionOwnerError)) throw error;
+    return await settleStrandedCommand(input.continuationToken, command, error);
+  }
+}
+
 function isInactiveCommandTarget(error: unknown): boolean {
   if (error instanceof AcceptedSessionIdentityError) return false;
   if (HookNotFoundError.is(error)) return true;
