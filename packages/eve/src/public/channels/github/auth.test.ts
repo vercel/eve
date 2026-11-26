@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createGitHubAppJwt,
+  createGitHubAppSlugResolver,
   createGitHubInstallationToken,
   normalizeGitHubPrivateKey,
   resolveGitHubAppId,
@@ -127,5 +128,31 @@ describe("GitHub App auth helpers", () => {
     await expect(resolveGitHubPrivateKey()).resolves.toBe("line1\nline2");
     await expect(resolveGitHubWebhookSecret()).resolves.toBe("secret");
     expect(normalizeGitHubPrivateKey("a\\nb")).toBe("a\nb");
+  });
+
+  describe("createGitHubAppSlugResolver", () => {
+    it("reads a lazy credentials.appSlug once and serves it from the cache afterwards", async () => {
+      const appSlug = vi.fn<() => Promise<string>>().mockResolvedValue(" eve-bot ");
+      const resolve = createGitHubAppSlugResolver({ credentials: { appSlug } });
+      await expect(resolve()).resolves.toBe("eve-bot");
+      await expect(resolve()).resolves.toBe("eve-bot");
+      expect(appSlug).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects with the source's own error when a lazy source fails, and reads it again on the next call", async () => {
+      const appSlug = vi
+        .fn<() => Promise<string>>()
+        .mockRejectedValueOnce(new Error("secret store down"))
+        .mockResolvedValueOnce("eve-bot");
+      const resolve = createGitHubAppSlugResolver({ credentials: { appSlug } });
+      await expect(resolve()).rejects.toThrow("secret store down");
+      await expect(resolve()).resolves.toBe("eve-bot");
+      expect(appSlug).toHaveBeenCalledTimes(2);
+    });
+
+    it("resolves to undefined when neither credentials.appSlug nor GITHUB_APP_SLUG names the App", async () => {
+      const resolve = createGitHubAppSlugResolver({});
+      await expect(resolve()).resolves.toBeUndefined();
+    });
   });
 });
