@@ -248,7 +248,7 @@ async function buildRouteArgs(input: {
   });
 }
 
-async function resolveAcceptedDeploymentId(
+export async function resolveAcceptedDeploymentId(
   config: NitroArtifactsConfig,
 ): Promise<string | undefined> {
   const hosted = process.env.VERCEL_DEPLOYMENT_ID?.trim();

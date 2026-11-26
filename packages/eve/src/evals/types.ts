@@ -21,6 +21,7 @@ import type {
 import type { Answer } from "#shared/input.js";
 import type { Interaction } from "#protocol/session-projection/reader.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import type {
@@ -536,6 +537,18 @@ export interface JudgeContext {
 }
 
 /**
+ * Options for creating a session inside an eval with {@link EveEvalContext.session}.
+ */
+export interface EveEvalSessionOptions extends CreateSessionOptions {
+  /**
+   * Prior conversation the session starts from, as ordered user and assistant text.
+   * Joins model history with the first message; no earlier turn, model call, tool,
+   * or hook runs. Requires a target with dev routes enabled (such as local `eve eval`).
+   */
+  readonly history?: readonly SessionHistoryMessage[];
+}
+
+/**
  * The context passed to `test(t)`. Creates independent sessions and carries
  * run-level assertions, value-level assertions, and model-backed judges.
  *
@@ -556,8 +569,10 @@ export interface EveEvalContext<TContext = unknown> extends EveEvalAssertions {
   /**
    * Create a new session without starting a turn or reading events. Resolves on
    * acceptance with a definite session id and cursor. Every call creates a session.
+   * Pass `history` on a target with dev routes enabled to start from fixed prior
+   * conversation without running earlier turns.
    */
-  session(options?: CreateSessionOptions): Promise<EveEvalSession>;
+  session(options?: EveEvalSessionOptions): Promise<EveEvalSession>;
   /** Create a new session with its first message and wait for the turn to settle. */
   send(message: SendTurnInput["message"], options?: SendTurnOptions): Promise<EveEvalTurn>;
 

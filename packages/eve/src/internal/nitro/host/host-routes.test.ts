@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { CompiledAgentManifest, CompiledChannelDefinition } from "#compiler/manifest.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
-import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN } from "#protocol/routes.js";
+import {
+  EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
+  EVE_DEV_SESSION_ROUTE_PATH,
+} from "#protocol/routes.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { createHostRouteTable } from "#internal/nitro/host/host-routes.js";
 import { EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH } from "#internal/schedules/consumer-route.js";
@@ -99,6 +102,7 @@ describe("createHostRouteTable", () => {
       "channel-preflight OPTIONS /a",
       "connection-event POST /eve/v1/hooks/issues",
       `development-schedule POST ${EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN}`,
+      `development-session POST ${EVE_DEV_SESSION_ROUTE_PATH}`,
       `workflow ALL ${EVE_WORKFLOW_FLOW_ROUTE_PATH}`,
     ]);
   });
