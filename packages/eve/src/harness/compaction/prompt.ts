@@ -1,6 +1,5 @@
 import type { ModelMessage, ToolResultPart } from "ai";
 
-import { isToolResultError } from "#harness/action-result-helpers.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 
@@ -183,9 +182,10 @@ function renderTranscriptToolResult(
 ): string {
   const limit =
     conversationTextLimit === undefined ? TRANSCRIPT_PAYLOAD_LIMIT : COMPACT_PAYLOAD_LIMIT;
+  const outputType =
+    part.output !== null && typeof part.output === "object" ? part.output.type : undefined;
   const isError =
-    part.isError === true ||
-    (part.output !== null && typeof part.output === "object" && isToolResultError(part.output));
+    part.isError === true || outputType === "error-text" || outputType === "error-json";
   const status = isError ? "errored" : "returned";
   const output = renderToolResultOutput(part.output, limit);
   return output ? `Tool ${part.toolName} ${status} ${output}` : `Tool ${part.toolName} ${status}`;
