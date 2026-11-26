@@ -15,6 +15,7 @@ import {
   evaluationError,
   definitionSession,
 } from "#internal/testing/definition-session.js";
+import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { readDynamicSubagentSelections } from "./subagents.js";
@@ -81,6 +82,37 @@ describe("dynamic subagents", () => {
     await beforeModelCall(ctx);
 
     expect(seen).toEqual(["openai/gpt-5.4"]);
+  });
+
+  it("reads an async dynamic model chosen earlier in the same evaluation without a static default", async () => {
+    const seen: string[] = [];
+    const { ctx } = definitionSession({
+      dynamicModel: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return "openai/gpt-5.4";
+      },
+      instructions: [
+        {
+          evaluate: (dynamicCtx) => {
+            seen.push(`instructions:${dynamicCtx.model.id}`);
+            return defineInstructions({ content: `Using ${dynamicCtx.model.id}` });
+          },
+          slug: "model-aware",
+        },
+      ],
+      subagents: [
+        {
+          evaluate: (dynamicCtx) => {
+            seen.push(`subagent:${dynamicCtx.model.id}`);
+            return null;
+          },
+          name: "helper",
+        },
+      ],
+    });
+
+    await beforeModelCall(ctx);
+    expect(seen.sort()).toEqual(["instructions:openai/gpt-5.4", "subagent:openai/gpt-5.4"]);
   });
 
   it.each([

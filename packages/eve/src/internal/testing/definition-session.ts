@@ -1,7 +1,12 @@
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { HistoryStateKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import type { DynamicContext } from "#dynamic/definition.js";
+import {
+  defineDynamic,
+  type DynamicContext,
+  type DynamicModelContext,
+} from "#dynamic/definition.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { DynamicDefinitionKind } from "#runtime/types.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
@@ -57,6 +62,7 @@ export function definitionSession(
       readonly name: string;
     }[];
     readonly connections?: readonly DynamicSource[];
+    readonly dynamicModel?: (ctx: DynamicModelContext) => string | Promise<string>;
     readonly instructions?: readonly DynamicSource[];
     readonly model?: RuntimeModelReference;
     readonly skills?: readonly DynamicSource[];
@@ -88,11 +94,35 @@ export function definitionSession(
       return [name, { prepared: { behavior, name } }];
     }),
   );
+  const dynamicModelRef =
+    input.dynamicModel === undefined
+      ? undefined
+      : {
+          exportName: "default",
+          logicalPath: "agent.ts",
+          sourceId: "agent.ts",
+          sourceKind: "module" as const,
+        };
+  const moduleMap =
+    input.dynamicModel === undefined
+      ? undefined
+      : {
+          nodes: {
+            root: {
+              modules: {
+                "agent.ts": {
+                  default: defineAgent({ model: defineDynamic(input.dynamicModel!) }),
+                },
+              },
+            },
+          },
+        };
   ctx.set(
     SessionAgentKey,
     fromCompiledBundle({
       graph: { nodesByNodeId: new Map() },
       modelMetadata: async () => MODEL_METADATA,
+      moduleMap,
       nodeId: "root",
       resolvedAgent: {
         channels: [],
@@ -122,7 +152,7 @@ export function definitionSession(
         subagentsByName: new Map(),
       },
       toolRegistry: { toolsByName },
-      turnAgent: { id: "agent", model: input.model },
+      turnAgent: { dynamicModel: dynamicModelRef, id: "agent", model: input.model },
     } as never),
   );
   const registry = new ConnectionRegistryImpl(input.staticConnections ?? []);
