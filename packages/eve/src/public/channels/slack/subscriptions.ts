@@ -233,8 +233,24 @@ export function parseSlackEventOccurrence(
       ...channels.map((channel) => ({ ...base, channel })),
       ...channels.flatMap((channel) => timestamps.map((ts) => ({ ...base, channel, ts }))),
     ],
-    data: { team_id: teamId, channels, timestamps, sender, payload: event as JsonObject },
+    data: {
+      team_id: teamId,
+      channels,
+      timestamps,
+      sender,
+      payload: withoutActionTokens(event) as JsonObject,
+    },
   };
+}
+
+function withoutActionTokens(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutActionTokens);
+  if (!isObject(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== "action_token")
+      .map(([key, child]) => [key, withoutActionTokens(child)]),
+  );
 }
 
 function isAuthoredByApp(

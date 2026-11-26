@@ -8,7 +8,11 @@ import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operati
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { SLACK_EVENT_SCOPES } from "#public/channels/slack/event-scopes.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
-import { describeSlackEvent, slackEventDefinitions } from "#public/channels/slack/subscriptions.js";
+import {
+  describeSlackEvent,
+  parseSlackEventOccurrence,
+  slackEventDefinitions,
+} from "#public/channels/slack/subscriptions.js";
 import type {
   ChannelEvent,
   ChannelEventDefinition,
@@ -401,6 +405,30 @@ describe("Slack channel subscriptions", () => {
       });
       expect(response.status).toBe(200);
       expect(emit).toHaveBeenCalled();
+    });
+  });
+
+  describe("event payload credentials", () => {
+    it("drops every action_token before an event reaches a subscriber's model input", () => {
+      const occurrence = parseSlackEventOccurrence(
+        envelope({
+          action_token: "xoxe-top",
+          assistant_thread: { action_token: "xoxe-assistant", context: {} },
+          channel: "C1",
+          channel_type: "channel",
+          event_ts: "1.2",
+          message: { action_token: "xoxe-nested", text: "hi", ts: "1.1" },
+          text: "hello",
+          ts: "1.1",
+          type: "message",
+          user: "U2",
+        }) as never,
+      );
+      expect(occurrence).not.toBeNull();
+      const payload = JSON.stringify(occurrence?.data.payload);
+      expect(payload).not.toContain("action_token");
+      expect(payload).not.toContain("xoxe-");
+      expect(payload).toContain('"text":"hello"');
     });
   });
 
