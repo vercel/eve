@@ -13,7 +13,10 @@ import { createHostRouteTable, type HostRouteTable } from "#internal/nitro/host/
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import type { HostRuntime } from "#internal/nitro/host/runtime-plugin.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
-import { usesLocalVercelSchedules } from "#internal/schedules/consumer-route.js";
+import {
+  hasLocalDevScheduleCollections,
+  usesLocalVercelSchedules,
+} from "#internal/schedules/consumer-route.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
 
 export type HostMode =
@@ -34,6 +37,7 @@ export interface HostDirectories {
 export type HostRuntimePlugin =
   | "connection-drain"
   | "instrumentation"
+  | "local-dev-schedules"
   | "local-schedules"
   | "timezone-schedules"
   | "sandbox-shutdown"
@@ -95,6 +99,9 @@ export function createHostSpec(
     ...(development ? [] : (["skill-files"] as const)),
     ...(instrumented ? (["instrumentation"] as const) : []),
     ...(development && usesLocalVercelSchedules(manifest) ? (["local-schedules"] as const) : []),
+    ...(development && hasLocalDevScheduleCollections(manifest)
+      ? (["local-dev-schedules"] as const)
+      : []),
     ...(!development &&
     preset !== "vercel" &&
     routes.scheduleTasks.some((task) => task.timezone !== undefined)

@@ -4,5 +4,6 @@ export class Cron {
     options: { timezone: string; unref?: boolean },
     callback: () => void | Promise<void>,
   );
+  nextRun(previous?: Date): Date | null;
   stop(): void;
 }

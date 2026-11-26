@@ -6,6 +6,7 @@ import type {
 
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { isVercelSchedulesDevEnvironment } from "#internal/schedules/dev-environment.js";
+import { localDevScheduleProvider } from "#internal/schedules/local-dev-provider.js";
 import type {
   ScheduleExpression,
   SchedulePage,
@@ -13,13 +14,11 @@ import type {
   ScheduleRecord,
 } from "#public/schedules/subscription.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
-import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
 
-const DEVELOPMENT_PROVIDER: ScheduleProvider = {
-  ...inMemoryScheduleProvider(),
+const DEVELOPMENT_PROVIDER = localDevScheduleProvider({
   validateExpression: validateVercelExpression,
-};
+});
 const CLIENT_OPTIONS = new WeakMap<ScheduleProvider, VercelScheduleProviderOptions>();
 
 export function readVercelScheduleClientOptions(
@@ -41,7 +40,7 @@ export interface VercelScheduleProviderOptions {
   readonly fetch?: typeof fetch;
 }
 
-/** Uses ambient OIDC on Vercel and process-local storage under `eve dev`. */
+/** Uses ambient OIDC on Vercel and a local SQLite store with its own clock under `eve dev`. */
 export function vercelScheduleProvider(
   options: VercelScheduleProviderOptions = {},
 ): ScheduleProvider {
