@@ -109,6 +109,7 @@ export interface OfferedCatalogTools {
   readonly connections: boolean;
   readonly searchableSkills: boolean;
   readonly skills: boolean;
+  readonly subscriptions: boolean;
   readonly tools: boolean;
 }
 export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationProjection>(

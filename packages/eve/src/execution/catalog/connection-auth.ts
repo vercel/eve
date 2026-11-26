@@ -5,7 +5,7 @@ import {
 import { getAuthorizationResults } from "#harness/authorization.js";
 import { createLogger } from "#internal/logging.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
-import { passesToolFilter } from "#runtime/connections/mcp-client.js";
+import { passesToolFilter } from "#runtime/connections/tool-filter.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import {
   createAuthorizationExecution,
@@ -15,7 +15,6 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import {
   supportsInteractiveAuthorization,
   type ConnectionClient,
-  type ConnectionEventActionHandler,
   type ConnectionToolMetadata,
 } from "#shared/connection-types.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -49,11 +48,11 @@ export type ConnectionListing =
 
 export async function listConnectionTools(
   connection: ResolvedConnectionDefinition,
-  { auth, client, scoped }: ConnectionSession,
+  session: ConnectionSession,
 ): Promise<ConnectionListing> {
   const name = connection.connectionName;
   try {
-    return { tools: await listToolMetadata(connection, client) };
+    return { tools: await listToolMetadata(connection, session.client) };
   } catch (error) {
     if (!isConnectionAuthorizationRequiredError(error)) {
       log.warn("failed to load connection tools", { connection: name, error });
@@ -62,27 +61,34 @@ export async function listConnectionTools(
         failure: listingFailureMessage(name, error),
       };
     }
-    if (scoped === undefined) {
-      return { failure: `"${name}" requires authorization and cannot start interactive sign-in.` };
-    }
-    if (auth.isJustAuthorized(scoped)) {
-      return {
-        failure: `Authorization failed for "${name}": the service rejected the token immediately after authorization.`,
-      };
-    }
-    return { authorization: scoped, error };
+    return authorizationRequired(name, session, error);
   }
+}
+
+export function authorizationRequired(
+  name: string,
+  { auth, scoped }: Pick<ConnectionSession, "auth" | "scoped">,
+  error: unknown,
+): Exclude<ConnectionListing, { readonly tools: unknown }> {
+  if (scoped === undefined) {
+    return { failure: `"${name}" requires authorization and cannot start interactive sign-in.` };
+  }
+  if (auth.isJustAuthorized(scoped)) {
+    return {
+      failure: `Authorization failed for "${name}": the service rejected the token immediately after authorization.`,
+    };
+  }
+  return { authorization: scoped, error };
 }
 
 const LISTING_TIMEOUT_MS = 10_000;
 
 class ListingTimeoutError extends Error {}
 
-export async function listToolMetadata(
-  connection: Pick<ResolvedConnectionDefinition, "connectionName" | "tools">,
-  client: ConnectionClient,
-): Promise<readonly ConnectionToolMetadata[]> {
-  const { connectionName } = connection;
+export async function withListingDeadline<T>(
+  connectionName: string,
+  list: () => Promise<T>,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
@@ -94,57 +100,25 @@ export async function listToolMetadata(
     }, LISTING_TIMEOUT_MS);
   });
   try {
-    const tools = await listConnectionMetadata(connectionName, client, deadline);
-    return tools.filter((tool) =>
-      passesToolFilter(
-        tool.operationId === undefined ? [tool.name] : [tool.name, tool.operationId],
-        connection.tools,
-      ),
-    );
+    return await Promise.race([list(), deadline]);
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function listConnectionMetadata(
-  connectionName: string,
+export async function listToolMetadata(
+  connection: Pick<ResolvedConnectionDefinition, "connectionName" | "tools">,
   client: ConnectionClient,
-  deadline: Promise<never>,
 ): Promise<readonly ConnectionToolMetadata[]> {
-  const remoteListing = Promise.race([client.getToolMetadata(), deadline]);
-  const actions = client.eventActions;
-  if (actions === undefined) return remoteListing;
-  const [remoteResult, actionResult] = await Promise.allSettled([
-    remoteListing,
-    listEventActions(connectionName, actions, deadline),
-  ]);
-  for (const result of [remoteResult, actionResult]) {
-    if (result.status === "rejected" && isConnectionAuthorizationRequiredError(result.reason))
-      throw result.reason;
-  }
-  const generated = actionResult.status === "fulfilled" ? actionResult.value : [];
-  if (remoteResult.status === "rejected") {
-    if (generated.length > 0) return generated;
-    throw remoteResult.reason;
-  }
-  const remote = remoteResult.value;
-  if (remote.some((tool) => actions.ownsName(tool.name)))
-    throw new Error("Remote tool names conflict with eve's event action namespace.");
-  return [...remote, ...generated];
-}
-
-async function listEventActions(
-  connectionName: string,
-  actions: ConnectionEventActionHandler,
-  deadline: Promise<never>,
-): Promise<readonly ConnectionToolMetadata[]> {
-  try {
-    return await Promise.race([actions.metadata(), deadline]);
-  } catch (error) {
-    if (isConnectionAuthorizationRequiredError(error)) throw error;
-    log.warn("failed to discover connection events", { connection: connectionName, error });
-    return actions.recoveryMetadata();
-  }
+  const tools = await withListingDeadline(connection.connectionName, () =>
+    client.getToolMetadata(),
+  );
+  return tools.filter((tool) =>
+    passesToolFilter(
+      tool.operationId === undefined ? [tool.name] : [tool.name, tool.operationId],
+      connection.tools,
+    ),
+  );
 }
 
 export function listingFailureMessage(connectionName: string, error: unknown): string {

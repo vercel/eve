@@ -25,6 +25,7 @@ interface SearchOutput {
 async function searchFor(
   tools: readonly HarnessToolDefinition[],
   options: {
+    readonly channels?: readonly unknown[];
     readonly connections?: readonly FakeConnection[];
     readonly skills?: readonly CatalogSkillSource[];
   } = {},
@@ -241,6 +242,49 @@ describe("search", () => {
       expect(notion.signIns).toEqual([]);
     });
 
+    it("answers a subscriptions__ search for a connection that needs sign-in with the sign-in result", async () => {
+      const notion = fakeConnection({
+        description: "Notion pages and databases",
+        events: ["page.updated"],
+        listing: "sign-in",
+        name: "notion",
+        signIn: true,
+        tools: [connectionTool("search_pages")],
+      });
+      const search = await searchFor(tools, { connections: [notion] });
+
+      const result = await search({ query: "subscriptions__notion__" });
+
+      expect(result.results).toEqual([
+        {
+          description: "Sign in to use the Notion tools: Notion pages and databases",
+          signature: "notion(input: {}): Promise<unknown>",
+          tool: "notion",
+        },
+      ]);
+      expect(notion.signIns).toEqual([]);
+    });
+
+    it("reports a subscriptions__ search for a connection that cannot start sign-in as unavailable, not as a sign-in tool", async () => {
+      const vault = fakeConnection({
+        events: ["secret.rotated"],
+        listing: "sign-in",
+        name: "vault",
+        tools: [],
+      });
+      const search = await searchFor(tools, { connections: [vault] });
+
+      const result = await search({ query: "subscriptions__vault__" });
+
+      expect(result.results).toEqual([]);
+      expect(result.unavailable).toEqual([
+        {
+          connection: "vault",
+          error: '"vault" requires authorization and cannot start interactive sign-in.',
+        },
+      ]);
+    });
+
     it("reports a connection that cannot start sign-in, and one whose tools fail to load, as unavailable", async () => {
       const logs = captureLogRecords();
       const vault = fakeConnection({ listing: "sign-in", name: "vault", tools: [] });
@@ -305,6 +349,80 @@ describe("search", () => {
         vi.useRealTimers();
         process.off("unhandledRejection", unhandled);
       }
+    });
+  });
+
+  describe("connection events", () => {
+    it("reports a connection whose event catalog does not list within 10 seconds as unavailable, while other results return", async () => {
+      vi.useFakeTimers();
+      try {
+        const slow = fakeConnection({ events: ["page.updated"], name: "notion", tools: [] });
+        vi.spyOn(slow.client.eventActions!, "getEvents").mockReturnValue(new Promise(() => {}));
+        const crm = fakeConnection({ name: "crm", tools: [connectionTool("list_issues")] });
+        const pending = (await searchFor(tools, { connections: [crm, slow] }))({
+          query: "issues",
+        });
+        await vi.advanceTimersByTimeAsync(10_000);
+        const output = await pending;
+
+        expect(names(output)).toContain("crm__list_issues");
+        expect(output.unavailable).toEqual([
+          {
+            connection: "notion",
+            error: '"notion" did not list its tools within 10s. Try again later.',
+          },
+        ]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("subscription channels", () => {
+    const channel = (name: string, catalog: unknown) => ({
+      name,
+      definition: { onEvent: () => null, catalog },
+    });
+
+    it("throws a source-without-events message for a subscriptions__ search on an empty channel", async () => {
+      const search = await searchFor(tools, { channels: [channel("github", () => [])] });
+
+      await expect(search({ query: "subscriptions__github__" })).rejects.toThrow(
+        'Subscription source "github" has no events.',
+      );
+    });
+
+    it("suggests the closest subscription source for a misspelled subscriptions__ namespace", async () => {
+      const search = await searchFor(tools, { channels: [channel("github", () => [])] });
+
+      await expect(search({ query: "subscriptions__githb__" })).rejects.toThrow(
+        "Closest subscription sources: subscriptions__github.",
+      );
+    });
+
+    it("reports a channel and connection sharing one name that both fail to list once in unavailable", async () => {
+      const github = fakeConnection({
+        listing: new Error("upstream returned 502"),
+        name: "github",
+        tools: [],
+      });
+      const search = await searchFor(tools, {
+        channels: [
+          channel("github", () => {
+            throw new Error("no events");
+          }),
+        ],
+        connections: [github],
+      });
+
+      const output = await search({ query: "github" });
+
+      expect(output.unavailable).toEqual([
+        {
+          connection: "github",
+          error: 'Failed to list the events of channel "github": no events',
+        },
+      ]);
     });
   });
 

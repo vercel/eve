@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
-import type { CompiledChannel } from "#channel/compiled-channel.js";
+import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
@@ -226,5 +226,28 @@ describe("defineChannel events", () => {
       expect.stringContaining("a channel event handler's waitUntil work failed"),
       expect.objectContaining({ eventType: "turn.settled" }),
     );
+  });
+});
+
+describe("defineChannel subscriptions", () => {
+  it.each([
+    ["a list", []],
+    ["a function", () => []],
+    ["an async function", async () => []],
+  ])("accepts a catalog that is %s", async (_label, catalog) => {
+    const channel = defineChannel({
+      routes: [],
+      experimental: { subscriptions: { onEvent: () => null, catalog } },
+    });
+    expect(isCompiledChannel(channel) && channel.catalog).toBe(catalog);
+  });
+
+  it("throws when experimental.subscriptions has no catalog", () => {
+    expect(() =>
+      defineChannel({
+        routes: [],
+        experimental: { subscriptions: { onEvent: () => null } as never },
+      }),
+    ).toThrow("experimental.subscriptions requires `catalog`");
   });
 });

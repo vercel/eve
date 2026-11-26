@@ -11,12 +11,12 @@ import type { SessionContext } from "#context/session-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ConnectionCallbackContext } from "#shared/connection-types.js";
 import { withConnectionApproval } from "#runtime/connections/approval-scope.js";
+import { passesToolFilter } from "#runtime/connections/tool-filter.js";
 import { ConnectionAuthorizationTokensKey } from "#runtime/connections/authorization-tokens.js";
 import {
   isMcpAuthChallengeResult,
   isMcpAuthRequiredError,
   McpConnectionClient,
-  passesToolFilter,
   resolveHeaders,
 } from "#runtime/connections/mcp-client.js";
 

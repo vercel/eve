@@ -18,7 +18,12 @@ export async function compileChannelDefinition(
   options: ModuleBackedDefinitionLoadOptions,
 ): Promise<
   | { readonly kind: "disabled"; readonly name: string }
-  | { readonly definitions: readonly CompiledChannelDefinition[]; readonly kind: "channel" }
+  | {
+      readonly definitions: readonly CompiledChannelDefinition[];
+      readonly kind: "channel";
+      readonly name: string;
+      readonly offersSubscriptions: boolean;
+    }
 > {
   const rawValue = await loadModuleBackedDefinition({
     binding: options.binding,
@@ -64,6 +69,8 @@ export async function compileChannelDefinition(
       vercelConnect: extractVercelConnectMetadata(buildMetadata?.externalCredentials),
     })),
     kind: "channel",
+    name: channelName,
+    offersSubscriptions: definition.onEvent !== undefined,
   };
 }
 

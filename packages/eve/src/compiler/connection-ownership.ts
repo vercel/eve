@@ -1,5 +1,16 @@
 import { assertNotConnectionOwned } from "#connections/ownership.js";
 
+export function assertSubscriptionSourceNamesDistinct(input: {
+  readonly channelNames: ReadonlySet<string>;
+  readonly connectionNames: readonly string[];
+}): void {
+  const shared = input.connectionNames.filter((name) => input.channelNames.has(name));
+  if (shared.length > 0)
+    throw new Error(
+      `A channel and a connection are both named ${shared.map((name) => `"${name}"`).join(", ")} and both offer subscriptions, so a subscription's source name would be ambiguous. Rename one.`,
+    );
+}
+
 export function assertStaticConnectionOwnership(input: {
   readonly connectionNames: readonly string[];
   readonly subagentNames: readonly string[];

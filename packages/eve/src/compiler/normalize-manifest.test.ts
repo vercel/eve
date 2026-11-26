@@ -1338,6 +1338,59 @@ describe("compileAgentManifest source graph", () => {
       );
     });
 
+    it("rejects a channel and a connection of one name that both offer subscriptions, and accepts one that does not", async () => {
+      const connectionDefinition = {
+        url: "https://tracker.example/mcp",
+        description: "Tracker",
+        auth: {
+          getToken: async () => ({ token: "credential" }),
+          vercelConnect: {
+            connector: "oauth/tracker",
+            experimental_events: { createAdapter: vi.fn(), verify: vi.fn() },
+          },
+        },
+      };
+      const eventsConnection = (offersEvents: boolean) => ({
+        logicalPath: "connections/tracker.ts",
+        loadNamespace: async () => ({
+          default: offersEvents
+            ? defineMcpClientConnection({
+                ...connectionDefinition,
+                experimental: { events: { onEvent() {} } },
+              })
+            : defineMcpClientConnection(connectionDefinition),
+        }),
+      });
+      const routes = [GET("/tracker", async () => new Response("ok"))];
+      const subscribingChannel = (subscribes: boolean) => ({
+        logicalPath: "channels/tracker.ts",
+        loadNamespace: async () => ({
+          default: subscribes
+            ? defineChannel({
+                routes,
+                experimental: { subscriptions: { onEvent: () => null, catalog: [] } },
+              })
+            : defineChannel({ routes }),
+        }),
+      });
+
+      await expect(
+        compileAgentManifest(manifest(), {
+          sourceRegistries: [registry([eventsConnection(true), subscribingChannel(true)])],
+        }),
+      ).rejects.toThrow('A channel and a connection are both named "tracker"');
+      await expect(
+        compileAgentManifest(manifest(), {
+          sourceRegistries: [registry([eventsConnection(false), subscribingChannel(true)])],
+        }),
+      ).resolves.toBeDefined();
+      await expect(
+        compileAgentManifest(manifest(), {
+          sourceRegistries: [registry([eventsConnection(true), subscribingChannel(false)])],
+        }),
+      ).resolves.toBeDefined();
+    });
+
     it("accepts connections outside eve's namespace, including the catalog tools' former names", async () => {
       const names = ["search", "execute", "steve", "eve-tools"];
       const sourceRegistry = registry(
