@@ -50,9 +50,7 @@ async function runConfig(
 }
 
 async function runConfigResolved(plugin: Plugin): Promise<void> {
-  (plugin.configResolved as (config: { build: { ssr: boolean } }) => void)({
-    build: { ssr: false },
-  });
+  (plugin.configResolved as () => void)();
 }
 
 async function writeClientBuild(
@@ -91,6 +89,31 @@ async function buildForVercel(
       [build.ssr ? "ssr" : "client"]: { config: { build: { outDir } }, isBuilt: true },
     },
   });
+}
+
+async function buildWithAdapterForVercel(
+  root: string,
+  isBuilt: boolean,
+  adapter: () => Promise<void> = async () => {},
+): Promise<void> {
+  vi.stubEnv("VERCEL", "1");
+  const plugin = createEveVitePlugin({ adapterWritesVercelOutput: true, host, options: {} });
+  await runConfig(plugin, root, buildEnv);
+  const buildApp = plugin.buildApp as {
+    handler: (builder: {
+      build(environment: { isBuilt: boolean }): Promise<unknown>;
+      environments: Record<string, { isBuilt: boolean }>;
+    }) => Promise<void>;
+  };
+  const ssr = { isBuilt };
+  await buildApp.handler({
+    async build(environment) {
+      environment.isBuilt = true;
+      await adapter();
+    },
+    environments: { ssr },
+  });
+  expect(ssr.isBuilt).toBe(true);
 }
 
 async function readOutputRoutes(root: string): Promise<unknown[]> {
@@ -360,6 +383,36 @@ describe("createEveVitePlugin", () => {
     expect(existsSync(join(root, ".vercel", "output", "static", "index.html"))).toBe(true);
     expect(config.routes[0]).toEqual(expect.objectContaining({ src: "^/eve/v1/(.*)$" }));
     expect(config.services.eve?.framework).toBe("eve");
+  });
+
+  it.each([
+    { adapterRuns: "in an earlier buildApp hook", isBuilt: true },
+    { adapterRuns: "while eve builds the environment", isBuilt: false },
+  ])("adds the eve service to adapter output written $adapterRuns", async (row) => {
+    const root = await createAgentProject();
+    const outputConfigPath = join(root, ".vercel", "output", "config.json");
+    const writeAdapterOutput = async () => {
+      await mkdir(dirname(outputConfigPath), { recursive: true });
+      await writeFile(outputConfigPath, JSON.stringify({ routes: [{ handle: "filesystem" }] }));
+    };
+    if (row.isBuilt) {
+      await writeAdapterOutput();
+    }
+
+    await buildWithAdapterForVercel(root, row.isBuilt, writeAdapterOutput);
+
+    expect((await readOutputRoutes(root)).map((route) => (route as { src?: string }).src)).toEqual([
+      "^/eve/v1/(.*)$",
+      undefined,
+    ]);
+  });
+
+  it("asks for adapter output when the adapter wrote no Vercel Build Output", async () => {
+    const root = await createAgentProject();
+
+    await expect(buildWithAdapterForVercel(root, true)).rejects.toThrow(
+      /found no Vercel Build Output .* after the build/,
+    );
   });
 
   it("merges the generated eve service into the user's Nitro Vercel config", async () => {

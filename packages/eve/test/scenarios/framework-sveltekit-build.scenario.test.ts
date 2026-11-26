@@ -9,10 +9,6 @@ import { runPnpmCommand } from "../../src/internal/testing/run-pnpm-command.js";
 
 const scenarioApp = useScenarioApp();
 
-const SVELTEKIT_EVE_SERVICE_DESCRIPTOR = createSvelteKitEveServiceDescriptor({
-  installDependencies: true,
-});
-
 async function readVercelOutputConfig(outputRoot: string): Promise<{
   readonly routes: readonly unknown[];
   readonly services: Record<string, unknown>;
@@ -37,52 +33,58 @@ async function readVercelOutputConfig(outputRoot: string): Promise<{
 }
 
 describe("framework-sveltekit build", () => {
-  it("emits the eve service and route into the Vercel Build Output", async () => {
-    const app = await scenarioApp(SVELTEKIT_EVE_SERVICE_DESCRIPTOR);
+  it.each([2, 3] as const)(
+    "emits the eve service and route into the SvelteKit %i Vercel Build Output",
+    async (sveltekitMajor) => {
+      const app = await scenarioApp(
+        createSvelteKitEveServiceDescriptor({ installDependencies: true, sveltekitMajor }),
+      );
 
-    await runPnpmCommand({
-      args: ["exec", "vite", "build"],
-      cwd: app.appRoot,
-      env: {
-        ...process.env,
-        VERCEL: "1",
-        VERCEL_ENV: "production",
-      },
-    });
+      await runPnpmCommand({
+        args: ["exec", "vite", "build"],
+        cwd: app.appRoot,
+        env: {
+          ...process.env,
+          VERCEL: "1",
+          VERCEL_ENV: "production",
+        },
+      });
 
-    const { routes, services } = await readVercelOutputConfig(
-      join(app.appRoot, ".vercel", "output"),
-    );
-    const eveRouteIndex = routes.findIndex(
-      (route) =>
-        typeof route === "object" &&
-        route !== null &&
-        "src" in route &&
-        route.src === "^/eve/v1/(.*)$" &&
-        "destination" in route,
-    );
-    const filesystemIndex = routes.findIndex(
-      (route) =>
-        typeof route === "object" &&
-        route !== null &&
-        "handle" in route &&
-        route.handle === "filesystem",
-    );
+      const { routes, services } = await readVercelOutputConfig(
+        join(app.appRoot, ".vercel", "output"),
+      );
+      const eveRouteIndex = routes.findIndex(
+        (route) =>
+          typeof route === "object" &&
+          route !== null &&
+          "src" in route &&
+          route.src === "^/eve/v1/(.*)$" &&
+          "destination" in route,
+      );
+      const filesystemIndex = routes.findIndex(
+        (route) =>
+          typeof route === "object" &&
+          route !== null &&
+          "handle" in route &&
+          route.handle === "filesystem",
+      );
 
-    expect(routes[eveRouteIndex]).toEqual(
-      expect.objectContaining({
-        destination: { service: "eve", type: "service" },
-        src: "^/eve/v1/(.*)$",
-      }),
-    );
-    if (filesystemIndex !== -1) {
-      expect(eveRouteIndex).toBeLessThan(filesystemIndex);
-    }
-    expect(services.eve).toEqual(
-      expect.objectContaining({
-        framework: "eve",
-        root: ".eve/vercel-services/eve",
-      }),
-    );
-  }, 300_000);
+      expect(routes[eveRouteIndex]).toEqual(
+        expect.objectContaining({
+          destination: { service: "eve", type: "service" },
+          src: "^/eve/v1/(.*)$",
+        }),
+      );
+      if (filesystemIndex !== -1) {
+        expect(eveRouteIndex).toBeLessThan(filesystemIndex);
+      }
+      expect(services.eve).toEqual(
+        expect.objectContaining({
+          framework: "eve",
+          root: ".eve/vercel-services/eve",
+        }),
+      );
+    },
+    300_000,
+  );
 });

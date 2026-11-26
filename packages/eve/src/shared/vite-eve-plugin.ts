@@ -85,16 +85,15 @@ export function createEveVitePlugin(input: {
   readonly host: EveFrameworkHost;
   readonly nitroOnly?: boolean;
   readonly options: EveVitePluginOptions;
-  readonly vercelOutputAfterSsrBundle?: boolean;
+  readonly adapterWritesVercelOutput?: boolean;
 }): Plugin & { readonly nitro: EveNitroModule } {
-  const { host, nitroOnly, options, vercelOutputAfterSsrBundle } = input;
+  const { adapterWritesVercelOutput, host, nitroOnly, options } = input;
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, host);
   const isVercel = Boolean(process.env.VERCEL);
   let viteRoot: string;
   let projectRoot: string;
   let agents: readonly EveFrameworkAgent[];
   let isPreview = false;
-  let isSsrBuild = false;
   let isVercelBuild = false;
   let nitroModuleInstalled = false;
   let nitroServesPreview = false;
@@ -251,8 +250,7 @@ export function createEveVitePlugin(input: {
         return { nitro: { routeRules }, server: { proxy } };
       },
     },
-    configResolved(config) {
-      isSsrBuild = Boolean(config.build.ssr);
+    configResolved() {
       if (nitroOnly && !isPreview && !nitroModuleInstalled) {
         throw new Error(
           `The eve ${host.label} plugin needs the Nitro Vite plugin. Install "nitro" and add nitro() from "nitro/vite" to the plugins in vite.config.ts.`,
@@ -272,7 +270,7 @@ export function createEveVitePlugin(input: {
           buildApp: {
             order: "post",
             async handler(builder: ViteBuilder) {
-              if (nitroModuleInstalled || vercelOutputAfterSsrBundle) {
+              if (nitroModuleInstalled) {
                 return;
               }
               for (const environment of Object.values(builder.environments)) {
@@ -280,18 +278,10 @@ export function createEveVitePlugin(input: {
                   await builder.build(environment);
                 }
               }
-              await addEveVercelServicesToOutput(builder);
+              await addEveVercelServicesToOutput(adapterWritesVercelOutput ? undefined : builder);
             },
           },
         }
       : {}),
-    closeBundle: {
-      sequential: true,
-      async handler() {
-        if (isVercelBuild && isSsrBuild && vercelOutputAfterSsrBundle) {
-          await addEveVercelServicesToOutput();
-        }
-      },
-    },
   };
 }
