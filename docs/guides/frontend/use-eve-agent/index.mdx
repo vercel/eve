@@ -276,6 +276,26 @@ const agent = useEveAgent({
 
 To read the result of one delivery, use `receipt.result()` instead of `onFinish`. A delivery can finish while its turn still waits for input.
 
+### Errors
+
+Narrow errors with the static `is()` of these classes from `eve/client`, which also match errors from a separately bundled copy of eve:
+
+| Class                | When                                                          | Fields                                        |
+| -------------------- | ------------------------------------------------------------- | --------------------------------------------- |
+| `TurnFailedError`    | A turn failed on the server. `code` is `turn_failed`.         | `turnId` and `info`: the recorded `ErrorInfo` |
+| `SessionFailedError` | The session failed on the server. `code` is `session_failed`. | `info`: the recorded `ErrorInfo`              |
+| `ClientError`        | The server answered a request with an error status.           | `status`, `code`, `body`                      |
+
+A failed turn or session keeps the recorded `message`, and its `name` is the recorded code, such as `MODEL_CALL_FAILED`. `info` holds that `code` and `message`, and its `name`, `id`, and `hint` when the server recorded them. Show `info.id` as the support ID to quote and `info.hint` as the remedy.
+
+Where each error arrives:
+
+- `error` and `onError` report failures of session creation, streams, resume, and turns.
+- `send()` and `respond()` can reject when preparation or submission fails, for example when `fetch` rejects or the server returns a `ClientError`.
+- A turn that fails after `send()` resolved doesn't reject it. The failure arrives as a `TurnFailedError` on `error` and `onError`.
+- `cancel()` waiting for a pending submission rejects with the store's current `error`, which can be a `TurnFailedError`.
+- A command aborted by its signal rejects with the signal's reason. An `AbortError` doesn't set `error`. Any other reason sets `error` and reaches `onError` like other failures.
+
 ## Interactions
 
 Approvals, questions, sign-ins, and budget prompts are requests for input, which the API calls interactions. Read them with `interaction(view, id)`, `interactions(view)`, or `openInteractions(view)` from `eve/events`.

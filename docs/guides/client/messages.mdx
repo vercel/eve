@@ -64,8 +64,11 @@ The typed errors `eve/client` throws (`ClientError` and its subclasses, `Session
 `HealthResponseError`, and `AgentInfoResponseError`) extend `EveError` and have a stable snake_case
 `code`: `SessionNotActiveError` uses `session_not_active` or `session_not_ready`; `ClientError` carries
 the response's code (such as `session_stranded` or `session_expired`), or `http_error` when the
-response had none. Narrow with the static `is()` of the class you expect instead of `instanceof`,
-so errors from a separately bundled copy of eve still match:
+response had none. `SessionStore` and [`useEveAgent`](../frontend/use-eve-agent#errors) report a
+turn or session that failed on the server as `TurnFailedError` (`turn_failed`, with `turnId`) or
+`SessionFailedError` (`session_failed`). Their `name` is the recorded code, and `info` holds the
+recorded `ErrorInfo`. Narrow with the static `is()` of the class you expect instead of
+`instanceof`, so errors from a separately bundled copy of eve still match:
 
 ```ts
 import { ClientError, SessionNotActiveError } from "eve/client";

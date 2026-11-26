@@ -252,6 +252,14 @@ describe("Client request policy", () => {
     ]);
   });
 
+  it("preserves the original rejection from raw fetch", async () => {
+    const failure = new TypeError("fetch failed");
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(failure);
+    const client = new Client({ baseUrl: "https://eve.test" });
+
+    await expect(client.fetch("/custom")).rejects.toBe(failure);
+  });
+
   it("includes response headers in info request errors", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("Redirecting...", {
