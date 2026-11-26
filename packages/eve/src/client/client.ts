@@ -9,7 +9,6 @@ import {
 } from "#client/agent-info-schema.js";
 import { ClientError } from "#client/client-error.js";
 import { ClientSessions } from "#client/sessions.js";
-import { clientFetch } from "#client/client-network-error.js";
 import { createClientUrl } from "#client/url.js";
 import type {
   AgentInfoResult,
@@ -57,7 +56,7 @@ export class Client {
   async health(): Promise<HealthResult> {
     const url = createClientUrl(this.#baseUrl, EVE_HEALTH_ROUTE_PATH);
     const headers = await this.#resolveHeaders();
-    const response = await clientFetch(url, withRedirectPolicy({ headers }, this.#redirect));
+    const response = await fetch(url, withRedirectPolicy({ headers }, this.#redirect));
 
     if (!response.ok) {
       const body = await response.text();
@@ -135,14 +134,11 @@ export class Client {
    * This is the raw escape hatch for framework-owned routes (for example
    * channel ingress or dev-only schedule dispatch) while preserving the same
    * auth/header cascade used by {@link health}, {@link info}, and sessions.
-   *
-   * @throws {ClientNetworkError} If `fetch` rejects a valid request before any response. Aborts
-   * still reject with the signal's reason.
    */
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
     const url = createClientUrl(this.#baseUrl, path);
     const headers = await this.#resolveHeaders(headersInitToRecord(init.headers));
-    return await clientFetch(url, withRedirectPolicy({ ...init, headers }, this.#redirect));
+    return await fetch(url, withRedirectPolicy({ ...init, headers }, this.#redirect));
   }
 
   async #resolveHeaders(perRequest?: Readonly<Record<string, string>>): Promise<Headers> {

@@ -29,7 +29,6 @@
   "ClientAuth",
   "ClientError",
   "ClientErrorCode",
-  "ClientNetworkError",
   "ClientOptions",
   "ClientRedirectPolicy",
   "ClientSession",

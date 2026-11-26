@@ -29,7 +29,7 @@ export class EveError extends Error {
       type = Object.getPrototypeOf(type) as typeof EveError;
       lineage.push(type.errorName);
     }
-    markErrorLineage(this, lineage);
+    Object.defineProperty(this, LINEAGE, { value: Object.freeze(lineage) });
   }
 
   /** Whether `error` is an eve error of this class or a subclass, from any copy of eve. */
@@ -37,16 +37,8 @@ export class EveError extends Error {
     this: { readonly errorName: string; readonly prototype: T },
     error: unknown,
   ): error is T {
-    return hasErrorLineage(error, this.errorName);
+    if (typeof error !== "object" || error === null) return false;
+    const lineage: unknown = Reflect.get(error, LINEAGE);
+    return Array.isArray(lineage) && lineage.includes(this.errorName);
   }
-}
-
-export function markErrorLineage(error: Error, lineage: readonly string[]): void {
-  Object.defineProperty(error, LINEAGE, { value: Object.freeze([...lineage]) });
-}
-
-export function hasErrorLineage(error: unknown, errorName: string): boolean {
-  if (typeof error !== "object" || error === null) return false;
-  const lineage: unknown = Reflect.get(error, LINEAGE);
-  return Array.isArray(lineage) && lineage.includes(errorName);
 }

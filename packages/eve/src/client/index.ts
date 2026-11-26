@@ -8,7 +8,6 @@ export {
   ClientSessionStrandedError,
   type ClientErrorCode,
 } from "#client/client-error.js";
-export { ClientNetworkError } from "#client/client-network-error.js";
 export { SessionFailedError, TurnFailedError } from "#client/recorded-failure-error.js";
 export { SessionNotActiveError } from "#channel/session-not-active-error.js";
 export { conversationOf } from "#client/conversation.js";

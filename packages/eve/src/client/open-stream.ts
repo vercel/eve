@@ -13,7 +13,6 @@ import { throwIfAborted } from "#client/abort-signal.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import { readMessageStreamVersion } from "#client/stream-version.js";
 import type { ClientRedirectPolicy, ReconnectOptions } from "#client/types.js";
-import { isRefusedRedirect, toClientNetworkError } from "#client/client-network-error.js";
 import { createClientUrl } from "#client/url.js";
 import { waitWithSignal } from "#shared/wait-with-signal.js";
 
@@ -311,7 +310,12 @@ export async function openStreamBody(
         signal,
       });
     } catch (error) {
-      if (input.redirect === "error" && isRefusedRedirect(error)) {
+      if (
+        input.redirect === "error" &&
+        error instanceof Error &&
+        error.cause instanceof Error &&
+        error.cause.message === "unexpected redirect"
+      ) {
         throw new Error("The session stream refused a redirect. Use the final agent URL instead.", {
           cause: error,
         });
@@ -321,7 +325,7 @@ export async function openStreamBody(
         !isStreamDisconnectError(error) ||
         attempt === retryPolicy.maxAttempts - 1
       ) {
-        throw toClientNetworkError(error, signal);
+        throw error;
       }
       await sleep(retryDelayMs, input.signal);
       retryDelayMs = Math.min(retryDelayMs * 2, retryPolicy.maxDelayMs);

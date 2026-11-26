@@ -52,18 +52,6 @@ control methods, and raw HTTP requests are not retried.
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `SessionNotActiveError`      | Unknown or terminal session, thrown immediately (`retryable: false`), or the `session_not_ready` retry expired (`retryable: true`). |
 | `ClientSessionStrandedError` | [Stranded](../../concepts/execution-model-and-durability#stranded-sessions) session.                                                |
-| `ClientNetworkError`         | `fetch` rejected a valid request before any response.                                                                               |
-
-`ClientNetworkError` wraps the rejection from `fetch` as its `cause` and keeps its `message`. It
-extends `TypeError` rather than `EveError`, so `instanceof TypeError` checks keep matching, and its
-`code` is `network_error`. Session creation, `send()`, `respond()`, control methods, `Client.fetch()`,
-and stream opens throw it; a stream open throws it only after its reconnect attempts run out.
-
-The usual cause is a network failure or an unreachable agent, but `fetch` can't always say which
-failure happened. A browser rejects a blocked CORS request, or a redirect refused by the client's
-`redirect` policy, the same way. In Node.js, a refused redirect rejects with the platform's
-`TypeError` instead. An invalid request, such as a `GET` with a body, throws the platform's
-`TypeError` before anything is sent. An aborted request rejects with the abort signal's reason.
 
 `ClientSessionStrandedError` is a `ClientError` with `code: "session_stranded"` and, when recorded,
 the `eveVersion` that built the session. It is never retried, and the client never creates a
@@ -83,7 +71,7 @@ recorded `ErrorInfo`. Narrow with the static `is()` of the class you expect inst
 `instanceof`, so errors from a separately bundled copy of eve still match:
 
 ```ts
-import { ClientError, ClientNetworkError, SessionNotActiveError } from "eve/client";
+import { ClientError, SessionNotActiveError } from "eve/client";
 
 try {
   await session.send("Continue.");
@@ -92,8 +80,6 @@ try {
     // Start a new session.
   } else if (ClientError.is(error) && error.code === "unauthorized") {
     // Sign in again.
-  } else if (ClientNetworkError.is(error)) {
-    // The request got no response. Offer a retry.
   } else {
     throw error;
   }

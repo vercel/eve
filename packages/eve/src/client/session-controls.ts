@@ -1,7 +1,6 @@
 import { PrewarmResponseSchema, type PrewarmSessionResult } from "#protocol/prewarm-session.js";
 import { createClientError } from "#client/client-error.js";
 import type { ClientRedirectPolicy } from "#client/types.js";
-import { clientFetch } from "#client/client-network-error.js";
 import { createClientUrl } from "#client/url.js";
 import { DeliveryResponseSchema, type DeliveryReceipt } from "#protocol/delivery.js";
 import {
@@ -28,7 +27,7 @@ export async function prewarmClientSession(input: {
   readonly sessionId: string;
   readonly signal?: AbortSignal;
 }): Promise<PrewarmSessionResult> {
-  const response = await clientFetch(
+  const response = await fetch(
     createClientUrl(input.context.baseUrl, createEveSessionRoutePath(input.sessionId)),
     {
       headers: await input.context.resolveHeaders(),
@@ -68,7 +67,7 @@ export async function sendClientControl(input: {
   const body = input.kind === "cancel" ? { turnId } : input.kind === "end" ? { reason } : {};
   const headers = await input.context.resolveHeaders();
   headers.set("content-type", "application/json");
-  const response = await clientFetch(
+  const response = await fetch(
     createClientUrl(input.context.baseUrl, paths[input.kind](input.sessionId)),
     {
       body: JSON.stringify(body),
