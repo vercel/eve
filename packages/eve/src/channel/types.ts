@@ -440,6 +440,8 @@ export interface Runtime {
 
   getStreamTailIndex(sessionId: string): Promise<number>;
 
+  getStreamVersion?(sessionId: string): Promise<string | undefined>;
+
   readChildBinding?(
     sessionId: string,
     childSessionId: string,
