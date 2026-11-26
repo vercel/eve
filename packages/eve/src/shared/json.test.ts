@@ -67,6 +67,16 @@ describe("parseJsonValue", () => {
     expect(parseJsonValue(value)).toEqual({ city: "Brooklyn", nested: { active: true } });
   });
 
+  it("keeps __proto__ as an own data property without mutating the object prototype", () => {
+    const parsed = JSON.parse('{"__proto__":{"isAdmin":true},"status":"ok"}') as unknown;
+    const normalized = parseJsonObject(parsed);
+
+    expect(Object.getPrototypeOf(normalized)).toBe(Object.prototype);
+    expect("isAdmin" in normalized).toBe(false);
+    expect(Object.hasOwn(normalized, "__proto__")).toBe(true);
+    expect(JSON.stringify(normalized)).toBe('{"__proto__":{"isAdmin":true},"status":"ok"}');
+  });
+
   it("rejects arrays with undefined entries", () => {
     expect(() => parseJsonValue(["brooklyn", undefined])).toThrow(
       "Expected a JSON-serializable value.",

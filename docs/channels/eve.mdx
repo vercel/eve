@@ -422,7 +422,7 @@ const history = [
 ];
 ```
 
-Each `{ type: "tool" }` part takes a `name` (1 to 64 ASCII letters, digits, underscores, or dashes), an optional JSON object `input` that defaults to `{}`, and either `output` (any JSON value) or non-empty `error`. Consecutive `tool` parts run as one parallel step; a `text` part right before a `tool` part joins that step as narration, and a `text` part after a `tool` part follows its result. Tool-only steps need no placeholder text. eve runs no tool, approval, hook, or `toModelOutput` for imported calls, and emits no `call.*` events for them.
+Each `{ type: "tool" }` part takes a `name` (1 to 64 ASCII letters, digits, underscores, or dashes), an optional JSON object `input` that defaults to `{}`, and either `output` (any JSON value) or non-empty `error`. Consecutive `tool` parts group into one parallel step; a `text` part right before a `tool` part joins that step as narration, and a `text` part after a `tool` part follows its result. Tool-only steps need no placeholder text. eve runs no tool, approval, hook, or `toModelOutput` for imported calls, and emits no `call.*` events for them.
 
 eve never accepts `history` from a client request body. Resolve it on the server and authorize the caller against the stored conversation.
 

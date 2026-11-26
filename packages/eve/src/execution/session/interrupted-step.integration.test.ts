@@ -6,6 +6,7 @@ import {
   readInterruptedAttempt,
   recoverInterruptedStep,
 } from "#execution/session/interrupted-step.js";
+import { TOOL_RESULT_BOUNDARY } from "#harness/messages.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -196,5 +197,65 @@ it("keeps a settled turn's imported history ahead of its message and reply", asy
     { content: "It ships Friday.", role: "assistant" },
     expect.objectContaining({ content: "Thanks, Alice here.", role: "user" }),
     { content: "Hi Bob.", role: "assistant" },
+  ]);
+});
+
+it("inserts a tool-result boundary during recovery when imported history ends in a tool part", async () => {
+  const { ctx, session } = openTurnSession("imported-tool-only-session");
+  const settled = {
+    type: "turn.settled" as const,
+    data: { outcome: "completed" as const, reply: ["p"], turnId: "turn-1" },
+  };
+  enterSessionProjection(ctx, withPublished(session, [settled]).state);
+  const reply = {
+    type: "content.completed",
+    data: { kind: "text", partId: "p", value: "Still Friday." },
+  };
+  const result = await recoverInterruptedStep({
+    admission: commitOf([]),
+    attempt: readInterruptedAttempt(0, [
+      { position: 0, line: { at: "2026-10-21T00:00:00.000Z", facts: [reply, settled] } },
+    ]),
+    ctx,
+    publish: vi.fn(async () => session),
+    session,
+    stepInput: {
+      history: [
+        { role: "user", text: "Bob asked about the launch." },
+        {
+          parts: [{ name: "launch_date", output: "Friday", type: "tool" }],
+          role: "assistant",
+        },
+      ],
+      message: "Any update?",
+    },
+  });
+  expect("result" in result && result.result.history).toEqual([
+    {
+      content: "Bob asked about the launch.",
+      kind: "user",
+      metadata: { "eve.imported": true },
+      role: "user",
+    },
+    {
+      content: [
+        { input: {}, toolCallId: "imported_0", toolName: "launch_date", type: "tool-call" },
+      ],
+      role: "assistant",
+    },
+    {
+      content: [
+        {
+          output: { type: "text", value: "Friday" },
+          toolCallId: "imported_0",
+          toolName: "launch_date",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    },
+    { content: TOOL_RESULT_BOUNDARY, role: "assistant" },
+    expect.objectContaining({ content: "Any update?", role: "user" }),
+    { content: "Still Friday.", role: "assistant" },
   ]);
 });

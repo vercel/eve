@@ -158,22 +158,38 @@ function checkDevSessionHistoryBounds(value: unknown): string | undefined {
     return `history exceeds the maximum of ${String(MAX_DEV_SESSION_HISTORY_MESSAGES)} messages.`;
   }
   const pending: Array<{ readonly depth: number; readonly value: unknown }> = [{ depth: 0, value }];
-  let nodes = 0;
+  let nodes = 1;
   let size = 0;
   while (pending.length > 0) {
     const entry = pending.pop()!;
-    if (++nodes > MAX_DEV_SESSION_HISTORY_NODES || entry.depth > MAX_DEV_SESSION_HISTORY_DEPTH) {
+    if (entry.depth > MAX_DEV_SESSION_HISTORY_DEPTH) {
       return "history exceeds the nesting or complexity limit.";
     }
     if (typeof entry.value === "string") {
       size += Buffer.byteLength(entry.value, "utf8");
+    } else if (Array.isArray(entry.value)) {
+      if (nodes + entry.value.length > MAX_DEV_SESSION_HISTORY_NODES) {
+        return "history exceeds the nesting or complexity limit.";
+      }
+      nodes += entry.value.length;
+      for (const child of entry.value) {
+        pending.push({ depth: entry.depth + 1, value: child });
+      }
     } else if (entry.value !== null && typeof entry.value === "object") {
-      for (const [key, child] of Object.entries(entry.value)) {
+      const record = entry.value as Record<string, unknown>;
+      for (const key in record) {
+        if (!Object.hasOwn(record, key)) continue;
         if (key === "__proto__") {
           return "history cannot contain prototype keys.";
         }
+        if (++nodes > MAX_DEV_SESSION_HISTORY_NODES) {
+          return "history exceeds the nesting or complexity limit.";
+        }
         size += Buffer.byteLength(key, "utf8");
-        pending.push({ depth: entry.depth + 1, value: child });
+        if (size > MAX_DEV_SESSION_HISTORY_BYTES) {
+          return `history exceeds the maximum size of ${String(MAX_DEV_SESSION_HISTORY_BYTES / 1024)} KiB.`;
+        }
+        pending.push({ depth: entry.depth + 1, value: record[key] });
       }
     }
     if (size > MAX_DEV_SESSION_HISTORY_BYTES) {

@@ -8,6 +8,7 @@ import {
   MAX_DEV_SESSION_HISTORY_BYTES,
   MAX_DEV_SESSION_HISTORY_DEPTH,
   MAX_DEV_SESSION_HISTORY_MESSAGES,
+  MAX_DEV_SESSION_HISTORY_NODES,
 } from "#internal/nitro/routes/dev-session-create.js";
 import { EVE_DEV_SESSION_ROUTE_PATH, EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
@@ -215,12 +216,68 @@ describe("handleDevSessionCreateRequest", () => {
       },
       "history exceeds the nesting or complexity limit.",
     ],
+    [
+      "history exceeding node count cap",
+      {
+        history: [
+          {
+            parts: [
+              {
+                name: "lookup",
+                output: Array.from({ length: MAX_DEV_SESSION_HISTORY_NODES }, () => 1),
+                type: "tool",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      "history exceeds the nesting or complexity limit.",
+    ],
   ])("returns 400 for %s without creating a session", async (_label, body, expectedError) => {
     const response = await postDevSession(body);
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: expectedError, ok: false });
     expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when raw JSON history contains a __proto__ key", async () => {
+    const request = new Request(`http://127.0.0.1:3000${EVE_DEV_SESSION_ROUTE_PATH}`, {
+      body: '{"history":[{"role":"assistant","parts":[{"type":"tool","name":"lookup","output":{"__proto__":{"isAdmin":true}}}]}]}',
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    const response = await handleDevSessionCreateRequest(DEV_CONFIG, request);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "history cannot contain prototype keys.",
+      ok: false,
+    });
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("does not count synthetic array indices toward the byte limit", async () => {
+    const structured = [
+      { role: "user", text: "a".repeat(MAX_DEV_SESSION_HISTORY_BYTES - 48 * 1024) },
+      {
+        parts: [
+          {
+            name: "list_ids",
+            output: Array.from({ length: 15_000 }, () => 1),
+            type: "tool",
+          },
+        ],
+        role: "assistant",
+      },
+    ] as const;
+
+    const response = await postDevSession({ history: structured });
+
+    expect(response.status).toBe(202);
+    expect(mocks.createSession).toHaveBeenCalledOnce();
   });
 
   it("returns 400 when tool stubs target an unknown static tool", async () => {

@@ -272,6 +272,11 @@ function importedMessageParts(
   if (message.parts === undefined) {
     return [{ state: "done", text: message.text, type: "text" }];
   }
+  if (message.role === "user") {
+    return message.parts.flatMap((part): EveMessagePart[] =>
+      part.type === "text" ? [{ state: "done", text: part.text, type: "text" }] : [],
+    );
+  }
   let stepIndex = 0;
   let sawToolInStep = false;
   return message.parts.map((part, partIndex): EveMessagePart => {

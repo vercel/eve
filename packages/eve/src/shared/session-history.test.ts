@@ -171,6 +171,39 @@ describe("validateSessionHistory", () => {
       "history[0].parts[0].output must be a JSON value.",
     ],
     [
+      "a tool part with a __proto__ key in input",
+      [
+        {
+          parts: [
+            {
+              input: JSON.parse('{"__proto__":{"isAdmin":true},"id":"T-1"}'),
+              name: "lookup",
+              output: "ok",
+              type: "tool",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      "history[0].parts[0].input cannot contain prototype keys.",
+    ],
+    [
+      "a tool part with a nested __proto__ key in output",
+      [
+        {
+          parts: [
+            {
+              name: "lookup",
+              output: JSON.parse('[{"__proto__":{"polluted":true}}]'),
+              type: "tool",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      "history[0].parts[0].output cannot contain prototype keys.",
+    ],
+    [
       "a tool part with pending/unknown fields",
       [
         {

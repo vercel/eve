@@ -79,7 +79,7 @@ export type SessionHistoryAssistantMessage = {
       readonly text?: never;
       /**
        * Ordered text and completed tool exchanges produced during the assistant turn.
-       * Consecutive `tool` parts run as one parallel step; text before a `tool` part joins that
+       * Consecutive `tool` parts group into one parallel step; text before a `tool` part joins that
        * step as narration, and text after a `tool` part follows its result.
        */
       readonly parts: readonly SessionHistoryAssistantPart[];
@@ -252,18 +252,41 @@ function validateToolPart(
 }
 
 function jsonObjectAt(value: unknown, at: string): JsonObject {
+  let normalized: JsonObject;
   try {
-    return parseJsonObject(value);
+    normalized = parseJsonObject(value);
   } catch {
     throw new InvalidSessionHistoryError(`${at} must be a JSON object.`);
   }
+  rejectPrototypeKeys(normalized, at);
+  return normalized;
 }
 
 function jsonValueAt(value: unknown, at: string): JsonValue {
+  let normalized: JsonValue;
   try {
-    return parseJsonValue(value);
+    normalized = parseJsonValue(value);
   } catch {
     throw new InvalidSessionHistoryError(`${at} must be a JSON value.`);
+  }
+  rejectPrototypeKeys(normalized, at);
+  return normalized;
+}
+
+function rejectPrototypeKeys(value: JsonValue, at: string): void {
+  const pending: JsonValue[] = [value];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (Array.isArray(current)) {
+      for (const item of current) pending.push(item);
+      continue;
+    }
+    if (current !== null && typeof current === "object") {
+      if (Object.hasOwn(current, "__proto__")) {
+        throw new InvalidSessionHistoryError(`${at} cannot contain prototype keys.`);
+      }
+      for (const child of Object.values(current)) pending.push(child);
+    }
   }
 }
 

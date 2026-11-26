@@ -647,6 +647,12 @@ describe("the conversation", () => {
           deliveryId: "d_0",
           history: [
             {
+              id: "u1",
+              parts: [{ text: "Is T-1 open?", type: "text" }],
+              role: "user",
+              text: "Is T-1 open?",
+            },
+            {
               id: "a1",
               parts: [
                 { text: "Checking T-1.", type: "text" },
@@ -676,11 +682,17 @@ describe("the conversation", () => {
 
     expect(conversation.state.messages[0]).toEqual({
       id: "d_0:imported:0",
+      metadata: { historyId: "u1", imported: true, status: "complete" },
+      parts: [{ state: "done", text: "Is T-1 open?", type: "text" }],
+      role: "user",
+    });
+    expect(conversation.state.messages[1]).toEqual({
+      id: "d_0:imported:1",
       metadata: { historyId: "a1", imported: true, status: "complete" },
       parts: [
         { state: "done", stepIndex: 0, text: "Checking T-1.", type: "text" },
         {
-          callId: "d_0:imported:0:tool:1",
+          callId: "d_0:imported:1:tool:1",
           input: { id: "T-1" },
           kind: "tool",
           label: "Lookup ticket",
@@ -691,7 +703,7 @@ describe("the conversation", () => {
           type: "tool",
         },
         {
-          callId: "d_0:imported:0:tool:2",
+          callId: "d_0:imported:1:tool:2",
           error: { code: "tool_error", message: "Timed out" },
           input: {},
           kind: "tool",

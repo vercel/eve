@@ -108,7 +108,16 @@ function normalizeJsonValueCandidate(
       return INVALID_JSON_VALUE_CANDIDATE;
     }
 
-    normalized[key] = normalizedEntry;
+    if (key === "__proto__") {
+      Object.defineProperty(normalized, key, {
+        configurable: true,
+        enumerable: true,
+        value: normalizedEntry,
+        writable: true,
+      });
+    } else {
+      normalized[key] = normalizedEntry;
+    }
   }
 
   seen.delete(value);

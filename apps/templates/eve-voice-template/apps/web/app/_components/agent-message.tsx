@@ -172,7 +172,7 @@ function Steps({
     );
     return (
       <Fragment key={call.callId}>
-        <ToolLine part={call} state={callState(view, call.callId)} />
+        <ToolLine part={call} state={toolCallState(view, call)} />
         {nested.length > 0 ? (
           <div className="ml-[calc(--spacing(2)-1px)] border-l pl-4">
             <Trace>{nested.map(toolLines)}</Trace>
@@ -251,9 +251,13 @@ function parentCallIdOf(part: EveToolPart): string | undefined {
   return typeof parent === "string" ? parent : undefined;
 }
 
+function toolCallState(view: SessionView, part: EveToolPart): CallState | undefined {
+  return callState(view, part.callId) ?? (part.state === "streaming" ? undefined : part.state);
+}
+
 function stepState(step: Step, view: SessionView): "working" | "waiting" | "failed" | "done" {
   if (step.type === "reasoning") return step.state === "streaming" ? "working" : "done";
-  const state = callState(view, step.callId);
+  const state = toolCallState(view, step);
   if (state === "approval" || state === "blocked") return "waiting";
   const status = state === undefined ? "running" : CALL_LINES[state].status;
   return status === "error" ? "failed" : status === undefined ? "done" : "working";
