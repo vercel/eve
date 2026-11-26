@@ -103,6 +103,15 @@ pnpm dlx https://pkg.eve.dev/pr/<pull-request-id>/eve.tgz dev
 `pnpm dlx` may reuse a cached package for the same PR URL. To test a newer
 commit, use its full-SHA URL: `https://pkg.eve.dev/<full-sha>/eve.tgz`.
 
+Every public package in `packages/` is published the same way, named like its
+`npm pack` tarball without the version. Install an extension next to the eve
+build from the same PR:
+
+```bash
+npm install https://pkg.eve.dev/pr/<pull-request-id>/eve.tgz \
+  https://pkg.eve.dev/pr/<pull-request-id>/eve-recall.tgz
+```
+
 ## Linting and formatting
 
 ```bash
