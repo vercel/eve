@@ -1,16 +1,12 @@
 import assert from "node:assert/strict";
-import { execFile, spawn as spawnProcess } from "node:child_process";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
-import { Readable } from "node:stream";
-import { promisify } from "node:util";
+import { join } from "node:path";
 import test from "node:test";
 
 import type { RepositoryInstructionFile } from "../../extension/extension.ts";
 import { discoverWorkspace } from "../../extension/lib/repositories.ts";
-
-const execFileAsync = promisify(execFile);
+import { createLocalSandbox } from "./local-sandbox.ts";
 
 async function withWorkspace(
   files: Readonly<Record<string, string>>,
@@ -19,51 +15,7 @@ async function withWorkspace(
   const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-project's-")));
   try {
     for (const [name, content] of Object.entries(files)) await writeFile(join(root, name), content);
-    const commands: string[] = [];
-    const sandbox = {
-      resolvePath: (path: string) => (isAbsolute(path) ? path : join(root, path)),
-      async run({ command }: { command: string }) {
-        commands.push(command);
-        const { stdout, stderr } = await execFileAsync("bash", ["-c", command]);
-        return { exitCode: 0, stdout, stderr };
-      },
-      async spawn({ command }: { command: string }) {
-        commands.push(command);
-        const child = spawnProcess("bash", ["-c", command], {
-          cwd: root,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        const exitPromise = new Promise<{ exitCode: number }>((resolve) => {
-          let settled = false;
-          const finish = (code: number) => {
-            if (settled) return;
-            settled = true;
-            resolve({ exitCode: code });
-          };
-          child.once("error", () => finish(1));
-          child.once("close", (code) => finish(typeof code === "number" ? code : 1));
-        });
-        const stdout = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
-        const stderr = Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>;
-        return {
-          ...(child.pid !== undefined && { pid: child.pid }),
-          stdout,
-          stderr,
-          wait: () => exitPromise,
-          async kill() {
-            if (child.exitCode === null && child.signalCode === null) {
-              try {
-                if (process.platform === "win32") child.kill();
-                else child.kill("SIGKILL");
-              } catch {}
-            }
-            child.stdout.destroy();
-            child.stderr.destroy();
-            await exitPromise;
-          },
-        };
-      },
-    };
+    const { sandbox, commands } = createLocalSandbox(root);
     await check(async () => {
       const discovery = await discoverWorkspace(sandbox, {
         includeWorkspaceInstructions: true,

@@ -2,7 +2,7 @@ import { defineDynamic } from "eve/instructions";
 
 import extension from "../extension.ts";
 import { buildKeyedInstructions } from "../lib/project-instructions.ts";
-import { findKnownEnclosingRoot } from "../lib/repo-reconcile.ts";
+import { isWorkspaceCovered } from "../lib/repo-reconcile.ts";
 import { initialRepositorySessionState, repoState } from "../lib/repo-state.ts";
 import { resolveRepositoriesConfig } from "../lib/repositories.ts";
 
@@ -13,10 +13,7 @@ export default defineDynamic((ctx) => {
   try {
     state = repoState.get();
   } catch {}
-  const workspaceCovered =
-    state.workspaceRoot !== null &&
-    (findKnownEnclosingRoot(state.workspaceRoot, state.byRoot) !== null ||
-      state.workspaceRoot in state.scopes);
+  const workspaceCovered = isWorkspaceCovered(state.workspaceRoot, state.byRoot, state.scopes);
   return buildKeyedInstructions(
     {
       workspaceInstruction: workspaceCovered ? [] : state.workspaceInstruction,

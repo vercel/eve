@@ -59,32 +59,12 @@ export interface SessionContext {
    * Resolves the session's sandbox. Throws when no sandbox is available
    * in the current authored runtime context.
    */
-  getSandbox(): Promise<RuntimeSandboxSession>;
-  /**
-   * Resolves the session's sandbox. Throws when no sandbox is available
-   * in the current authored runtime context.
-   */
-  getSandbox(options: { readonly create?: true } | undefined): Promise<RuntimeSandboxSession>;
-  /**
-   * Resolves the session's existing sandbox without creating a new one,
-   * returning `null` if this session does not have a sandbox.
-   */
-  getSandbox(options: { readonly create: false }): Promise<RuntimeSandboxSession | null>;
+  getSandbox(options?: { readonly create?: true }): Promise<RuntimeSandboxSession>;
   /**
    * Resolves the session's sandbox, or returns `null` without creating one
    * when `options.create` is `false` and the session does not have a sandbox.
    */
   getSandbox(options?: GetSandboxOptions): Promise<RuntimeSandboxSession | null>;
-  /**
-   * Resolves the session's existing sandbox with the capabilities declared by
-   * its configured environment without creating a new one, returning `null` if
-   * this session does not have a sandbox. Throws when the environment is not
-   * active.
-   */
-  getSandbox<Session extends SandboxSession>(
-    environment: SandboxEnvironment<object | undefined, Session>,
-    options: { readonly create: false },
-  ): Promise<RuntimeSandboxSession<Session> | null>;
   /**
    * Resolves the session's sandbox with the capabilities declared by its
    * configured environment. Throws when the environment is not active.

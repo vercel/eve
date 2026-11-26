@@ -3,12 +3,11 @@ import { defineInstructions, type InstructionsDefinition } from "eve/instruction
 
 import type { RepositoryInstructionFile } from "../extension.ts";
 import type { RecordedRepository, RecordedScope, RepositorySessionState } from "./repo-state.ts";
-import { DEFAULT_MAX_TOTAL_BYTES, MAX_OVERFLOW_PATHS } from "./repositories.ts";
-
-export interface ProjectInstructionsFile {
-  readonly path: string;
-  readonly content: string;
-}
+import {
+  appendOverflowPaths,
+  DEFAULT_MAX_TOTAL_BYTES,
+  MAX_OVERFLOW_PATHS,
+} from "./repositories.ts";
 
 export function escapeXmlAttr(value: string): string {
   return value
@@ -23,13 +22,6 @@ export function neutralizeInstructionContent(content: string): string {
     /<\/((?:repository|scoped|project)_instructions|repository_rules)\b/giu,
     "&lt;/$1",
   );
-}
-
-export function formatProjectInstructions(file: ProjectInstructionsFile): string {
-  return [
-    "Project-specific instructions and guidelines:",
-    `<project_instructions path="${escapeXmlAttr(file.path)}">\n${neutralizeInstructionContent(file.content)}\n</project_instructions>`,
-  ].join("\n\n");
 }
 
 function hashInstructionKey(value: string): string {
@@ -163,12 +155,7 @@ export function buildKeyedInstructions(
   if (candidates.length === 0 && preOverflow.length === 0) return null;
 
   const result: Record<string, InstructionsDefinition> = {};
-  const overflowPaths: string[] = [];
-  const pushOverflow = (p: string) => {
-    if (p.length > 0 && !overflowPaths.includes(p) && overflowPaths.length < MAX_OVERFLOW_PATHS) {
-      overflowPaths.push(p);
-    }
-  };
+  const skippedPaths: string[] = [];
   let usedBytes = 0;
 
   for (const candidate of candidates) {
@@ -177,11 +164,15 @@ export function buildKeyedInstructions(
       result[candidate.key] = defineInstructions({ content: candidate.content, role: "user" });
       usedBytes += entryBytes;
     } else {
-      for (const p of candidate.paths) pushOverflow(p);
+      skippedPaths.push(...candidate.paths);
     }
   }
 
-  for (const p of preOverflow) pushOverflow(p);
+  const overflowPaths = appendOverflowPaths(
+    [],
+    [...skippedPaths, ...preOverflow],
+    MAX_OVERFLOW_PATHS,
+  );
 
   if (overflowPaths.length > 0) {
     result.overflow = defineInstructions({

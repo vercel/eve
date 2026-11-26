@@ -21,7 +21,6 @@ import {
   type RecordedScope,
 } from "../../extension/lib/repo-state.ts";
 import {
-  computeMaxOutputBytes,
   isValidRelativePath,
   isValidRootPath,
   matchesRepositoryRule,
@@ -317,7 +316,6 @@ test("buildKeyedInstructions enforces maxTotalBytes and appends an overflow dire
     }),
     ruleFiles: [],
     ruleInstructions: [],
-    enteredAtHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   };
   const repoB: RecordedRepository = {
     ...makeRepo({
@@ -335,7 +333,6 @@ test("buildKeyedInstructions enforces maxTotalBytes and appends an overflow dire
     }),
     ruleFiles: [],
     ruleInstructions: [],
-    enteredAtHead: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   };
   const scopeA: RecordedScope = {
     dir: "/workspace/repoA/sub",
@@ -382,6 +379,24 @@ test("buildKeyedInstructions enforces maxTotalBytes and appends an overflow dire
   assert.ok(overflowOnly !== null);
   assert.deepEqual(Object.keys(overflowOnly), ["overflow"]);
   assert.match(overflowOnly.overflow?.content ?? "", /\/workspace\/repo-33/u);
+
+  const workspaceOnly = buildKeyedInstructions({
+    workspaceInstruction: [
+      {
+        path: "/workspace/AGENTS.md",
+        relativePath: "AGENTS.md",
+        source: "worktree",
+        content: "Run pnpm test.",
+        truncated: false,
+      },
+    ],
+    byRoot: {},
+    scopes: {},
+  });
+  assert.equal(
+    workspaceOnly?.workspace?.content,
+    'Project-specific instructions and guidelines:\n\n<project_instructions path="/workspace/AGENTS.md">\nRun pnpm test.\n</project_instructions>',
+  );
 });
 
 test("runBoundedSandboxCommand kills oversized spawn streams early and bounds buffered bytes", async () => {
@@ -421,10 +436,6 @@ test("runBoundedSandboxCommand kills oversized spawn streams early and bounds bu
   assert.equal(killCalls, 1);
   assert.ok(Buffer.byteLength(result.stdout, "utf8") <= maxOutputBytes);
   assert.ok(pulledChunks <= 4, `expected early stop, pulled ${pulledChunks} chunks`);
-
-  assert.equal(computeMaxOutputBytes(256_000), 643_072);
-  assert.equal(computeMaxOutputBytes(128), 524_288);
-  assert.equal(computeMaxOutputBytes(10_000_000), 4_194_304);
 
   const runOnly: RepositorySandbox = {
     resolvePath: (p) => p,

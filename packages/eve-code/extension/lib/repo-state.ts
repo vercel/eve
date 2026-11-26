@@ -1,6 +1,7 @@
 import { defineState } from "eve/context";
 
 import type { RepositoryInstructionFile } from "../extension.ts";
+import { isPathWithinRoot } from "./repositories.ts";
 
 export const MAX_CHECKED_DIRS = 500;
 
@@ -14,7 +15,6 @@ export interface RecordedRepository {
   readonly instructions: readonly RepositoryInstructionFile[];
   readonly ruleFiles: readonly RepositoryInstructionFile[];
   readonly ruleInstructions: readonly string[];
-  readonly enteredAtHead: string | null;
 }
 
 export interface RecordedScope {
@@ -34,7 +34,6 @@ export interface RepositorySessionState {
   readonly checkedDirs: readonly string[];
   readonly overflowPaths: readonly string[];
   readonly syncedTurnId: string | null;
-  readonly revision: number;
 }
 
 export function initialRepositorySessionState(): RepositorySessionState {
@@ -48,7 +47,6 @@ export function initialRepositorySessionState(): RepositorySessionState {
     checkedDirs: [],
     overflowPaths: [],
     syncedTurnId: null,
-    revision: 0,
   };
 }
 
@@ -56,23 +54,6 @@ export const repoState = defineState<RepositorySessionState>(
   "repositories",
   initialRepositorySessionState,
 );
-
-export function appendOverflowPaths(
-  existing: readonly string[],
-  added: readonly string[],
-  maxPaths: number,
-): readonly string[] {
-  if (added.length === 0 && existing.length <= maxPaths) return existing;
-  const result: string[] = [];
-  const seen = new Set<string>();
-  for (const p of [...existing, ...added]) {
-    if (result.length >= maxPaths) break;
-    if (p.length === 0 || seen.has(p)) continue;
-    seen.add(p);
-    result.push(p);
-  }
-  return result;
-}
 
 export function appendCheckedDirs(
   existing: readonly string[],
@@ -92,6 +73,5 @@ export function invalidateRepoCheckedDirs(
   existing: readonly string[],
   repoRoot: string,
 ): readonly string[] {
-  const prefix = repoRoot === "/" ? "/" : `${repoRoot}/`;
-  return existing.filter((dir) => dir !== repoRoot && !dir.startsWith(prefix));
+  return existing.filter((dir) => !isPathWithinRoot(dir, repoRoot));
 }

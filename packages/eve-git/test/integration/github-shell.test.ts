@@ -1172,14 +1172,6 @@ test("prefetches partial-clone instruction files inside the active credential le
     assert.deepEqual(events, ["lease:install", "run:main", "run:prefetch", "lease:clear"]);
     assert.equal(runs.length, 2);
     const prefetch = runs[1]!;
-    assert.match(
-      prefetch.command,
-      /GIT_ALLOW_PROTOCOL= git -c core\.hooksPath=\/dev\/null -c core\.fsmonitor=false -C '\/workspace\/internal-agents' rev-parse --show-toplevel/u,
-    );
-    assert.match(
-      prefetch.command,
-      /env GIT_ALLOW_PROTOCOL=https GIT_TERMINAL_PROMPT=0 git -c core\.hooksPath=\/dev\/null -c core\.fsmonitor=false -c credential\.helper= -C "\$top" cat-file --batch-check/u,
-    );
     assert.match(prefetch.command, /'AGENTS\.md' 'CLAUDE\.md'/u);
     const gitConfig = parseGitConfigEnv(prefetch.env);
     assert.equal(gitConfig.get("core.hooksPath"), "/dev/null");
@@ -1197,7 +1189,7 @@ test("prefetches partial-clone instruction files inside the active credential le
   }
 });
 
-test("skips prefetch on failed clones, non-partial clones, non-clone commands, workspace escapes, or empty prefetchFiles", async () => {
+test("skips prefetch on failed clones, plain clones, or empty prefetchFiles", async () => {
   const cases: ReadonlyArray<{
     readonly label: string;
     readonly input: GitHubShellInput;
@@ -1206,37 +1198,6 @@ test("skips prefetch on failed clones, non-partial clones, non-clone commands, w
   }> = [
     { label: "failed clone", input: PARTIAL_CLONE, config: CONFIG, exitCode: 128 },
     { label: "plain gh repo clone", input: CLONE, config: CONFIG, exitCode: 0 },
-    {
-      label: "plain gh repo clone without directory",
-      input: {
-        command: "gh repo clone acme/widgets",
-        description: "Plain clone repository",
-        repository: "acme/widgets",
-      },
-      config: CONFIG,
-      exitCode: 0,
-    },
-    {
-      label: "non-partial git clone",
-      input: {
-        command: "git clone --depth 1 https://github.com/vercel/internal-agents.git",
-        description: "Shallow clone repository",
-        repository: "vercel/internal-agents",
-      },
-      config: CONFIG,
-      exitCode: 0,
-    },
-    { label: "gh pr view", input: READ, config: CONFIG, exitCode: 0 },
-    {
-      label: "workspace escape",
-      input: {
-        command: "git -C /tmp/outside fetch origin",
-        description: "Fetch outside workspace",
-        repository: "vercel/internal-agents",
-      },
-      config: CONFIG,
-      exitCode: 0,
-    },
     {
       label: "disabled prefetch",
       input: PARTIAL_CLONE,

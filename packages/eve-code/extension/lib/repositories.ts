@@ -112,6 +112,29 @@ export function isValidRootPath(value: string): boolean {
   return value === "." || isValidRelativePath(value);
 }
 
+export function isPathWithinRoot(targetPath: string, root: string): boolean {
+  return root === "/"
+    ? targetPath.startsWith("/")
+    : targetPath === root || targetPath.startsWith(`${root}/`);
+}
+
+export function appendOverflowPaths(
+  existing: readonly string[],
+  added: readonly string[],
+  maxPaths: number = MAX_OVERFLOW_PATHS,
+): readonly string[] {
+  if (added.length === 0 && existing.length <= maxPaths) return existing;
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const p of [...existing, ...added]) {
+    if (result.length >= maxPaths) break;
+    if (p.length === 0 || seen.has(p)) continue;
+    seen.add(p);
+    result.push(p);
+  }
+  return result;
+}
+
 function validatePositiveInt(value: number | undefined, name: string, fallback: number): number {
   if (value === undefined) return fallback;
   if (!Number.isInteger(value) || value <= 0) {
@@ -120,7 +143,7 @@ function validatePositiveInt(value: number | undefined, name: string, fallback: 
   return value;
 }
 
-export function computeMaxOutputBytes(maxTotalBytes: number): number {
+function computeMaxOutputBytes(maxTotalBytes: number): number {
   return Math.min(Math.max(maxTotalBytes * 2 + 131_072, 524_288), 4_194_304);
 }
 
@@ -247,14 +270,6 @@ function validateInstructionSpecs(
     }
     return candidates;
   });
-}
-
-function normalizeSpecs(
-  specs: readonly RepositoryInstructionSpec[],
-): readonly (readonly string[])[] {
-  return specs
-    .map((spec) => (typeof spec === "string" ? [spec] : [...spec]).filter(isValidRelativePath))
-    .filter((valid) => valid.length > 0);
 }
 
 export function shellQuote(value: string): string {
@@ -498,6 +513,15 @@ ${boundary}_CFG
 }`;
 }
 
+function workspaceHeaderShell(workspacePath: string): string {
+  const quoted = shellQuote(workspacePath);
+  return [
+    `WS=$(canon_path ${quoted} 2>/dev/null || printf '%s' ${quoted})`,
+    `printf '%s WORKSPACE %s\\n' "$B" "$WS"`,
+    `[ -n "\${HOME:-}" ] && [ -d "$HOME" ] && printf '%s HOME %s\\n' "$B" "$(canon_path "$HOME" 2>/dev/null || printf '%s' "$HOME")"`,
+  ].join("\n");
+}
+
 function emitSpecsShell(
   specs: readonly (readonly string[])[],
   callForCandidate: (candExpr: string) => string,
@@ -528,13 +552,7 @@ function parseProtocolOutput(stdout: string, boundary: string, maxFileBytes: num
   const seenRepos = new Set<string>();
   const files: { readonly scope: string; readonly file: RepositoryInstructionFile }[] = [];
   const checkedDirs: string[] = [];
-  const overflowPaths: string[] = [];
-
-  const pushOverflow = (p: string) => {
-    if (p.length > 0 && !overflowPaths.includes(p) && overflowPaths.length < MAX_OVERFLOW_PATHS) {
-      overflowPaths.push(p);
-    }
-  };
+  const rawOverflowPaths: string[] = [];
 
   const prefix = `${boundary} `;
   let cursor = 0;
@@ -557,7 +575,7 @@ function parseProtocolOutput(stdout: string, boundary: string, maxFileBytes: num
       const dir = rest.slice(12);
       if (dir.length > 0 && !checkedDirs.includes(dir)) checkedDirs.push(dir);
     } else if (rest.startsWith("REPO_OVERFLOW ") || rest.startsWith("FILE_OVERFLOW ")) {
-      pushOverflow(rest.slice(14));
+      rawOverflowPaths.push(rest.slice(14));
     } else if (rest === "REPO_START") {
       const fields: Record<string, string> = {};
       let ended = false;
@@ -572,7 +590,7 @@ function parseProtocolOutput(stdout: string, boundary: string, maxFileBytes: num
       const root = fields.ROOT ?? "";
       if (ended && root.length > 0 && !seenRepos.has(root)) {
         seenRepos.add(root);
-        if (repos.length >= MAX_DISCOVERED_REPOSITORIES) pushOverflow(root);
+        if (repos.length >= MAX_DISCOVERED_REPOSITORIES) rawOverflowPaths.push(root);
         else {
           const remote = sanitizeRemoteUrl(fields.REMOTE ?? "") || null;
           repos.push({
@@ -615,7 +633,7 @@ function parseProtocolOutput(stdout: string, boundary: string, maxFileBytes: num
         rawSource === "git" || rawSource === "unavailable" ? rawSource : "worktree";
       if (path.length === 0 || relativePath.length === 0) continue;
       if (!complete) {
-        pushOverflow(path);
+        rawOverflowPaths.push(path);
       } else if (source === "unavailable") {
         files.push({
           scope: fields.SCOPE ?? "",
@@ -631,7 +649,15 @@ function parseProtocolOutput(stdout: string, boundary: string, maxFileBytes: num
     }
   }
 
-  return { workspaceRoot, homeDir, enclosingRepoRoot, repos, files, checkedDirs, overflowPaths };
+  return {
+    workspaceRoot,
+    homeDir,
+    enclosingRepoRoot,
+    repos,
+    files,
+    checkedDirs,
+    overflowPaths: appendOverflowPaths([], rawOverflowPaths, MAX_OVERFLOW_PATHS),
+  };
 }
 
 function attachInstructions(
@@ -700,9 +726,7 @@ export async function discoverWorkspace(
     sandbox,
     (boundary) =>
       [
-        `WS=$(canon_path ${shellQuote(workspacePath)} 2>/dev/null || printf '%s' ${shellQuote(workspacePath)})`,
-        `printf '%s WORKSPACE %s\\n' "$B" "$WS"`,
-        `[ -n "\${HOME:-}" ] && [ -d "$HOME" ] && printf '%s HOME %s\\n' "$B" "$(canon_path "$HOME" 2>/dev/null || printf '%s' "$HOME")"`,
+        workspaceHeaderShell(workspacePath),
         `SEEN="$NL"`,
         `_cand_list=$( {`,
         ...(options.existingRoots ?? []).map(
@@ -757,11 +781,7 @@ export async function discoverWorkspace(
 
   const repositories = attachInstructions(parsed.repos, parsed.files);
   const workspaceRoot = parsed.workspaceRoot ?? workspacePath;
-  const workspaceCovered = repositories.some((repo) =>
-    repo.root === "/"
-      ? workspaceRoot.startsWith("/")
-      : workspaceRoot === repo.root || workspaceRoot.startsWith(`${repo.root}/`),
-  );
+  const workspaceCovered = repositories.some((repo) => isPathWithinRoot(workspaceRoot, repo.root));
   return {
     workspaceRoot,
     homeDir: parsed.homeDir,
@@ -836,7 +856,7 @@ export async function readRepositorySpecFiles(
   readonly files: readonly RepositoryInstructionFile[];
   readonly overflowPaths: readonly string[];
 }> {
-  const normalized = normalizeSpecs(specs);
+  const normalized = validateInstructionSpecs(specs);
   if (normalized.length === 0) return { files: [], overflowPaths: [] };
   const maxFileBytes = validatePositiveInt(
     options.maxFileBytes,
@@ -873,12 +893,11 @@ export async function readRepositorySpecFiles(
 export function computeAncestorDirs(rootDir: string, targetDir: string): readonly string[] {
   const root = posix.resolve("/", rootDir);
   const target = posix.resolve("/", targetDir);
-  if (target === root) return [];
-  const prefix = root === "/" ? "/" : `${root}/`;
-  if (!target.startsWith(prefix)) return [];
+  if (target === root || !isPathWithinRoot(target, root)) return [];
+  const prefixLen = root === "/" ? 1 : root.length + 1;
   const dirs: string[] = [];
   let current = root;
-  for (const part of target.slice(prefix.length).split("/").filter(Boolean)) {
+  for (const part of target.slice(prefixLen).split("/").filter(Boolean)) {
     current = current === "/" ? `/${part}` : `${current}/${part}`;
     dirs.push(current);
   }
@@ -898,7 +917,7 @@ export async function readScopedDirectoryInstructions(
     readonly loadScoped?: boolean;
   },
 ): Promise<ScopedProbeResult> {
-  const specs = normalizeSpecs(options.instructions ?? DEFAULT_REPOSITORY_INSTRUCTIONS);
+  const specs = validateInstructionSpecs(options.instructions);
   const maxFileBytes = validatePositiveInt(
     options.maxFileBytes,
     "maxFileBytes",
@@ -925,9 +944,7 @@ export async function readScopedDirectoryInstructions(
     sandbox,
     (boundary) =>
       [
-        `WS=$(canon_path ${shellQuote(workspacePath)} 2>/dev/null || printf '%s' ${shellQuote(workspacePath)})`,
-        `printf '%s WORKSPACE %s\\n' "$B" "$WS"`,
-        `[ -n "\${HOME:-}" ] && [ -d "$HOME" ] && printf '%s HOME %s\\n' "$B" "$(canon_path "$HOME" 2>/dev/null || printf '%s' "$HOME")"`,
+        workspaceHeaderShell(workspacePath),
         `_target=${shellResolveTargetExpr(sandbox, options.targetPath)}`,
         `if [ -d "$_target" ]; then _tdir=$(canon_path "$_target" 2>/dev/null || true); else _tdir=$(canon_path "$(dirname -- "$_target")" 2>/dev/null || true); fi`,
         `[ -n "$_tdir" ] || exit 0`,

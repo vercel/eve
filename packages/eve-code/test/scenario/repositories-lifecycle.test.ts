@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
-import { execFile, spawn as spawnProcess } from "node:child_process";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
-import { Readable } from "node:stream";
-import { promisify } from "node:util";
+import { join } from "node:path";
 import test from "node:test";
 
 import type { SandboxSession } from "eve/sandbox";
@@ -31,24 +28,13 @@ import { registerDefinitionSource } from "../../../eve/dist/src/internal/authore
 import { createModelMetadata } from "../../../eve/dist/src/internal/model-catalog.js";
 import { SessionAgentKey } from "../../../eve/dist/src/runtime/sessions/runtime-context-keys.js";
 import type { SandboxAccess } from "../../../eve/dist/src/sandbox/state.js";
+import { createLocalSandbox, git, initRepo } from "./local-sandbox.ts";
 
 (globalThis as Record<symbol, unknown>)[Symbol.for("eve.ext-config-scope")] =
   "eve-code-repositories-lifecycle-test";
 const { default: extension } = await import("../../extension/extension.ts");
 const { default: repositoriesHook } = await import("../../extension/hooks/repositories.ts");
 const { default: projectInstructions } = await import("../../extension/instructions/project.ts");
-
-const execFileAsync = promisify(execFile);
-
-const GIT_ENV: NodeJS.ProcessEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "Eve Test",
-  GIT_AUTHOR_EMAIL: "eve@example.com",
-  GIT_COMMITTER_NAME: "Eve Test",
-  GIT_COMMITTER_EMAIL: "eve@example.com",
-  GIT_CONFIG_NOSYSTEM: "1",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-};
 
 const MODEL_METADATA = createModelMetadata({
   catalog: {
@@ -65,93 +51,13 @@ const MODEL_METADATA = createModelMetadata({
   fetchedAt: "2026-01-01T00:00:00.000Z",
 });
 
-async function git(cwd: string, args: readonly string[]): Promise<string> {
-  const { stdout } = await execFileAsync("git", [...args], { cwd, env: GIT_ENV });
-  return stdout.trim();
-}
-
-async function initUpstreamRepo(dir: string, files: Readonly<Record<string, string>>) {
-  await mkdir(dir, { recursive: true });
-  await git(dir, ["init", "-b", "main"]);
-  for (const [rel, content] of Object.entries(files)) {
-    const full = join(dir, rel);
-    await mkdir(join(full, ".."), { recursive: true });
-    await writeFile(full, content);
-  }
-  await git(dir, ["add", "."]);
-  await git(dir, ["commit", "-m", "init"]);
-}
-
 function createRealSandboxAccess(workspaceDir: string) {
-  const commands: string[] = [];
+  const { sandbox, commands } = createLocalSandbox(workspaceDir);
   let openCount = 0;
   let started = false;
 
   const session: SandboxSession = {
-    resolvePath: (path) => (isAbsolute(path) ? path : join(workspaceDir, path)),
-    async run({ command, workingDirectory }) {
-      commands.push(command);
-      const cwd =
-        workingDirectory === undefined
-          ? workspaceDir
-          : isAbsolute(workingDirectory)
-            ? workingDirectory
-            : join(workspaceDir, workingDirectory);
-      try {
-        const { stdout, stderr } = await execFileAsync("bash", ["-c", command], {
-          cwd,
-          env: GIT_ENV,
-        });
-        return { exitCode: 0, stdout, stderr };
-      } catch (error) {
-        const err = error as { code?: number; stdout?: string; stderr?: string };
-        return {
-          exitCode: typeof err.code === "number" ? err.code : 1,
-          stdout: err.stdout ?? "",
-          stderr: err.stderr ?? "",
-        };
-      }
-    },
-    async spawn({ command, workingDirectory, env }) {
-      commands.push(command);
-      const cwd =
-        workingDirectory === undefined
-          ? workspaceDir
-          : isAbsolute(workingDirectory)
-            ? workingDirectory
-            : join(workspaceDir, workingDirectory);
-      const child = spawnProcess("bash", ["-c", command], {
-        cwd,
-        env: { ...GIT_ENV, ...env },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      const exitPromise = new Promise<{ exitCode: number }>((resolve) => {
-        let settled = false;
-        const finish = (code: number) => {
-          if (settled) return;
-          settled = true;
-          resolve({ exitCode: code });
-        };
-        child.once("error", () => finish(1));
-        child.once("close", (code) => finish(typeof code === "number" ? code : 1));
-      });
-      return {
-        ...(child.pid !== undefined && { pid: child.pid }),
-        stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-        stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
-        wait: () => exitPromise,
-        async kill() {
-          if (child.exitCode === null && child.signalCode === null) {
-            try {
-              child.kill("SIGKILL");
-            } catch {}
-          }
-          child.stdout.destroy();
-          child.stderr.destroy();
-          await exitPromise;
-        },
-      };
-    },
+    ...sandbox,
     readFile: async () => null,
     readBinaryFile: async () => null,
     readTextFile: async () => null,
@@ -379,13 +285,13 @@ test("post-clone sparse repo A, repo B deduplication, scoped AGENTS.md caching, 
     const upstreamB = join(root, "upstream-b");
     const workspace = join(root, "workspace");
     await mkdir(workspace, { recursive: true });
-    await initUpstreamRepo(upstreamA, {
+    await initRepo(upstreamA, {
       "AGENTS.md": "Repo A root rules from HEAD.\n",
       "packages/sub/AGENTS.md": "Repo A subpackage rules.\n",
       "packages/sub/index.ts": "export const a = 1;\n",
       "packages/sub/other.ts": "export const b = 2;\n",
     });
-    await initUpstreamRepo(upstreamB, {
+    await initRepo(upstreamB, {
       "AGENTS.md": "Repo B root rules.\n",
       "src/main.ts": "export const main = true;\n",
     });
@@ -489,7 +395,7 @@ test("pre-seeded workspace runs onEnter once and injects instructions on Turn 1 
   const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-preseeded-")));
   try {
     const workspace = join(root, "workspace");
-    await initUpstreamRepo(workspace, {
+    await initRepo(workspace, {
       "AGENTS.md": "Pre-seeded workspace rules.\n",
       "CONTRIBUTING.md": "Contribution guidelines.\n",
     });
@@ -535,7 +441,7 @@ test("discoverOnStart on-sandbox-use stays idle on Turn 1 and non-sandbox tools,
   const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-lazy-")));
   try {
     const workspace = join(root, "workspace");
-    await initUpstreamRepo(workspace, { "AGENTS.md": "Lazy workspace rules.\n" });
+    await initRepo(workspace, { "AGENTS.md": "Lazy workspace rules.\n" });
     extension({ repositories: { discoverOnStart: "on-sandbox-use" } });
 
     const sandbox = createRealSandboxAccess(workspace);
@@ -577,7 +483,7 @@ test("HEAD change prunes deleted scopes, delete + re-clone re-runs onEnter, grep
     const upstream = join(root, "upstream");
     const workspace = join(root, "workspace");
     await mkdir(workspace, { recursive: true });
-    await initUpstreamRepo(upstream, {
+    await initRepo(upstream, {
       "AGENTS.md": "Root v1.\n",
       "MAIN_ONLY.md": "Main branch checklist.\n",
       "sub/AGENTS.md": "Sub v1.\n",
@@ -666,11 +572,11 @@ test("syncAfter, background bash guard, throwing rule isolation, read-only 0-RPC
     const upstreamB = join(root, "upstream-b");
     const workspace = join(root, "workspace");
     await mkdir(workspace, { recursive: true });
-    await initUpstreamRepo(upstreamA, {
+    await initRepo(upstreamA, {
       "AGENTS.md": "Repo A rules.\n",
       "RULE.md": `${"r".repeat(2500)}\n`,
     });
-    await initUpstreamRepo(upstreamB, { "AGENTS.md": "SyncAfter B rules.\n" });
+    await initRepo(upstreamB, { "AGENTS.md": "SyncAfter B rules.\n" });
 
     const syncTool = defineTool({
       description: "Custom workspace sync",

@@ -1,8 +1,8 @@
 import { call } from "eve/events";
-import { defineHook } from "eve/hooks";
+import { defineHook, type HookContext } from "eve/hooks";
 import type { RuntimeSandboxSession } from "eve/sandbox";
 
-import extension from "../extension.ts";
+import extension, { type RepositoryRuleContext } from "../extension.ts";
 import {
   classifySettledCall,
   hasUncheckedFileAncestors,
@@ -13,32 +13,40 @@ import {
 import { repoState } from "../lib/repo-state.ts";
 import { resolveRepositoriesConfig } from "../lib/repositories.ts";
 
+async function openSandbox(
+  ctx: Pick<HookContext, "getSandbox">,
+  create: boolean,
+): Promise<RuntimeSandboxSession | null> {
+  try {
+    return create ? await ctx.getSandbox() : await ctx.getSandbox({ create: false });
+  } catch {
+    return null;
+  }
+}
+
+function buildRuleContext(
+  sandbox: RuntimeSandboxSession,
+  ctx: Pick<HookContext, "session" | "channel" | "conversation">,
+  trigger: RepositoryRuleContext["trigger"],
+): RepositoryRuleContext {
+  return {
+    sandbox,
+    session: ctx.session,
+    channel: ctx.channel,
+    trigger,
+    ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
+  };
+}
+
 export default defineHook({
   events: {
     async "turn.started"(_event, ctx) {
       const resolved = resolveRepositoriesConfig(extension.config.repositories);
-      let sandbox: RuntimeSandboxSession | null;
-      try {
-        sandbox =
-          resolved.discoverOnStart === "on-sandbox-use"
-            ? await ctx.getSandbox({ create: false })
-            : await ctx.getSandbox();
-      } catch {
-        return;
-      }
+      const sandbox = await openSandbox(ctx, resolved.discoverOnStart !== "on-sandbox-use");
       if (sandbox === null) return;
-      await reconcileWorkspace(
-        sandbox,
-        resolved,
-        {
-          sandbox,
-          session: ctx.session,
-          channel: ctx.channel,
-          trigger: "turn.started",
-          ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
-        },
-        { turnId: ctx.turn?.id ?? null },
-      );
+      await reconcileWorkspace(sandbox, resolved, buildRuleContext(sandbox, ctx, "turn.started"), {
+        turnId: ctx.turn?.id ?? null,
+      });
     },
 
     async "call.settled"(event, ctx) {
@@ -67,21 +75,10 @@ export default defineHook({
         }
       }
 
-      let sandbox: RuntimeSandboxSession | null;
-      try {
-        sandbox = await ctx.getSandbox({ create: false });
-      } catch {
-        return;
-      }
+      const sandbox = await openSandbox(ctx, false);
       if (sandbox === null) return;
 
-      const ruleCtx = {
-        sandbox,
-        session: ctx.session,
-        channel: ctx.channel,
-        trigger: "call.settled" as const,
-        ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
-      };
+      const ruleCtx = buildRuleContext(sandbox, ctx, "call.settled");
 
       if (needsTurnSync || action.kind === "reconcile") {
         await reconcileWorkspace(sandbox, resolved, ruleCtx, {

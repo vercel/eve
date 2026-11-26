@@ -47,8 +47,6 @@ const GIT_CLONE_VALUE_FLAGS = new Set([
 
 const GH_REPO_CLONE_VALUE_FLAGS = new Set(["-u", "--upstream-remote-name"]);
 
-const WINDOWS_DRIVE_PATH = /^([A-Za-z]):([/\\].*)$/u;
-
 function hasControlCharOrBackslash(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
@@ -64,47 +62,10 @@ export function isValidPrefetchPath(value: string): boolean {
   return segments.every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
 }
 
-function normalizePath(value: string): string {
-  const match = WINDOWS_DRIVE_PATH.exec(value);
-  if (match) {
-    const drive = match[1]!;
-    const rest = match[2]!.replaceAll("\\", "/");
-    return `${drive}:${posix.resolve("/", rest)}`;
-  }
-  return posix.resolve("/", value);
-}
-
-function resolvePath(base: string, target: string): string {
-  if (WINDOWS_DRIVE_PATH.test(target)) {
-    return normalizePath(target);
-  }
-  const baseMatch = WINDOWS_DRIVE_PATH.exec(base);
-  if (baseMatch) {
-    const normalizedTarget = target.replaceAll("\\", "/");
-    if (normalizedTarget.startsWith("/")) {
-      return posix.resolve("/", normalizedTarget);
-    }
-    const drive = baseMatch[1]!;
-    const baseRest = baseMatch[2]!.replaceAll("\\", "/");
-    return `${drive}:${posix.resolve("/", baseRest, normalizedTarget)}`;
-  }
-  return posix.resolve("/", base, target);
-}
-
-function normalizeForComparison(value: string): string {
-  const normalized = normalizePath(value);
-  const match = WINDOWS_DRIVE_PATH.exec(normalized);
-  return match ? `${match[1]!.toUpperCase()}:${match[2]!}` : normalized;
-}
-
 function isWithinWorkspace(targetPath: string, workspaceRoot: string): boolean {
-  const normalizedWorkspace = normalizeForComparison(workspaceRoot);
-  const normalizedTarget = normalizeForComparison(targetPath);
-  if (normalizedWorkspace === "/") return normalizedTarget.startsWith("/");
-  const prefix = normalizedWorkspace.endsWith("/")
-    ? normalizedWorkspace
-    : `${normalizedWorkspace}/`;
-  return normalizedTarget === normalizedWorkspace || normalizedTarget.startsWith(prefix);
+  const root = posix.resolve("/", workspaceRoot);
+  const target = posix.resolve("/", targetPath);
+  return root === "/" || target === root || target.startsWith(`${root}/`);
 }
 
 export function resolvePrefetchTarget(
@@ -129,7 +90,7 @@ function resolveGitPrefetchTarget(
   workingDirectory: string,
   repository: string | undefined,
 ): string | null {
-  let baseDir = normalizePath(workingDirectory);
+  let baseDir = posix.resolve("/", workingDirectory);
   let index = 1;
   while (index < argv.length) {
     const arg = argv[index]!;
@@ -137,12 +98,12 @@ function resolveGitPrefetchTarget(
     if (!arg.startsWith("-")) break;
     if (arg === "-C") {
       if (index + 1 >= argv.length) return null;
-      baseDir = resolvePath(baseDir, argv[index + 1]!);
+      baseDir = posix.resolve("/", baseDir, argv[index + 1]!);
       index += 2;
       continue;
     }
     if (arg.startsWith("-C")) {
-      baseDir = resolvePath(baseDir, arg.slice(2));
+      baseDir = posix.resolve("/", baseDir, arg.slice(2));
       index += 1;
       continue;
     }
@@ -163,42 +124,11 @@ function resolveGitPrefetchTarget(
   return null;
 }
 
-function hasPartialCloneFilter(args: readonly string[]): boolean {
+function parseGitCloneArgs(args: readonly string[]): {
+  readonly isPartial: boolean;
+  readonly positionals: readonly string[];
+} {
   let isPartial = false;
-  let index = 0;
-  while (index < args.length) {
-    const arg = args[index]!;
-    if (arg === "--") break;
-    if (arg === "--filter") {
-      if (index + 1 < args.length) isPartial = true;
-      index += 2;
-      continue;
-    }
-    if (arg.startsWith("--filter=")) {
-      isPartial = arg.length > "--filter=".length;
-      index += 1;
-      continue;
-    }
-    if (arg === "--no-filter") {
-      isPartial = false;
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith("-")) {
-      index += GIT_CLONE_VALUE_FLAGS.has(arg) ? 2 : 1;
-      continue;
-    }
-    index += 1;
-  }
-  return isPartial;
-}
-
-function resolveGitCloneTarget(
-  args: readonly string[],
-  baseDir: string,
-  repository: string | undefined,
-): string | null {
-  if (!hasPartialCloneFilter(args)) return null;
   const positionals: string[] = [];
   let afterDoubleDash = false;
   let index = 0;
@@ -210,17 +140,54 @@ function resolveGitCloneTarget(
       continue;
     }
     if (!afterDoubleDash && arg.startsWith("-")) {
+      if (arg === "--filter") {
+        if (index + 1 < args.length) isPartial = true;
+        index += 2;
+        continue;
+      }
+      if (arg.startsWith("--filter=")) {
+        isPartial = arg.length > "--filter=".length;
+        index += 1;
+        continue;
+      }
+      if (arg === "--no-filter") {
+        isPartial = false;
+        index += 1;
+        continue;
+      }
       index += GIT_CLONE_VALUE_FLAGS.has(arg) ? 2 : 1;
       continue;
     }
     positionals.push(arg);
     index += 1;
   }
+  return { isPartial, positionals };
+}
+
+function hasPartialCloneFilter(args: readonly string[]): boolean {
+  return parseGitCloneArgs(args).isPartial;
+}
+
+function resolveCloneDestination(
+  baseDir: string,
+  positionals: readonly string[],
+  repository: string | undefined,
+): string | null {
   if (positionals[1]) {
-    return resolvePath(baseDir, positionals[1]);
+    return posix.resolve("/", baseDir, positionals[1]);
   }
   const repoName = repoNameFromSpec(positionals[0]) ?? repoNameFromSpec(repository);
-  return repoName ? resolvePath(baseDir, repoName) : null;
+  return repoName ? posix.resolve("/", baseDir, repoName) : null;
+}
+
+function resolveGitCloneTarget(
+  args: readonly string[],
+  baseDir: string,
+  repository: string | undefined,
+): string | null {
+  const { isPartial, positionals } = parseGitCloneArgs(args);
+  if (!isPartial) return null;
+  return resolveCloneDestination(baseDir, positionals, repository);
 }
 
 function resolveGhRepoCloneTarget(
@@ -247,11 +214,7 @@ function resolveGhRepoCloneTarget(
   if (gitFlagsStart === -1 || !hasPartialCloneFilter(argv.slice(gitFlagsStart))) {
     return null;
   }
-  if (positionals[1]) {
-    return resolvePath(workingDirectory, positionals[1]);
-  }
-  const repoName = repoNameFromSpec(positionals[0]) ?? repoNameFromSpec(repository);
-  return repoName ? resolvePath(workingDirectory, repoName) : null;
+  return resolveCloneDestination(workingDirectory, positionals, repository);
 }
 
 function repoNameFromSpec(spec: string | undefined): string | null {
