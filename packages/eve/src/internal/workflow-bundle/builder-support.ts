@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 
+import type { CompiledExtensionMount } from "#compiler/manifest.js";
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
 import {
@@ -11,6 +12,14 @@ import {
   stringifyNitroDataImportSpecifier,
 } from "#internal/application/import-specifier.js";
 import { resolvePackageRoot, resolveWorkflowModulePath } from "#internal/application/package.js";
+import {
+  extensionModuleType,
+  parseExtensionMountId,
+  resolveExtensionMountForId,
+  tagExtensionMountId,
+  type WorkflowExtensionMount,
+} from "#internal/bundler/extension-mount-plugin.js";
+import { stripUnusedNodeEsmCompatBanner } from "#internal/node-esm-compat-banner.js";
 import {
   applyWorkflowTransform,
   getImportPath,
@@ -26,6 +35,8 @@ export interface AuthoredWorkflowModules {
 
 export interface WorkflowBundleBuilderOptions {
   readonly authoredWorkflowModules?: AuthoredWorkflowModules;
+  readonly extensionMounts?: readonly CompiledExtensionMount[];
+  readonly extensionOverridePaths?: ReadonlyMap<string, string>;
   agentName: string;
   appRoot: string;
   compiledArtifactsBootstrapPath: string;
@@ -147,6 +158,11 @@ export async function collectWorkflowInputFiles(root: string): Promise<string[]>
 }
 
 export function createWorkflowImport(filePath: string, workingDir: string): string {
+  const parsed = parseExtensionMountId(filePath);
+  if (parsed.mountId !== undefined) {
+    return `import ${JSON.stringify(tagExtensionMountId(parsed.filePath, parsed.mountId))};`;
+  }
+
   const { importPath, isPackage } = getImportPath(filePath, workingDir);
 
   if (isPackage) {
@@ -198,6 +214,13 @@ export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRol
           `Workflow bundle cannot import "${source}"${via}: the runtime API is not available ` +
             `inside a workflow body. Call it from a "use step" function and await that step from the body.`,
         );
+      }
+
+      if (source === "eve/extension") {
+        return resolveFirstExistingPath([
+          join(workingDir, "src", "public", "extension", "index.ts"),
+          join(workingDir, "dist", "src", "public", "extension", "index.js"),
+        ]);
       }
 
       if (
@@ -263,6 +286,7 @@ export function createEvePackageImportsPlugin(
 }
 
 export function createWorkflowTransformPlugin(input: {
+  extensionMounts?: readonly WorkflowExtensionMount[];
   manifest: WorkflowManifest;
   mode?: "step" | "workflow";
   projectRoot: string;
@@ -270,37 +294,67 @@ export function createWorkflowTransformPlugin(input: {
   workingDir: string;
 }): WorkflowRolldownPlugin {
   const sideEffectFiles = new Set(
-    input.sideEffectFiles?.map((filePath) => filePath.replaceAll("\\", "/")) ?? [],
+    input.sideEffectFiles?.map((filePath) => normalizeWorkflowModuleKey(filePath)) ?? [],
   );
 
   return {
     name: "eve-workflow-transform",
     async load(id: string) {
-      if (!isJavaScriptLikePath(id)) {
+      if (id.startsWith("\0")) {
+        return undefined;
+      }
+      const { filePath, mountId } = parseExtensionMountId(id);
+      if (!isJavaScriptLikePath(filePath)) {
         return undefined;
       }
 
-      const code = await readFile(id, "utf8");
-      const relativeFilepath = createManifestRelativeFilepath(input.workingDir, id);
+      const code = await readFile(filePath, "utf8");
+      const relativeFilepath = createManifestRelativeFilepath(input.workingDir, filePath);
+      const extensionMount = resolveExtensionMountForId(id, input.extensionMounts);
+      const mode = input.mode ?? "workflow";
       const transformed = await applyWorkflowTransform(
         relativeFilepath,
         code
           .replace(/require\(\s*(['"])server-only\1\s*\)/g, "void 0")
           .replace(/require\(\s*(['"])client-only\1\s*\)/g, "void 0"),
-        input.mode ?? "workflow",
-        id,
+        mode,
+        filePath,
         input.projectRoot,
+        undefined,
+        extensionMount,
       );
 
       mergeWorkflowManifest(input.manifest, transformed.workflowManifest);
 
-      return {
-        code: transformed.code,
+      const transformedCode =
+        mode === "workflow"
+          ? await stripUnusedNodeEsmCompatBanner(filePath, transformed.code)
+          : transformed.code;
+
+      const result: {
+        code: string;
+        map: null;
+        moduleSideEffects?: true;
+        moduleType?: ReturnType<typeof extensionModuleType>;
+      } = {
+        code: transformedCode,
         map: null,
-        moduleSideEffects: sideEffectFiles.has(id.replaceAll("\\", "/")) || undefined,
       };
+      if (sideEffectFiles.has(normalizeWorkflowModuleKey(id))) {
+        result.moduleSideEffects = true;
+      }
+      if (mountId !== undefined) {
+        result.moduleType = extensionModuleType(filePath);
+      }
+      return result;
     },
   };
+}
+
+function normalizeWorkflowModuleKey(id: string): string {
+  const { filePath, mountId } = parseExtensionMountId(id);
+  const normalized = filePath.replaceAll("\\", "/");
+  return mountId === undefined ? normalized : tagExtensionMountId(normalized, mountId);
 }
 
 export function createWorkflowNodeBuiltinGuardPlugin(): WorkflowRolldownPlugin {

@@ -83,6 +83,8 @@ If no configuration is needed, export `defineExtension()` and let agents re-expo
 
 `defineState` keys belong to the mount path and state name, so two mounts of the same package don't share state; see [Mount it](#mount-it).
 
+Tools under `extension/tools/` and `extension/subagents/<id>/tools/` can also use [`defineWorkflowTool`](/docs/tools/workflows) (`execute`, `task`, and `serve`) with `"use workflow"`, and helpers under `extension/lib/` can use `"use step"`. Workflow IDs, step IDs, and `extension.config` stay isolated per mount. Because `"use workflow"` bodies replay inside a sandbox without `process.env` or Node.js APIs, read `extension.config` inside `"use step"` helpers whenever mounts configure values from `process.env` or Node.js APIs.
+
 ### Add a subagent
 
 Author a subagent under `extension/subagents/<id>/` with the same files as an agent's [declared subagent](/docs/subagents). Mounting the extension as `crm` exposes `extension/subagents/reviewer/` as `crm__reviewer`. The subagent's own tools, connections, skills, hooks, instructions, sandbox, and nested subagents stay inside it and keep their path-derived names. The subagent uses the extension's mount path for its state keys, but keeps its own state.

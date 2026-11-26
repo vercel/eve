@@ -62,6 +62,8 @@ export async function createHostNitro(spec: HostSpec): Promise<Nitro> {
     appRoot: locations.appRoot,
     authoredWorkflowModules: locations.compiledArtifacts.authoredWorkflowModules,
     compiledArtifactsBootstrapPath: locations.compiledArtifacts.bootstrapPath,
+    extensionMounts: spec.extensionMounts,
+    extensionOverridePaths: spec.extensionOverridePaths,
     outDir: locations.workflowBuildDir,
     inlineSourcemap: spec.development,
     rootDir: resolvePackageRoot(),
@@ -173,7 +175,7 @@ function toNitroConfig(
     logLevel: spec.development ? 1 : undefined,
     logging: spec.development ? undefined : { compressedSizes: false },
     modules: instrumentationEntry ? [instrumentationEntry.module] : [],
-    noExternals: createHostNoExternals(built.workflowArtifacts.stepTargets),
+    noExternals: createHostNoExternals(built.workflowArtifacts.stepTargets, spec.extensionMounts),
     output: { dir: locations.outputDir },
     plugins: [
       EVE_RUNTIME_PLUGIN_ID,

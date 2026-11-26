@@ -4,7 +4,10 @@ import {
   mayContainWorkflowDirective,
   type WorkflowDirective,
 } from "#internal/workflow-bundle/workflow-directive-ast.js";
-import { parseWorkflowSourceAst } from "#internal/workflow-bundle/workflow-source-ast.js";
+import {
+  collectAstReferencedIdentifiers,
+  parseWorkflowSourceAst,
+} from "#internal/workflow-bundle/workflow-source-ast.js";
 
 import type { WorkflowManifest } from "./workflow-builders.js";
 
@@ -37,11 +40,13 @@ type AstNode = {
   readonly async?: boolean;
   readonly body?: readonly AstNode[] | { readonly body?: readonly AstNode[] };
   readonly callee?: AstNode | null;
+  readonly computed?: boolean;
   readonly declaration?: AstNode | null;
   readonly declarations?: readonly AstNode[];
   readonly directive?: string;
   readonly end?: number;
-  readonly exported?: { readonly name?: string } | null;
+  readonly exportKind?: string;
+  readonly exported?: { readonly name?: string; readonly value?: unknown } | null;
   readonly expression?: AstNode | null;
   readonly expressions?: readonly AstNode[];
   readonly id?: { readonly name?: string } | null;
@@ -196,7 +201,10 @@ export async function transformWorkflowDirectives(input: {
     return { code: `${prefix}\n${proxies}`, workflowManifest: manifest };
   }
   if (input.mode === "workflow" && input.authored === true) {
-    replacements.push(...removeEveDefinerDefaultExport(ast));
+    const replacedStepStarts = new Set(
+      functions.filter((fn) => fn.directive === "use step").map((fn) => fn.rangeStart),
+    );
+    replacements.push(...removeEveDefinerExports(ast, replacedStepStarts));
   }
   const replacedSource = applySourceReplacements(input.source, replacements);
   const transformedSource =
@@ -289,17 +297,7 @@ function collectLocalNamesReExportedAtModuleLevel(ast: AstProgram): Set<string> 
   const result = new Set<string>();
 
   for (const node of ast.body ?? []) {
-    if (node.type !== "ExportNamedDeclaration") {
-      continue;
-    }
-
-    if (node.source !== undefined && node.source !== null) {
-      continue;
-    }
-
-    if (node.declaration !== undefined && node.declaration !== null) {
-      continue;
-    }
+    if (!isLocalReExportDeclaration(node)) continue;
 
     for (const specifier of node.specifiers ?? []) {
       const localName = specifier.local?.name;
@@ -390,31 +388,159 @@ function applySourceReplacements(
   return result + source.slice(cursor);
 }
 
-function removeEveDefinerDefaultExport(
+const NON_DEFINER_EVE_SPECIFIERS = new Set([
+  "eve/experimental/workflow",
+  "eve/extension",
+  "eve/workflow",
+  "eve/workflow/api",
+]);
+
+function unwrapTypeExpression(node: AstNode | null | undefined): AstNode | null | undefined {
+  let current = node;
+  while (
+    current !== null &&
+    current !== undefined &&
+    (current.type === "TSAsExpression" ||
+      current.type === "TSSatisfiesExpression" ||
+      current.type === "TSNonNullExpression" ||
+      current.type === "TSTypeAssertion" ||
+      current.type === "ParenthesizedExpression")
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function isEveDefinerCall(
+  expr: AstNode | null | undefined,
+  eveBindings: ReadonlySet<string>,
+): boolean {
+  const call = unwrapTypeExpression(expr);
+  if (call?.type !== "CallExpression") return false;
+  const callee = call.callee;
+  const binding = callee?.type === "MemberExpression" ? callee.object : callee;
+  return binding?.type === "Identifier" && eveBindings.has(binding.name ?? "");
+}
+
+function isLocalReExportDeclaration(node: AstNode): boolean {
+  return (
+    node.type === "ExportNamedDeclaration" &&
+    node.exportKind !== "type" &&
+    (node.declaration === undefined || node.declaration === null) &&
+    (node.source === undefined || node.source === null)
+  );
+}
+
+function removeEveDefinerExports(
   ast: AstProgram,
+  replacedStepStarts: ReadonlySet<number>,
 ): { end: number; start: number; text: string }[] {
   const eveBindings = new Set<string>();
 
   for (const node of ast.body ?? []) {
-    if (node.type !== "ImportDeclaration" || node.importKind === "type") continue;
+    if (node.type !== "ImportDeclaration") continue;
     const source = node.source?.value;
-    if (typeof source !== "string" || !/^eve(?:\/|$)/.test(source)) continue;
-    for (const specifier of node.specifiers ?? []) {
-      if (specifier.importKind === "type") continue;
-      const name = specifier.local?.name;
-      if (name !== undefined) eveBindings.add(name);
+    if (
+      typeof source !== "string" ||
+      !/^eve(?:\/|$)/.test(source) ||
+      NON_DEFINER_EVE_SPECIFIERS.has(source)
+    ) {
+      continue;
+    }
+    for (const name of readValueImportBindings(node)) eveBindings.add(name);
+  }
+
+  if (eveBindings.size === 0) return [];
+
+  const removedNodes = new Set<AstNode>();
+  const removedNames = new Set<string>();
+  const candidates = new Map<AstNode, { readonly init: AstNode; readonly name: string }>();
+
+  for (const node of ast.body ?? []) {
+    if (node.start === undefined || node.end === undefined) continue;
+    if (node.type === "ExportDefaultDeclaration") {
+      if (isEveDefinerCall(node.declaration, eveBindings)) removedNodes.add(node);
+      continue;
+    }
+    const declaration = node.type === "ExportNamedDeclaration" ? node.declaration : node;
+    if (declaration?.type !== "VariableDeclaration" || declaration.declarations?.length !== 1) {
+      continue;
+    }
+    const declarator = declaration.declarations[0]!;
+    const name = declarator.id?.name;
+    if (
+      name !== undefined &&
+      declarator.init != null &&
+      isEveDefinerCall(declarator.init, eveBindings)
+    ) {
+      candidates.set(node, { init: declarator.init, name });
+    }
+  }
+
+  let changed = candidates.size > 0;
+  while (changed) {
+    changed = false;
+    const referenced = new Set<string>();
+    for (const node of ast.body ?? []) {
+      if (
+        removedNodes.has(node) ||
+        isLocalReExportDeclaration(node) ||
+        (node.start !== undefined && replacedStepStarts.has(node.start))
+      ) {
+        continue;
+      }
+      const candidate = candidates.get(node);
+      if (candidate === undefined) {
+        collectAstReferencedIdentifiers(node, referenced);
+      } else {
+        const ownRefs = collectAstReferencedIdentifiers(candidate.init);
+        ownRefs.delete(candidate.name);
+        for (const name of ownRefs) referenced.add(name);
+      }
+    }
+    for (const [node, candidate] of candidates) {
+      if (referenced.has(candidate.name)) continue;
+      removedNodes.add(node);
+      removedNames.add(candidate.name);
+      candidates.delete(node);
+      changed = true;
     }
   }
 
   const removals: { end: number; start: number; text: string }[] = [];
-  for (const node of ast.body ?? []) {
-    if (node.type !== "ExportDefaultDeclaration" || node.start === undefined) continue;
-    const call = node.declaration;
-    if (call?.type !== "CallExpression" || node.end === undefined) continue;
-    const callee = call.callee;
-    const binding = callee?.type === "MemberExpression" ? callee.object : callee;
-    if (binding?.type !== "Identifier" || !eveBindings.has(binding.name ?? "")) continue;
-    removals.push({ end: node.end, start: node.start, text: "" });
+  for (const node of removedNodes) {
+    removals.push({ end: node.end!, start: node.start!, text: "" });
+  }
+  if (removedNames.size > 0) {
+    for (const node of ast.body ?? []) {
+      if (!isLocalReExportDeclaration(node) || node.start === undefined || node.end === undefined) {
+        continue;
+      }
+      const specifiers = node.specifiers ?? [];
+      const kept = specifiers.filter(
+        (specifier) =>
+          specifier.exportKind === "type" || !removedNames.has(specifier.local?.name ?? ""),
+      );
+      if (kept.length === specifiers.length) continue;
+      if (kept.length === 0) {
+        removals.push({ end: node.end, start: node.start, text: "" });
+      } else {
+        const rendered = kept.map((specifier) => {
+          const typePrefix = specifier.exportKind === "type" ? "type " : "";
+          const local = specifier.local?.name ?? "";
+          const exported =
+            typeof specifier.exported?.value === "string"
+              ? JSON.stringify(specifier.exported.value)
+              : (specifier.exported?.name ?? local);
+          return `${typePrefix}${local === exported ? local : `${local} as ${exported}`}`;
+        });
+        removals.push({
+          end: node.end,
+          start: node.start,
+          text: `export { ${rendered.join(", ")} };`,
+        });
+      }
+    }
   }
 
   return removals;
@@ -492,9 +618,7 @@ function collectLocalReExportAliases(ast: AstProgram): Map<string, string[]> {
   const result = new Map<string, string[]>();
 
   for (const node of ast.body ?? []) {
-    if (node.type !== "ExportNamedDeclaration") continue;
-    if (node.source !== undefined && node.source !== null) continue;
-    if (node.declaration !== undefined && node.declaration !== null) continue;
+    if (!isLocalReExportDeclaration(node)) continue;
 
     for (const specifier of node.specifiers ?? []) {
       const localName = specifier.local?.name;
@@ -516,34 +640,26 @@ function isLiteralValueDeclarator(declarator: AstNode): boolean {
 }
 
 function isLiteralValueExpression(node: AstNode | null | undefined): boolean {
-  if (node === null || node === undefined) {
+  const unwrapped = unwrapTypeExpression(node);
+  if (unwrapped === null || unwrapped === undefined) {
     return false;
   }
 
-  if (node.type === "Literal") {
+  if (unwrapped.type === "Literal") {
     return (
-      node.value === null ||
-      typeof node.value === "boolean" ||
-      typeof node.value === "number" ||
-      typeof node.value === "string"
+      unwrapped.value === null ||
+      typeof unwrapped.value === "boolean" ||
+      typeof unwrapped.value === "number" ||
+      typeof unwrapped.value === "string"
     );
   }
 
-  if (node.type === "TemplateLiteral" && (node.expressions ?? []).length === 0) {
+  if (unwrapped.type === "TemplateLiteral" && (unwrapped.expressions ?? []).length === 0) {
     return true;
   }
 
-  if (
-    node.type === "TSAsExpression" ||
-    node.type === "TSSatisfiesExpression" ||
-    node.type === "TSNonNullExpression" ||
-    node.type === "TSTypeAssertion"
-  ) {
-    return isLiteralValueExpression(node.expression);
-  }
-
-  if (node.type === "UnaryExpression" && node.argument?.type === "Literal") {
-    return typeof node.argument.value === "number";
+  if (unwrapped.type === "UnaryExpression" && unwrapped.argument?.type === "Literal") {
+    return typeof unwrapped.argument.value === "number";
   }
 
   return false;
@@ -561,39 +677,7 @@ function readValueImportBindings(node: AstNode): string[] {
 }
 
 function collectReferencedIdentifiers(ast: AstProgram): Set<string> {
-  const identifiers = new Set<string>();
-
-  visitAstNode(ast as AstNode, (node) => {
-    if (node.type === "Identifier" && typeof node.name === "string") {
-      identifiers.add(node.name);
-    }
-  });
-
-  return identifiers;
-}
-
-function visitAstNode(node: AstNode, visitor: (node: AstNode) => void): void {
-  if (node.type === "ImportDeclaration" || node.type?.startsWith("TS")) {
-    return;
-  }
-
-  visitor(node);
-
-  for (const value of Object.values(node)) {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (isAstNode(item)) {
-          visitAstNode(item, visitor);
-        }
-      }
-    } else if (isAstNode(value)) {
-      visitAstNode(value, visitor);
-    }
-  }
-}
-
-function isAstNode(value: unknown): value is AstNode {
-  return value !== null && typeof value === "object" && typeof (value as AstNode).type === "string";
+  return collectAstReferencedIdentifiers(ast);
 }
 
 function extendRemovalEnd(source: string, end: number): number {

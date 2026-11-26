@@ -8,7 +8,12 @@ import {
   WORKFLOW_MODULE_SPECIFIERS,
 } from "#internal/application/package.js";
 import { createAuthoredPlugins } from "#internal/bundler/authored-plugins.js";
-import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
+import {
+  createExtensionMountPlugin,
+  parseExtensionMountId,
+  resolveExtensionMountForId,
+  tagExtensionMountId,
+} from "#internal/bundler/extension-mount-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import type { CompiledExtensionMount } from "#compiler/manifest.js";
@@ -41,7 +46,9 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
     input.loadVendoredDependenciesNatively === true
       ? createDevelopmentCompiledExternalsPlugin()
       : null,
-    stepTargets.length === 0 ? null : createStepTransformPlugin(input.appRoot, stepTargets),
+    stepTargets.length === 0
+      ? null
+      : createStepTransformPlugin(input.appRoot, stepTargets, input.extensionMounts),
     createSideEffectModulesPlugin(input.appRoot, [
       ...stepTargets,
       stepsPath,
@@ -53,7 +60,9 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
     input.instrumentationEntryPlugin ?? null,
     createPseudoPackagePlugin(),
     createHostedGraphPlugin({ appRoot: input.appRoot, externals: input.externals }),
-    createExtensionMountPlugin(input.extensionMounts, input.extensionOverridePaths),
+    createExtensionMountPlugin(input.extensionMounts, input.extensionOverridePaths, {
+      bindHandles: true,
+    }),
     createExtensionScopePlugin(
       input.extensionMounts.map((mount) => ({
         mountId: mount.mountId,
@@ -156,7 +165,10 @@ export function createModulePathMatcher(
     windows ? "i" : undefined,
   );
   return {
-    idFilter: pathsRegex([...new Set([...paths, ...targets])], platform),
+    idFilter: pathsRegex(
+      [...new Set([...paths.map((target) => stripPathQueryAndHash(target)), ...targets])],
+      platform,
+    ),
     match,
     specifierFilter: [
       pathSpecifier,
@@ -225,19 +237,44 @@ function createPackageRelativeTransformFilename(path: string): string | undefine
 
 function createSideEffectModulesPlugin(rootDir: string, paths: readonly string[]) {
   const { match, specifierFilter } = createModulePathMatcher(rootDir, paths);
+  const windows = process.platform === "win32";
+  const toKey = (resolved: string, mountId: string | undefined) =>
+    `${windows ? resolved.toLowerCase() : resolved}\0${mountId ?? ""}`;
+  const targetKeys = new Set(
+    paths.flatMap((path) => {
+      const resolved = match(path);
+      return resolved === null ? [] : [toKey(resolved, parseExtensionMountId(path).mountId)];
+    }),
+  );
   return {
     name: "eve:side-effect-modules",
     resolveId: {
       filter: { id: specifierFilter },
       handler(source: string, importer: string | undefined) {
+        const sourceMountId = parseExtensionMountId(source).mountId;
+        if (
+          sourceMountId === undefined &&
+          importer !== undefined &&
+          parseExtensionMountId(importer).mountId !== undefined
+        ) {
+          return null;
+        }
         const id = match(source, importer);
-        return id === null ? null : { id, moduleSideEffects: "no-treeshake" as const };
+        if (id === null || !targetKeys.has(toKey(id, sourceMountId))) return null;
+        return {
+          id: sourceMountId === undefined ? id : tagExtensionMountId(id, sourceMountId),
+          moduleSideEffects: "no-treeshake" as const,
+        };
       },
     },
   };
 }
 
-function createStepTransformPlugin(rootDir: string, stepTargets: readonly string[]) {
+function createStepTransformPlugin(
+  rootDir: string,
+  stepTargets: readonly string[],
+  extensionMounts: readonly CompiledExtensionMount[],
+) {
   const { idFilter, match } = createModulePathMatcher(rootDir, stepTargets);
   return {
     name: "eve:workflow-step-transform",
@@ -246,14 +283,17 @@ function createStepTransformPlugin(rootDir: string, stepTargets: readonly string
       async handler(code: string, id: string) {
         const resolvedId = match(id);
         if (resolvedId === null) return null;
+        const extensionMount = resolveExtensionMountForId(id, extensionMounts);
         const result = await applyWorkflowTransform(
           createRelativeTransformFilename(rootDir, resolvedId),
           code,
           "step",
           resolvedId,
           rootDir,
+          undefined,
+          extensionMount,
         );
-        return { code: result.code, map: null };
+        return result.code === code ? null : { code: result.code, map: null };
       },
     },
   };

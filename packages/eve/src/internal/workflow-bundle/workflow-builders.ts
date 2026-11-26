@@ -4,6 +4,10 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { PROGRAM_AGENT_CALL_WORKFLOW_NAME } from "#execution/code-mode/agent-call-reference.js";
 import { BASH_JOB_TASK_WORKFLOW_NAME } from "#execution/sandbox/bash-job-reference.js";
 import { STABLE_WORKFLOW_NAMES } from "#execution/stable-workflow-names.js";
+import {
+  EXTENSION_CHUNK_DIRECTORY,
+  type WorkflowExtensionMount,
+} from "#internal/bundler/extension-mount-plugin.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { AGENT_TOOL_SERVE_WORKFLOW_NAME } from "#runtime/subagents/workflow-reference.js";
 import { prepareAuthoredWorkflowDirectives } from "#internal/workflow-bundle/authored-workflow-directives.js";
@@ -61,6 +65,7 @@ export async function applyWorkflowTransform(
     BASH_JOB_TASK_WORKFLOW_NAME,
     PROGRAM_AGENT_CALL_WORKFLOW_NAME,
   ]),
+  extensionMount?: WorkflowExtensionMount,
 ): Promise<{
   code: string;
   workflowManifest: WorkflowManifest;
@@ -78,20 +83,22 @@ export async function applyWorkflowTransform(
     mode === "metadata",
   );
 
-  if (
-    absolutePath !== undefined &&
-    isAuthoredApplicationModule(absolutePath, resolvedProjectRoot)
-  ) {
+  const authoredTarget =
+    absolutePath === undefined
+      ? undefined
+      : resolveAuthoredWorkflowTarget(absolutePath, resolvedProjectRoot, extensionMount);
+
+  if (authoredTarget !== undefined) {
     const prepared =
       mode === false
         ? undefined
-        : await prepareAuthoredWorkflowDirectives({ filePath: absolutePath, source });
+        : await prepareAuthoredWorkflowDirectives({ filePath: absolutePath!, source });
     return transformWorkflowDirectives({
       authored: true,
       authorizeSteps: true,
-      filename: authoredRelativePath(absolutePath, resolvedProjectRoot),
+      filename: authoredTarget.filename,
       mode: prepared?.hasDirectives === true ? mode : false,
-      moduleSpecifier: authoredModuleIdBase(absolutePath, resolvedProjectRoot),
+      moduleSpecifier: authoredTarget.moduleSpecifier,
       source: prepared?.source ?? source,
       stableModuleSpecifier: undefined,
       stableWorkflowNames,
@@ -107,6 +114,39 @@ export async function applyWorkflowTransform(
     stableModuleSpecifier,
     stableWorkflowNames,
   });
+}
+
+function resolveAuthoredWorkflowTarget(
+  absolutePath: string,
+  appRoot: string,
+  extensionMount: WorkflowExtensionMount | undefined,
+): { readonly filename: string; readonly moduleSpecifier: string } | undefined {
+  if (extensionMount !== undefined && isAbsolute(absolutePath)) {
+    const normalizedPath = toRealPath(absolutePath).replace(/\\/g, "/");
+    const realRoot = toRealPath(extensionMount.sourceRoot);
+    const bases: readonly (readonly [string, string])[] = [
+      [realRoot, ""],
+      [join(dirname(realRoot), EXTENSION_CHUNK_DIRECTORY), "(chunks)"],
+    ];
+    for (const [root, suffix] of bases) {
+      const normalizedRoot = root.replace(/\\/g, "/").replace(/\/$/, "");
+      if (normalizedPath.startsWith(`${normalizedRoot}/`)) {
+        const rel = normalizedPath.slice(normalizedRoot.length + 1);
+        const prefix = `@eve-mount/[${extensionMount.mountId}]${suffix}/`;
+        return {
+          filename: `${prefix}${rel}`,
+          moduleSpecifier: `${prefix}${stripJavaScriptExtension(rel)}`,
+        };
+      }
+    }
+  }
+  if (isAuthoredApplicationModule(absolutePath, appRoot)) {
+    return {
+      filename: authoredRelativePath(absolutePath, appRoot),
+      moduleSpecifier: authoredModuleIdBase(absolutePath, appRoot),
+    };
+  }
+  return undefined;
 }
 
 function isPackageTestFixtureModule(absolutePath: string): boolean {

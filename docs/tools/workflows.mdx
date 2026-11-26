@@ -77,7 +77,7 @@ continues, deploys, and returns one tool result.
   `defineDynamic` function returns, with exactly one entry point: `execute`, `task`, or `serve`.
   Defining none, or more than one, throws when the tool is defined.
 - Write the entry point inline, or reference a top-level `async function` in the same module or an
-  imported application module. `execute` and `task` can be async generators; `serve` can't.
+  imported application or extension module. `execute` and `task` can be async generators; `serve` can't.
 - Start the entry point with `"use workflow"`. A missing directive is a build error, even if another
   function in the module has one.
 - `"use step"` marks a top-level `async function` in the tool module, or any module it imports, as a
@@ -145,7 +145,7 @@ A hook's `token` resumes it. Pass a fixed `token` to `createHook` when a route m
 
 Import `WorkflowHook`, `WorkflowHookOptions`, `WorkflowWebhook`, `WorkflowWebhookOptions`, `WorkflowWebhookRequest`, `WorkflowMetadata`, and `StepMetadata` from `eve/workflow`, and `RateLimitOptions` from `eve/experimental/workflow`, for explicit types.
 
-Only these exports are public. A bare `workflow` or `workflow/*` import in an application module fails the build with an error that names these entries.
+Only these exports are public. A bare `workflow` or `workflow/*` import in an application or extension module fails the build with an error that names these entries.
 
 ## Wait for the result
 

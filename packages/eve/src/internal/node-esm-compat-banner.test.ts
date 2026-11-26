@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildNodeEsmCompatBanner,
   createNodeEsmCompatBannerPlugin,
+  stripUnusedNodeEsmCompatBanner,
 } from "#internal/node-esm-compat-banner.js";
 
 type TestProgram = Parameters<typeof buildNodeEsmCompatBanner>[0];
@@ -228,5 +229,48 @@ describe("createNodeEsmCompatBannerPlugin", () => {
     const result = renderChunk(plugin, code);
 
     expect(result?.map.mappings).toBe(";;;;;;AAAA;AACA");
+  });
+});
+
+describe("stripUnusedNodeEsmCompatBanner", () => {
+  const FULL_BANNER = [
+    'import { fileURLToPath as __eveFileURLToPath } from "node:url";',
+    'import { dirname as __eveDirname } from "node:path";',
+    'import { createRequire as __eveCreateRequire } from "node:module";',
+    "const __filename = __eveFileURLToPath(import.meta.url);",
+    "__eveDirname(__filename);",
+    "__eveCreateRequire(import.meta.url);",
+  ].join("\n");
+
+  it("strips compat banner imports when require only appears in strings or property keys", async () => {
+    const code = [
+      FULL_BANNER,
+      'export async function task(input) { if (!input.prompt) throw new Error("clips require a prompt"); return { require: true }; }',
+    ].join("\n");
+
+    const stripped = await stripUnusedNodeEsmCompatBanner("generate.mjs", code);
+
+    expect(stripped).not.toContain("node:url");
+    expect(stripped).not.toContain("node:path");
+    expect(stripped).not.toContain("node:module");
+    expect(stripped).toContain("clips require a prompt");
+  });
+
+  it("keeps node:module when require is referenced as an identifier", async () => {
+    const code = [
+      'import { fileURLToPath as __eveFileURLToPath } from "node:url";',
+      'import { dirname as __eveDirname } from "node:path";',
+      'import { createRequire as __eveCreateRequire } from "node:module";',
+      "const __filename = __eveFileURLToPath(import.meta.url);",
+      "const __dirname = __eveDirname(__filename);",
+      "const require = __eveCreateRequire(import.meta.url);",
+      'export function load() { return require("node:fs"); }',
+    ].join("\n");
+
+    const stripped = await stripUnusedNodeEsmCompatBanner("load.mjs", code);
+
+    expect(stripped).toContain('from "node:module"');
+    expect(stripped).not.toContain('from "node:path"');
+    expect(stripped).not.toContain('from "node:url"');
   });
 });

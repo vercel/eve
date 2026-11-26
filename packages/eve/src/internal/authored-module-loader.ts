@@ -4,7 +4,7 @@ import { join, relative, resolve, sep } from "node:path";
 import type { Plugin } from "rolldown";
 
 import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
-import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import type { CompiledAgentManifest, CompiledExtensionMount } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import {
   createAuthoredModuleBuildOptions,
@@ -13,8 +13,13 @@ import {
 import { writeAuthoredModuleCacheFile } from "#internal/authored-module-cache.js";
 import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 import {
+  canonicalizePath,
   createExtensionMountPlugin,
   EXTENSION_CHUNK_DIRECTORY,
+  parseExtensionMountId,
+  resolveExtensionMountForId,
+  tagExtensionMountId,
+  type WorkflowExtensionMount,
 } from "#internal/bundler/extension-mount-plugin.js";
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
 import { createAuthoredModuleEvaluationError } from "#internal/authored-module-evaluation-error.js";
@@ -69,6 +74,7 @@ export interface AuthoredModuleLoadOptions {
   readonly externalDependencies?: readonly string[];
   readonly extension?: {
     readonly mountId: string;
+    readonly sourceRoot?: string;
     readonly entry?: ExtensionMountEntry;
     readonly ancestors?: readonly (ExtensionMountEntry & { readonly mountId: string })[];
     readonly evaluationId?: string;
@@ -140,6 +146,10 @@ export async function bundleAuthoredModuleCode(
     mount === undefined
       ? []
       : [...(options.extension?.ancestors ?? []), { ...mount, mountId: mountId! }];
+  const fixedExtensionMount =
+    mount === undefined && mountId !== undefined && options.extension?.sourceRoot !== undefined
+      ? { mountId, sourceRoot: options.extension.sourceRoot }
+      : undefined;
   return await buildAuthoredModuleBundle(modulePath, options, {
     packageBoundaryPlugin: createRuntimeLoaderPackageBoundaryPlugin({
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
@@ -159,14 +169,18 @@ export async function bundleAuthoredModuleCode(
                 if (id !== "\0eve-compile-mount-entry") return undefined;
                 const mountImports = mountChain.map(
                   (entry) =>
-                    `import ${JSON.stringify(`${entry.mountSourcePath}?eve-mount=${encodeURIComponent(entry.mountId)}`)};`,
+                    `import ${JSON.stringify(tagExtensionMountId(entry.mountSourcePath, entry.mountId))};`,
                 );
-                const contribution = `${modulePath}?eve-mount=${encodeURIComponent(mountId!)}`;
+                const contribution = tagExtensionMountId(modulePath, mountId!);
                 return `${mountImports.join(" ")} export * from ${JSON.stringify(contribution)}; import entry from ${JSON.stringify(contribution)}; export default entry;`;
               },
             },
           ]),
-      createAuthoredWorkflowDirectivePlugin({ appRoot: options.appRoot ?? packageRoot }),
+      createAuthoredWorkflowDirectivePlugin({
+        appRoot: options.appRoot ?? packageRoot,
+        extensionMounts: mountChain,
+        fixedExtensionMount,
+      }),
       ...(mount === undefined ? [] : [createExtensionMountPlugin(mountChain)!]),
     ],
     sourcemap: evaluatedBundleSourcemap(),
@@ -202,7 +216,7 @@ export async function bundleExtensionDistributionGraph(input: {
   readonly imports: readonly string[];
 }> {
   const plugins = [
-    createAuthoredDirectiveGuardPlugin(),
+    createExtensionDistributionDirectivePlugin(),
     ...createAuthoredPlugins({ packageRoot: input.packageRoot }),
     createNodeEsmCompatBannerPlugin(),
     createDistributionPackageBoundaryPlugin({
@@ -292,7 +306,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
         })),
     ),
   );
-  const workflowSources = new AuthoredWorkflowSourceRecorder(input.appRoot);
+  const workflowSources = new AuthoredWorkflowSourceRecorder(input.appRoot, extensionMounts);
 
   try {
     const chunk = await buildSingleRolldownChunk("authored module map", {
@@ -313,6 +327,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
           createExternalRuntimeImportPlugin(programmaticLoaderImportSpecifier),
           createAuthoredWorkflowDirectivePlugin({
             appRoot: input.appRoot,
+            extensionMounts,
             recorder: workflowSources,
           }),
           workflowSources.graphPlugin(),
@@ -363,12 +378,14 @@ function createExternalRuntimeImportPlugin(importSpecifier: string): Plugin {
 class AuthoredWorkflowSourceRecorder {
   readonly #appRoot: string;
   readonly #directiveModules = new Set<string>();
+  readonly #extensionMounts: readonly CompiledExtensionMount[];
   readonly #imports = new Map<string, readonly string[]>();
   readonly #sources = new Map<string, string>();
   readonly #workflowModules = new Set<string>();
 
-  constructor(appRoot: string) {
+  constructor(appRoot: string, extensionMounts: readonly CompiledExtensionMount[] = []) {
     this.#appRoot = appRoot;
+    this.#extensionMounts = extensionMounts;
   }
 
   record(id: string, source: string, manifest: WorkflowManifest): void {
@@ -380,7 +397,9 @@ class AuthoredWorkflowSourceRecorder {
   }
 
   sourceModules(): readonly string[] {
-    return [...this.#sources.keys()].sort();
+    return [
+      ...new Set([...this.#sources.keys()].map((id) => parseExtensionMountId(id).filePath)),
+    ].sort();
   }
 
   graphPlugin(): Plugin {
@@ -407,20 +426,48 @@ class AuthoredWorkflowSourceRecorder {
   fingerprint(): string | undefined {
     if (this.#directiveModules.size === 0) return undefined;
 
+    const visited = new Set<string>();
     const reachable = new Set<string>();
     const queue = [...this.#directiveModules];
+    if (this.#extensionMounts.length > 0) {
+      const mountDeclarationPaths = new Set(
+        this.#extensionMounts
+          .filter((mount) => mount.programmaticImport === undefined)
+          .map((mount) => canonicalizePath(mount.mountSourcePath)),
+      );
+      for (const id of this.#sources.keys()) {
+        if (mountDeclarationPaths.has(canonicalizePath(parseExtensionMountId(id).filePath))) {
+          queue.push(id);
+        }
+      }
+    }
     for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
-      if (reachable.has(id) || !this.#sources.has(id)) continue;
-      reachable.add(id);
+      if (visited.has(id)) continue;
+      visited.add(id);
+      if (this.#sources.has(id)) reachable.add(id);
       queue.push(...(this.#imports.get(id) ?? []));
     }
 
     const hash = createHash("sha256");
     for (const id of [...reachable].sort()) {
+      const { filePath, mountId } = parseExtensionMountId(id);
       hash
-        .update(relative(this.#appRoot, id).split(sep).join("/"))
+        .update(relative(this.#appRoot, filePath).split(sep).join("/"))
+        .update("\0")
+        .update(mountId ?? "")
         .update("\0")
         .update(this.#sources.get(id) ?? "")
+        .update("\0");
+    }
+    for (const mount of [...this.#extensionMounts].sort((left, right) =>
+      left.mountId.localeCompare(right.mountId),
+    )) {
+      if (mount.programmaticImport === undefined) continue;
+      hash
+        .update("programmatic:")
+        .update(mount.mountId)
+        .update("\0")
+        .update(JSON.stringify(mount.programmaticImport.config))
         .update("\0");
     }
     return hash.digest("hex");
@@ -489,7 +536,7 @@ function createAuthoredDirectiveGuardPlugin(): Plugin {
       if (hasDirectives) {
         throw new Error(
           `Module "${id}" uses Workflow directives ("use step" or "use workflow"). ` +
-            "Workflow directives are supported in application modules only, not in extensions or instrumentation.",
+            "Workflow directives are supported in application and extension modules only, not in instrumentation.",
         );
       }
       return undefined;
@@ -497,21 +544,53 @@ function createAuthoredDirectiveGuardPlugin(): Plugin {
   };
 }
 
+function createExtensionDistributionDirectivePlugin(): Plugin {
+  return {
+    name: "eve-extension-distribution-directives",
+    async transform(source: string, id: string) {
+      if (!AUTHORED_BUNDLED_MODULE_EXTENSION.test(id) || isNodeModulesPath(id)) {
+        return undefined;
+      }
+      const prepared = await prepareAuthoredWorkflowDirectives({ filePath: id, source });
+      return prepared.source === source ? undefined : { code: prepared.source, map: null };
+    },
+  };
+}
+
 export function createAuthoredWorkflowDirectivePlugin(input: {
   readonly appRoot: string;
+  readonly extensionMounts?: readonly WorkflowExtensionMount[];
+  readonly fixedExtensionMount?: WorkflowExtensionMount;
   readonly recorder?: AuthoredWorkflowSourceRecorder;
 }): Plugin {
   return {
     name: "eve-authored-workflow-directives",
     async transform(source: string, id: string) {
-      if (!AUTHORED_BUNDLED_MODULE_EXTENSION.test(id) || isNodeModulesPath(id)) {
+      const { filePath } = parseExtensionMountId(id);
+      if (!AUTHORED_BUNDLED_MODULE_EXTENSION.test(filePath)) {
         return undefined;
       }
-      if (!isAuthoredApplicationModule(id, input.appRoot)) {
+      const extensionMount = resolveExtensionMountForId(
+        id,
+        input.extensionMounts,
+        input.fixedExtensionMount,
+      );
+      if (
+        extensionMount === undefined &&
+        (isNodeModulesPath(filePath) || !isAuthoredApplicationModule(filePath, input.appRoot))
+      ) {
         return undefined;
       }
 
-      const transformed = await applyWorkflowTransform(id, source, "client", id, input.appRoot);
+      const transformed = await applyWorkflowTransform(
+        filePath,
+        source,
+        "client",
+        filePath,
+        input.appRoot,
+        undefined,
+        extensionMount,
+      );
       input.recorder?.record(id, source, transformed.workflowManifest);
       return transformed.code === source ? undefined : { code: transformed.code, map: null };
     },

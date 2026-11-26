@@ -17,6 +17,7 @@ export type CompiledBindingNamespaceLoader = (
 
 export interface ExtensionCompileMount {
   readonly mountId: string;
+  readonly sourceRoot?: string;
   readonly entry?: NonNullable<AuthoredModuleLoadOptions["extension"]>["entry"];
 }
 
@@ -99,6 +100,7 @@ async function loadCompiledBindingNamespace(input: {
         ? undefined
         : {
             mountId,
+            sourceRoot: mount?.sourceRoot,
             evaluationId: input.evaluationId,
             entry: mount?.entry,
             ancestors:

@@ -3,6 +3,11 @@ import { dirname, relative } from "node:path";
 
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
+  parseExtensionMountId,
+  resolveExtensionMountForId,
+  type WorkflowExtensionMount,
+} from "#internal/bundler/extension-mount-plugin.js";
+import {
   applyWorkflowTransform,
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
@@ -15,6 +20,7 @@ export interface NitroStepEntrypointDiscoveredEntries {
 export async function writeNitroStepEntrypoint(input: {
   readonly builtinsPath: string;
   readonly discoveredEntries: NitroStepEntrypointDiscoveredEntries;
+  readonly extensionMounts?: readonly WorkflowExtensionMount[];
   readonly outfile: string;
   readonly projectRoot: string;
   readonly sideEffectFiles: readonly string[];
@@ -26,6 +32,7 @@ export async function writeNitroStepEntrypoint(input: {
     .sort()
     .filter((filePath) => !stepFileSet.has(filePath));
   const manifest = await collectNitroStepManifest({
+    extensionMounts: input.extensionMounts,
     projectRoot: input.projectRoot,
     stepFiles,
     serdeOnlyFiles,
@@ -51,6 +58,7 @@ export async function writeNitroStepEntrypoint(input: {
 }
 
 async function collectNitroStepManifest(input: {
+  readonly extensionMounts: readonly WorkflowExtensionMount[] | undefined;
   readonly projectRoot: string;
   readonly serdeOnlyFiles: readonly string[];
   readonly stepFiles: readonly string[];
@@ -59,7 +67,9 @@ async function collectNitroStepManifest(input: {
   const manifest: WorkflowManifest = {};
   const files = [...input.stepFiles, ...input.serdeOnlyFiles];
 
-  for (const filePath of files) {
+  for (const entryId of files) {
+    const { filePath } = parseExtensionMountId(entryId);
+    const extensionMount = resolveExtensionMountForId(entryId, input.extensionMounts);
     const source = await readFile(filePath, "utf8");
     const relativeFilepath = createManifestRelativeFilepath(input.workingDir, filePath);
     const transformed = await applyWorkflowTransform(
@@ -68,6 +78,8 @@ async function collectNitroStepManifest(input: {
       "step",
       filePath,
       input.projectRoot,
+      undefined,
+      extensionMount,
     );
 
     mergeWorkflowManifest(manifest, transformed.workflowManifest);

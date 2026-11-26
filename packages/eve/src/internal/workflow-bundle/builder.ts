@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import type { Plugin } from "rolldown";
 import { mapConcurrent } from "#shared/map-concurrent.js";
 
+import type { CompiledExtensionMount } from "#compiler/manifest.js";
 import {
   resolvePackageSourceDirectoryPath,
   resolveWorkflowModulePath,
@@ -12,6 +13,7 @@ import {
   createAuthoredPlugins,
   resolveAuthoredTsConfigPath,
 } from "#internal/bundler/authored-plugins.js";
+import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
 import {
   type AuthoredWorkflowModules,
   bundleFinalWorkflowOutput,
@@ -61,6 +63,8 @@ export interface WorkflowArtifacts {
 export class WorkflowBundleBuilder {
   readonly #authoredWorkflowModules: AuthoredWorkflowModules;
   readonly #compiledArtifactsBootstrapPath: string;
+  readonly #extensionMounts: readonly CompiledExtensionMount[];
+  readonly #extensionOverridePaths: ReadonlyMap<string, string>;
   readonly #outDir: string;
   readonly #queueNamespace: string;
   readonly #inlineSourcemap: boolean;
@@ -88,6 +92,8 @@ export class WorkflowBundleBuilder {
       workflowModules: [],
     };
     this.#compiledArtifactsBootstrapPath = options.compiledArtifactsBootstrapPath;
+    this.#extensionMounts = options.extensionMounts ?? [];
+    this.#extensionOverridePaths = options.extensionOverridePaths ?? new Map();
     this.#outDir = options.outDir;
     this.#queueNamespace = deriveEveWorkflowQueueNamespace(options.agentName);
     this.#inlineSourcemap = options.inlineSourcemap ?? true;
@@ -110,6 +116,7 @@ export class WorkflowBundleBuilder {
     const { manifest: stepsManifest, stepTargets } = await writeNitroStepEntrypoint({
       builtinsPath: resolveWorkflowModulePath("workflow/internal/builtins"),
       discoveredEntries: mergeStepEntries(frameworkEntries, appEntries),
+      extensionMounts: this.#extensionMounts,
       outfile: stepsPath,
       projectRoot: this.transformProjectRoot,
       sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
@@ -249,6 +256,7 @@ export class WorkflowBundleBuilder {
       ...workflowFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
       ...serdeOnlyFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
     ].join("\n");
+    const isAppLayer = options.label === "app";
     const interimBundle = await buildSingleRolldownChunk(`${options.label} workflow driver chunk`, {
       cwd: this.config.workingDir,
       onLog(level, log, defaultHandler) {
@@ -262,18 +270,26 @@ export class WorkflowBundleBuilder {
       plugins: [
         createWorkflowVirtualEntryPlugin(virtualEntrySource),
         createWorkflowDriverAliasPlugin(this.config.workingDir),
+        createWorkflowTransformPlugin({
+          extensionMounts: isAppLayer ? this.#extensionMounts : undefined,
+          manifest,
+          projectRoot: this.transformProjectRoot,
+          sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
+          workingDir: this.config.workingDir,
+        }),
+        ...(isAppLayer
+          ? [
+              createExtensionMountPlugin(this.#extensionMounts, this.#extensionOverridePaths, {
+                bindHandles: true,
+              }),
+            ]
+          : []),
         ...createAuthoredPlugins({
           authoredSourceOnly: true,
           extensions: WORKFLOW_SOURCE_EXTENSIONS,
           packageRoot: this.authoredPackageRoot,
         }),
         createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
-        createWorkflowTransformPlugin({
-          manifest,
-          projectRoot: this.transformProjectRoot,
-          sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
-          workingDir: this.config.workingDir,
-        }),
         createWorkflowNodeBuiltinGuardPlugin(),
         options.graphPlugin,
       ],

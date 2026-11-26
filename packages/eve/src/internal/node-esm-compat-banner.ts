@@ -1,3 +1,8 @@
+import {
+  collectAstReferencedIdentifiers,
+  parseWorkflowSourceAst,
+} from "#internal/workflow-bundle/workflow-source-ast.js";
+
 interface BannerLine {
   readonly importLine: string;
   readonly declarationLine: string;
@@ -35,6 +40,67 @@ const BANNER_LINES: readonly BannerLine[] = [
 
 const FILENAME_BANNER_LINE = BANNER_LINES[0]!;
 const DIRNAME_BANNER_LINE = BANNER_LINES[1]!;
+const REQUIRE_BANNER_LINE = BANNER_LINES[2]!;
+const STANDALONE_DIRNAME_DECLARATION =
+  "const __dirname = __eveDirname(__eveFileURLToPath(import.meta.url));";
+const DEAD_BANNER_CALL_LINES = new Set([
+  "__eveFileURLToPath(import.meta.url);",
+  "__eveDirname(__filename);",
+  "__eveDirname(__eveFileURLToPath(import.meta.url));",
+  "__eveCreateRequire(import.meta.url);",
+]);
+
+const BANNER_LINE_SET = new Set([
+  ...BANNER_LINES.flatMap((line) => [line.importLine, line.declarationLine]),
+  STANDALONE_DIRNAME_DECLARATION,
+  ...DEAD_BANNER_CALL_LINES,
+]);
+
+export async function stripUnusedNodeEsmCompatBanner(
+  filename: string,
+  code: string,
+): Promise<string> {
+  if (
+    !code.includes("__eveFileURLToPath") &&
+    !code.includes("__eveDirname") &&
+    !code.includes("__eveCreateRequire")
+  ) {
+    return code;
+  }
+
+  const lines = code.split("\n");
+  const body = lines.filter((line) => !BANNER_LINE_SET.has(line.trim())).join("\n");
+  const referenced =
+    body.includes("require") || body.includes("__dirname") || body.includes("__filename")
+      ? collectAstReferencedIdentifiers(await parseWorkflowSourceAst(filename, body))
+      : new Set<string>();
+  const usesRequire = referenced.has("require");
+  const usesDirname = referenced.has("__dirname");
+  const usesFilename =
+    referenced.has("__filename") ||
+    (usesDirname && lines.some((line) => line.trim() === DIRNAME_BANNER_LINE.declarationLine));
+  const usesFileURLToPath =
+    usesFilename ||
+    (usesDirname && lines.some((line) => line.trim() === STANDALONE_DIRNAME_DECLARATION));
+
+  const keepByLine = new Map<string, boolean>([
+    [FILENAME_BANNER_LINE.importLine, usesFileURLToPath],
+    [FILENAME_BANNER_LINE.declarationLine, usesFilename],
+    [DIRNAME_BANNER_LINE.importLine, usesDirname],
+    [DIRNAME_BANNER_LINE.declarationLine, usesDirname],
+    [STANDALONE_DIRNAME_DECLARATION, usesDirname],
+    [REQUIRE_BANNER_LINE.importLine, usesRequire],
+    [REQUIRE_BANNER_LINE.declarationLine, usesRequire],
+  ]);
+
+  const kept = lines.filter((rawLine) => {
+    const line = rawLine.trim();
+    if (DEAD_BANNER_CALL_LINES.has(line)) return false;
+    return keepByLine.get(line) ?? true;
+  });
+
+  return kept.length === lines.length ? code : kept.join("\n");
+}
 
 export function buildNodeEsmCompatBanner(program: ParsedProgram): string {
   const imports: string[] = [];
@@ -51,7 +117,7 @@ export function buildNodeEsmCompatBanner(program: ParsedProgram): string {
     imports.push(line.importLine);
     declarations.push(
       line === DIRNAME_BANNER_LINE && chunkProvidesFilename
-        ? "const __dirname = __eveDirname(__eveFileURLToPath(import.meta.url));"
+        ? STANDALONE_DIRNAME_DECLARATION
         : line.declarationLine,
     );
   }
