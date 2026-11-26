@@ -102,7 +102,6 @@ export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
 export const DisabledProviderToolsKey = new ContextKey<Readonly<Record<string, readonly string[]>>>(
   "eve.disabledProviderTools",
 );
-export const TaskPromotionAllowedKey = new ContextKey<boolean>("eve.internal.taskPromotionAllowed");
 export const ModelMaxOutputTokensKey = new ContextKey<Readonly<Record<string, number | null>>>(
   "eve.modelMaxOutputTokens",
 );

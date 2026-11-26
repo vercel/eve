@@ -27,6 +27,11 @@ import type { SessionView } from "#harness/session-machine/view.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { AuthorizationChallenge, SignInCompleted } from "#harness/authorization.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
+import {
+  cancelPromotedTasks,
+  withTaskPromotionAllowed,
+  type PromotedTaskCall,
+} from "#tools/task-handoff.js";
 
 export { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/call-executor.js";
 
@@ -89,6 +94,7 @@ export function signInReports(input: {
 }
 
 export async function runApprovedCalls(input: {
+  readonly allowTaskPromotion?: boolean;
   readonly approvals: readonly ApprovedCall[];
   readonly tools: HarnessToolLookup;
   readonly approvalMemory?: ApprovalMemory;
@@ -100,48 +106,66 @@ export async function runApprovedCalls(input: {
   readonly view: () => Pick<SessionView, "projection">;
   readonly signIns?: SignInReports;
 }): Promise<{
+  readonly promotedTasks: readonly PromotedTaskCall[];
   readonly settled: readonly CallResult[];
   readonly signIns: readonly ToolSignIn[];
 }> {
   const reportSignIns = (input.signIns ?? signInReports(input)).report;
-  const executed = await Promise.allSettled(
-    input.approvals.map(async (approval): Promise<CallOutcome> => {
-      const { call } = approval;
-      const { callId, toolName } = call;
-      const definition = input.tools.get(toolName);
-      if (changedSinceOffered(call, definition)) {
-        const message = changedToolMessage(toolName);
+  const executed = await withTaskPromotionAllowed(input.allowTaskPromotion === true, () =>
+    Promise.allSettled(
+      input.approvals.map(async (approval): Promise<CallOutcome> => {
+        const { call } = approval;
+        const { callId, toolName } = call;
+        const definition = input.tools.get(toolName);
+        if (changedSinceOffered(call, definition)) {
+          const message = changedToolMessage(toolName);
+          const failed = failedCall({ callId, message, toolName });
+          await reportSignIns(approval);
+          await input.publish(settleCall(failed.result));
+          return { settled: [{ part: failed.part }], toolResults: [] };
+        }
+        if (isRunnableTool(definition)) {
+          const responder = input.responderOf?.(approval);
+          return await executeToolCall(
+            call,
+            {
+              ...input,
+              definition,
+              ...(responder !== undefined && { responder }),
+              beforeResult: ({ failure, invoked }) =>
+                reportSignIns(approval, invoked ? failure : undefined),
+            },
+            "recheck",
+          );
+        }
+        const searchable = input.tools.get(SEARCH_TOOL_NAME) !== undefined;
+        const message = unavailableToolMessage(toolName, searchable);
         const failed = failedCall({ callId, message, toolName });
         await reportSignIns(approval);
         await input.publish(settleCall(failed.result));
         return { settled: [{ part: failed.part }], toolResults: [] };
-      }
-      if (isRunnableTool(definition)) {
-        const responder = input.responderOf?.(approval);
-        return await executeToolCall(
-          call,
-          {
-            ...input,
-            definition,
-            ...(responder !== undefined && { responder }),
-            beforeResult: ({ failure, invoked }) =>
-              reportSignIns(approval, invoked ? failure : undefined),
-          },
-          "recheck",
-        );
-      }
-      const searchable = input.tools.get(SEARCH_TOOL_NAME) !== undefined;
-      const message = unavailableToolMessage(toolName, searchable);
-      const failed = failedCall({ callId, message, toolName });
-      await reportSignIns(approval);
-      await input.publish(settleCall(failed.result));
-      return { settled: [{ part: failed.part }], toolResults: [] };
-    }),
+      }),
+    ),
+  );
+  const completed = executed.flatMap((call) => (call.status === "fulfilled" ? [call.value] : []));
+  const promotedTasks = completed.flatMap((call) =>
+    call.promoted === undefined ? [] : [call.promoted],
   );
   const failed = executed.find((call) => call.status === "rejected");
-  if (failed?.status === "rejected" && input.abortSignal?.aborted !== true) throw failed.reason;
-  const completed = executed.flatMap((call) => (call.status === "fulfilled" ? [call.value] : []));
+  if (failed?.status === "rejected" && input.abortSignal?.aborted !== true) {
+    await cancelPromotedTasks(promotedTasks);
+    throw failed.reason;
+  }
+  if (input.abortSignal?.aborted === true && promotedTasks.length > 0) {
+    await cancelPromotedTasks(promotedTasks);
+    return {
+      promotedTasks: [],
+      settled: completed.flatMap((call) => call.settled),
+      signIns: completed.flatMap((call) => (call.signIn === undefined ? [] : [call.signIn])),
+    };
+  }
   return {
+    promotedTasks,
     settled: completed.flatMap((call) => call.settled),
     signIns: completed.flatMap((call) => (call.signIn === undefined ? [] : [call.signIn])),
   };

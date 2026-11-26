@@ -31,6 +31,8 @@
       "edit_file",
       "web_fetch",
       "agent",
+      "eve__task_wait",
+      "eve__task_cancel",
       "eve__search",
       "eve__tool"
     ]
@@ -85,6 +87,8 @@
       "edit_file",
       "web_fetch",
       "agent",
+      "eve__task_wait",
+      "eve__task_cancel",
       "eve__search",
       "eve__tool"
     ]

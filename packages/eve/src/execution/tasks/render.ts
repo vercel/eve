@@ -214,6 +214,7 @@ export function renderModelOutputText(output: unknown): string {
   if (isModelOutput(output)) {
     switch (output.type) {
       case "text":
+      case "error-text":
         return String(output.value);
       case "json":
         return JSON.stringify(output.value);
@@ -235,12 +236,16 @@ function renderContentParts(parts: unknown): string {
     .join("\n");
 }
 
-function isModelOutput(
-  value: unknown,
-): value is { readonly type: "text" | "json" | "content"; readonly value: unknown } {
+function isModelOutput(value: unknown): value is {
+  readonly type: "text" | "error-text" | "json" | "content";
+  readonly value: unknown;
+} {
   if (typeof value !== "object" || value === null) return false;
   const type = Reflect.get(value, "type");
-  return (type === "text" || type === "json" || type === "content") && "value" in value;
+  return (
+    (type === "text" || type === "error-text" || type === "json" || type === "content") &&
+    "value" in value
+  );
 }
 
 export interface ListedTask {

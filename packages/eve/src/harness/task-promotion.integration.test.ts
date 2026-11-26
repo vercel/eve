@@ -16,6 +16,7 @@ import { schemaViolation } from "#protocol/session-events/schemas.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { toolOutput } from "#tools/model-output.js";
 import { canPromoteToTask, promoteToTask } from "#tools/task-handoff.js";
@@ -34,14 +35,18 @@ async function collectViolations(runtime: Runtime, sessionId: string): Promise<V
   return found;
 }
 
-describe("inline tool task promotion and deferred task controls", () => {
-  it("omits task controls on fast inline calls, promotes slow calls to durable tasks, delivers projected results, and latches task controls on monotonically", async () => {
+describe("inline tool task promotion and deferred task guidance", () => {
+  it("announces task guidance without mutating system, skips toModelOutput on receipts, renders error-text cleanly, and latches task tools on tool-only agents", async () => {
     const observedTools: string[][] = [];
     const observedSystems: string[] = [];
-    let finishDeferred!: (value: { readonly summary: string }) => void;
-    const deferredReady = new Promise<{ readonly summary: string }>((resolve) => {
-      finishDeferred = resolve;
-    });
+    const observedPrompts: string[] = [];
+    const modelOutputInputs: unknown[] = [];
+    let finishDeferred!: (value: { readonly exitCode: number; readonly summary: string }) => void;
+    const deferredReady = new Promise<{ readonly exitCode: number; readonly summary: string }>(
+      (resolve) => {
+        finishDeferred = resolve;
+      },
+    );
 
     let step = 0;
     const model = markMockModel(
@@ -52,8 +57,10 @@ describe("inline tool task promotion and deferred task controls", () => {
             .filter((message) => message.role === "system")
             .map((message) => (typeof message.content === "string" ? message.content : ""))
             .join("\n");
+          const promptJson = JSON.stringify(options.prompt);
           observedTools.push(toolNames);
           observedSystems.push(systemText);
+          observedPrompts.push(promptJson);
           step += 1;
           if (step === 1) {
             return toolCallsStreamResult([
@@ -66,14 +73,14 @@ describe("inline tool task promotion and deferred task controls", () => {
             ]);
           }
           if (step === 3) {
-            setTimeout(() => finishDeferred({ summary: "build succeeded: 42 tests" }), 10);
+            setTimeout(() => finishDeferred({ exitCode: 1, summary: "2 tests failed" }), 10);
             return toolCallsStreamResult([
               { input: "{}", toolCallId: "call_wait", toolName: TASK_WAIT_TOOL_NAME },
             ]);
           }
           if (step === 4) {
-            const promptJson = JSON.stringify(options.prompt);
-            expect(promptJson).toContain("JOB_OUTPUT: build succeeded: 42 tests");
+            expect(promptJson).toContain("JOB_OUTPUT: 2 tests failed\\n[exit code: 1]");
+            expect(promptJson).not.toContain('\\"type\\":\\"error-text\\"');
             return textStreamResult("First turn done.");
           }
           return textStreamResult("Second turn done.");
@@ -87,23 +94,27 @@ describe("inline tool task promotion and deferred task controls", () => {
       description: "Runs a job inline or promotes it to a durable task.",
       inputSchema: z.object({ mode: z.enum(["fast", "slow"]) }),
       async execute(input) {
-        if (input.mode === "fast") return { summary: "instant ok" };
+        if (input.mode === "fast") return { exitCode: 0, summary: "instant ok" };
         expect(canPromoteToTask()).toBe(true);
-        return promoteToTask<{ readonly summary: string }>({
+        return promoteToTask<{ readonly exitCode: number; readonly summary: string }>({
           handoff: { job: "build-42" },
           preview: "Compiling crate...",
           workflowId: PROMOTED_WORKFLOW_ID,
         });
       },
       toModelOutput(output) {
-        if (typeof output === "string") return toolOutput.text(output);
-        return toolOutput.text(`JOB_OUTPUT: ${output.summary}`);
+        modelOutputInputs.push(output);
+        const text = `JOB_OUTPUT: ${output.summary}`;
+        return output.exitCode !== 0
+          ? toolOutput.errorText(`${text}\n[exit code: ${output.exitCode}]`)
+          : toolOutput.text(text);
       },
     });
 
     const app = await createTestRuntime({
       agent: {
         definition: defineAgent({
+          defaultTools: false,
           model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
         }),
         name: "task-promotion-complete",
@@ -138,22 +149,124 @@ describe("inline tool task promotion and deferred task controls", () => {
         expect(res2.status).toBe("completed");
         expect(res2.reply).toBe("Second turn done.");
 
+        expect(modelOutputInputs).toEqual([
+          { exitCode: 0, summary: "instant ok" },
+          { exitCode: 1, summary: "2 tests failed" },
+        ]);
+
+        expect(observedSystems.every((system) => !system.includes(TASK_SYSTEM_BLOCK))).toBe(true);
+        expect(new Set(observedSystems).size).toBe(1);
+
+        expect(observedPrompts[0]).not.toContain("A call that returns");
+        expect(observedPrompts[1]).not.toContain("A call that returns");
+        expect(observedPrompts[2]).toContain("A call that returns");
+
         expect(observedTools[0]).not.toContain(TASK_WAIT_TOOL_NAME);
         expect(observedTools[0]).not.toContain(TASK_CANCEL_TOOL_NAME);
-        expect(observedSystems[0]).not.toContain(TASK_SYSTEM_BLOCK);
-
         expect(observedTools[1]).not.toContain(TASK_WAIT_TOOL_NAME);
-        expect(observedSystems[1]).not.toContain(TASK_SYSTEM_BLOCK);
-
         expect(observedTools[2]).toContain(TASK_WAIT_TOOL_NAME);
         expect(observedTools[2]).toContain(TASK_CANCEL_TOOL_NAME);
-        expect(observedSystems[2]).toContain(TASK_SYSTEM_BLOCK);
-
         expect(observedTools[4]).toContain(TASK_WAIT_TOOL_NAME);
         expect(observedTools[4]).toContain(TASK_CANCEL_TOOL_NAME);
-        expect(observedSystems[4]).toContain(TASK_SYSTEM_BLOCK);
 
         expect(await collectViolations(runtime, turn1.sessionId)).toEqual([]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+  });
+
+  it("promotes an inline tool call that required human approval", async () => {
+    let finishDeferred!: (value: { readonly summary: string }) => void;
+    const deferredReady = new Promise<{ readonly summary: string }>((resolve) => {
+      finishDeferred = resolve;
+    });
+
+    let step = 0;
+    const model = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async (options) => {
+          step += 1;
+          if (step === 1) {
+            return toolCallsStreamResult([
+              { input: "{}", toolCallId: "call_approved_slow", toolName: "approved_job" },
+            ]);
+          }
+          if (step === 2) {
+            setTimeout(() => finishDeferred({ summary: "approved build done" }), 10);
+            return toolCallsStreamResult([
+              { input: "{}", toolCallId: "call_wait", toolName: TASK_WAIT_TOOL_NAME },
+            ]);
+          }
+          expect(JSON.stringify(options.prompt)).toContain("APPROVED_OUTPUT: approved build done");
+          return textStreamResult("Approved job completed.");
+        },
+        modelId: "task-promotion-approved",
+        provider: "eve-test",
+      }),
+    );
+
+    const approvedJobTool = defineTool({
+      approval: always(),
+      description: "Requires approval and promotes to a durable task.",
+      inputSchema: z.object({}),
+      async execute() {
+        expect(canPromoteToTask()).toBe(true);
+        return promoteToTask<{ readonly summary: string }>({
+          handoff: { job: "approved-1" },
+          preview: "Approved job running...",
+          workflowId: PROMOTED_WORKFLOW_ID,
+        });
+      },
+      toModelOutput(output) {
+        return toolOutput.text(`APPROVED_OUTPUT: ${output.summary}`);
+      },
+    });
+
+    const app = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
+        }),
+        name: "task-promotion-approved",
+      },
+      modules: [
+        {
+          loadNamespace: async () => ({ default: approvedJobTool }),
+          logicalPath: "tools/approved_job.ts",
+        },
+      ],
+    });
+
+    await app.run(async () => {
+      const runtime = createTestInProcessRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      runtime.registerWorkflow(PROMOTED_WORKFLOW_ID, async (handoff: { job: string }) => {
+        expect(handoff).toEqual({ job: "approved-1" });
+        return await deferredReady;
+      });
+      try {
+        const channel = createChannelAddress({
+          adapter: { kind: "http" },
+          channelName: "http",
+          continuationToken: "http:promo-approved",
+          runtime,
+        });
+        const turn = await channel.send("Run the approved job.", { auth: null });
+        const paused = await turn.result();
+        expect(paused.status).toBe("awaiting-input");
+        const approvalId = paused.interactions[0]?.interactionId;
+        expect(approvalId).toBeDefined();
+
+        const resumed = await channel.respond(
+          [{ interactionId: approvalId!, optionId: "approve" }],
+          { auth: null },
+        );
+        const done = await resumed.result();
+        expect(done.status).toBe("completed");
+        expect(done.reply).toBe("Approved job completed.");
+        expect(await collectViolations(runtime, turn.sessionId)).toEqual([]);
       } finally {
         await runtime.dispose();
       }

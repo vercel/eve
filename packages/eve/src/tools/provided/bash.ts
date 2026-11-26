@@ -21,11 +21,10 @@ export interface BashToolInput {
 }
 
 /**
- * Output of the provided `bash` tool. A command that finishes within the wait
- * (60 seconds, or the input's `timeout`) is `completed`. A longer command keeps
- * running in the sandbox as process group `pid` and returns `running` with its
- * output so far; it keeps writing `stdout`, `stderr`, and finally `exit` files
- * in `outputDirectory`.
+ * Output of the provided `bash` tool. Commands that finish in time or expire
+ * under an explicit `timeout` up to 120s return `completed` (exit 124 on
+ * timeout). Longer commands promote to a background task during a turn, or
+ * return `running` with `pid` and `outputDirectory` outside a promotable turn.
  */
 export type BashToolOutput =
   | {

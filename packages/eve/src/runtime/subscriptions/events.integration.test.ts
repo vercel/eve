@@ -54,8 +54,7 @@ vi.mock("#runtime/subscriptions/owner.js", () => ({
   startConnectionEventOwner: vi.fn(async (binding: EventBinding, bundle: unknown) => {
     const existing = handlers.get(binding.id);
     if (existing !== undefined) return existing.subscription;
-    const { subscribeConnectionEvent } =
-      await import("#runtime/subscriptions/lifecycle-step.js");
+    const { subscribeConnectionEvent } = await import("#runtime/subscriptions/lifecycle-step.js");
     const { subscriptionFromOutcome } = await vi.importActual<
       typeof import("#runtime/subscriptions/owner.js")
     >("#runtime/subscriptions/owner.js");

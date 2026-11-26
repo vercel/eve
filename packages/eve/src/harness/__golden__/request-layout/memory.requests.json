@@ -30,7 +30,9 @@
       "write_file",
       "edit_file",
       "web_fetch",
-      "agent"
+      "agent",
+      "eve__task_wait",
+      "eve__task_cancel"
     ]
   },
   {
@@ -109,7 +111,9 @@
       "write_file",
       "edit_file",
       "web_fetch",
-      "agent"
+      "agent",
+      "eve__task_wait",
+      "eve__task_cancel"
     ]
   }
 ]

@@ -11,6 +11,7 @@ import {
   truncateTail,
 } from "#execution/sandbox/truncate-output.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { TASK_CANCEL_TOOL_NAME } from "#protocol/task-tools.js";
 import { canPromoteToTask, promoteToTask } from "#tools/task-handoff.js";
 
 /** How long a `bash` call waits by default before it leaves the command running in the background. */
@@ -45,7 +46,7 @@ set -m
   trap : TERM INT
   (unset _eve_d; eval "$_eve_cmd") > "$_eve_d/stdout" 2> "$_eve_d/stderr"
   code=$?
-  echo "$code" > "$_eve_d/exit"
+  echo "$code" > "$_eve_d/exit.tmp" && mv -f "$_eve_d/exit.tmp" "$_eve_d/exit"
   exit "$code"
 ) < /dev/null > /dev/null 2>&1 &
 pid=$!
@@ -122,6 +123,13 @@ interface StreamTails {
   readonly stdout: StreamTail;
 }
 
+export function isBashJobHandoff(value: unknown): value is BashJobHandoff {
+  if (typeof value !== "object" || value === null) return false;
+  const directory = Reflect.get(value, "directory");
+  const pid = Reflect.get(value, "pid");
+  return typeof directory === "string" && directory.length > 0 && Number.isInteger(pid) && pid > 0;
+}
+
 export async function executeBashToolOnSandbox(
   sandbox: SandboxSession,
   args: BashInput,
@@ -132,8 +140,10 @@ export async function executeBashToolOnSandbox(
     return result;
   }
   const waitSeconds = resolveBashWaitSeconds(args.timeout);
+  const handoff: BashJobHandoff = { directory: result.outputDirectory, pid: result.pid };
   return promoteToTask<BashResult>({
-    handoff: { directory: result.outputDirectory, pid: result.pid },
+    handoff: { ...handoff },
+    onCancel: () => cancelBashJobOnSandbox(sandbox, handoff),
     preview: formatBashPromotionPreview(result, waitSeconds),
     workflowId: bashJobTaskWorkflowReference.workflowId,
   });
@@ -172,8 +182,67 @@ function formatBashPromotionPreview(result: BashRunningResult, waitSeconds: numb
   return (
     `${streams}` +
     `Still running after ${waitSeconds}s (pid ${result.pid}, output in ${result.outputDirectory}). ` +
-    `Stop it with task_cancel if it appears hung.`
+    `Stop it with ${TASK_CANCEL_TOOL_NAME} if it appears hung.`
   );
+}
+
+function assertValidPid(pid: number): string {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new RangeError(`Expected a positive integer process group id, received ${String(pid)}.`);
+  }
+  return String(pid);
+}
+
+function buildStreamReadCommands(marker: string, quotedDir: string, codeExpr: string): string[] {
+  return [
+    `out_bytes="$(($(wc -c < stdout 2>/dev/null || echo 0)))"`,
+    `out_lines="$(($(wc -l < stdout 2>/dev/null || echo 0)))"`,
+    `err_bytes="$(($(wc -c < stderr 2>/dev/null || echo 0)))"`,
+    `err_lines="$(($(wc -l < stderr 2>/dev/null || echo 0)))"`,
+    `keep=0`,
+    `[ "$out_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$out_lines" -gt ${KEEP_OUTPUT_LINES} ] || [ "$err_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$err_lines" -gt ${KEEP_OUTPUT_LINES} ] && keep=1`,
+    `printf '%s done %s %s %s %s %s %s\\n' ${marker} ${codeExpr} "$out_bytes" "$out_lines" "$err_bytes" "$err_lines" "$keep"`,
+    `tail -c ${MAX_OUTPUT_BYTES} stdout 2>/dev/null`,
+    `tail -c ${MAX_OUTPUT_BYTES} stderr 2>/dev/null >&2`,
+    `[ "$keep" -eq 0 ] && rm -rf ${quotedDir}`,
+  ];
+}
+
+function parseReadStreamsOutput(
+  raw: { readonly stdout: string; readonly stderr: string },
+  marker: string,
+  directory: string,
+): { readonly exitCode: number; readonly streams: BashStreams } | undefined {
+  const doneMatch = new RegExp(
+    `(?:^|\\n)${marker} done (\\d+) (\\d+) (\\d+) (\\d+) (\\d+) (\\d+)\\n`,
+  ).exec(raw.stdout);
+  if (doneMatch === null) return undefined;
+  const exitCode = Number(doneMatch[1]);
+  const outBytes = Number(doneMatch[2]);
+  const outLines = Number(doneMatch[3]);
+  const errBytes = Number(doneMatch[4]);
+  const errLines = Number(doneMatch[5]);
+  const keep = doneMatch[6] === "1";
+  const stdoutText = raw.stdout.slice(doneMatch.index + doneMatch[0].length);
+  const stderrText = raw.stderr;
+  const outOmitted = Math.max(0, outBytes - Buffer.byteLength(stdoutText));
+  const errOmitted = Math.max(0, errBytes - Buffer.byteLength(stderrText));
+  const outTotalLines = outLines + (stdoutText.length > 0 && !stdoutText.endsWith("\n") ? 1 : 0);
+  const errTotalLines = errLines + (stderrText.length > 0 && !stderrText.endsWith("\n") ? 1 : 0);
+  const tails: StreamTails = {
+    stdout:
+      outOmitted === 0
+        ? { text: stdoutText, totalLines: outTotalLines }
+        : { omittedBytes: outOmitted, text: stdoutText },
+    stderr:
+      errOmitted === 0
+        ? { text: stderrText, totalLines: errTotalLines }
+        : { omittedBytes: errOmitted, text: stderrText },
+  };
+  return {
+    exitCode,
+    streams: formatStreams(tails, keep ? directory : undefined),
+  };
 }
 
 export async function pollBashJobOnSandbox(
@@ -183,34 +252,23 @@ export async function pollBashJobOnSandbox(
   | { readonly status: "running" }
   | { readonly result: BashCompletedResult; readonly status: "completed" }
 > {
+  const pid = assertValidPid(handoff.pid);
   const marker = `eve-bash-poll:${randomUUID().slice(0, 8)}`;
   const quoted = shellQuote(handoff.directory);
-  const pid = String(handoff.pid);
   const raw = await sandbox.run({
     command: [
       `cd ${quoted} 2>/dev/null || { printf '%s %s %s %s %s\\n' ${marker} missing 1 0 0; exit 0; }`,
-      `if [ ! -e exit ] && kill -0 -- -${pid} 2>/dev/null; then printf '%s running\\n' ${marker}; exit 0; fi`,
+      `if [ ! -s exit ] && kill -0 -- -${pid} 2>/dev/null; then printf '%s running\\n' ${marker}; exit 0; fi`,
       `code="$(cat exit 2>/dev/null)"`,
       `case "$code" in ''|*[!0-9]*) code=1 ;; esac`,
-      `out_bytes="$(($(wc -c < stdout 2>/dev/null || echo 0)))"`,
-      `out_lines="$(($(wc -l < stdout 2>/dev/null || echo 0)))"`,
-      `err_bytes="$(($(wc -c < stderr 2>/dev/null || echo 0)))"`,
-      `err_lines="$(($(wc -l < stderr 2>/dev/null || echo 0)))"`,
-      `keep=0`,
-      `[ "$out_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$out_lines" -gt ${KEEP_OUTPUT_LINES} ] || [ "$err_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$err_lines" -gt ${KEEP_OUTPUT_LINES} ] && keep=1`,
-      `printf '%s done %s %s %s %s %s %s\\n' ${marker} "$code" "$out_bytes" "$out_lines" "$err_bytes" "$err_lines" "$keep"`,
-      `tail -c ${MAX_OUTPUT_BYTES} stdout 2>/dev/null`,
-      `tail -c ${MAX_OUTPUT_BYTES} stderr 2>/dev/null >&2`,
-      `[ "$keep" -eq 0 ] && rm -rf ${quoted}`,
+      ...buildStreamReadCommands(marker, quoted, '"$code"'),
     ].join("\n"),
   });
   if (new RegExp(`(?:^|\\n)${marker} running(?:\\n|$)`).test(raw.stdout)) {
     return { status: "running" };
   }
-  const doneMatch = new RegExp(
-    `(?:^|\\n)${marker} done (\\d+) (\\d+) (\\d+) (\\d+) (\\d+) (\\d+)\\n`,
-  ).exec(raw.stdout);
-  if (doneMatch === null) {
+  const parsed = parseReadStreamsOutput(raw, marker, handoff.directory);
+  if (parsed === undefined) {
     return {
       result: {
         exitCode: 1,
@@ -222,30 +280,10 @@ export async function pollBashJobOnSandbox(
       status: "completed",
     };
   }
-  const exitCode = Number(doneMatch[1]);
-  const outBytes = Number(doneMatch[2]);
-  const outLines = Number(doneMatch[3]);
-  const errBytes = Number(doneMatch[4]);
-  const errLines = Number(doneMatch[5]);
-  const keep = doneMatch[6] === "1";
-  const stdoutText = raw.stdout.slice(doneMatch.index + doneMatch[0].length);
-  const stderrText = raw.stderr;
-  const outOmitted = Math.max(0, outBytes - Buffer.byteLength(stdoutText));
-  const errOmitted = Math.max(0, errBytes - Buffer.byteLength(stderrText));
-  const tails: StreamTails = {
-    stdout:
-      outOmitted === 0
-        ? { text: stdoutText, totalLines: outLines }
-        : { omittedBytes: outOmitted, text: stdoutText },
-    stderr:
-      errOmitted === 0
-        ? { text: stderrText, totalLines: errLines }
-        : { omittedBytes: errOmitted, text: stderrText },
-  };
   return {
     result: {
-      ...formatStreams(tails, keep ? handoff.directory : undefined),
-      exitCode,
+      ...parsed.streams,
+      exitCode: parsed.exitCode,
       status: "completed",
     },
     status: "completed",
@@ -255,16 +293,52 @@ export async function pollBashJobOnSandbox(
 export async function cancelBashJobOnSandbox(
   sandbox: SandboxSession,
   handoff: BashJobHandoff,
+  options: { readonly keepOutputDirectory?: boolean } = {},
 ): Promise<void> {
+  const pid = assertValidPid(handoff.pid);
   const quoted = shellQuote(handoff.directory);
-  const pid = String(handoff.pid);
+  const remove = options.keepOutputDirectory === true ? "" : `; rm -rf ${quoted}`;
   try {
     await sandbox.run({
-      command:
-        `kill -TERM -- -${pid} 2>/dev/null; sleep 0.2; kill -KILL -- -${pid} 2>/dev/null; ` +
-        `rm -rf ${quoted}`,
+      command: `kill -TERM -- -${pid} 2>/dev/null; sleep 0.2; kill -KILL -- -${pid} 2>/dev/null${remove}`,
     });
   } catch {}
+}
+
+export async function timeoutBashJobOnSandbox(
+  sandbox: SandboxSession,
+  handoff: BashJobHandoff,
+  message: string,
+): Promise<BashCompletedResult> {
+  await cancelBashJobOnSandbox(sandbox, handoff, { keepOutputDirectory: true });
+  const marker = `eve-bash-timeout:${randomUUID().slice(0, 8)}`;
+  const quoted = shellQuote(handoff.directory);
+  try {
+    const raw = await sandbox.run({
+      command: [
+        `cd ${quoted} 2>/dev/null || exit 0`,
+        ...buildStreamReadCommands(marker, quoted, "124"),
+      ].join("\n"),
+    });
+    const parsed = parseReadStreamsOutput(raw, marker, handoff.directory);
+    if (parsed !== undefined) {
+      const stderr = `${parsed.streams.stderr}${parsed.streams.stderr && !parsed.streams.stderr.endsWith("\n") ? "\n" : ""}${message}\n`;
+      return {
+        exitCode: 124,
+        status: "completed",
+        stderr,
+        stdout: parsed.streams.stdout,
+        truncated: parsed.streams.truncated,
+      };
+    }
+  } catch {}
+  return {
+    exitCode: 124,
+    status: "completed",
+    stderr: `${message}\n`,
+    stdout: "",
+    truncated: false,
+  };
 }
 
 async function runCommand(
@@ -338,10 +412,14 @@ async function runCommand(
     }
     void finished.catch(() => {});
     if (onTimeout === "kill") {
-      await cancelBashJobOnSandbox(sandbox, {
-        directory: running.outputDirectory,
-        pid: running.pid,
-      });
+      await cancelBashJobOnSandbox(
+        sandbox,
+        {
+          directory: running.outputDirectory,
+          pid: running.pid,
+        },
+        { keepOutputDirectory: running.truncated },
+      );
       const stderr = `${running.stderr}${running.stderr && !running.stderr.endsWith("\n") ? "\n" : ""}Command timed out after ${waitSeconds} seconds and was killed.\n`;
       return {
         exitCode: 124,

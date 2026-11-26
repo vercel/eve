@@ -1,7 +1,5 @@
 import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import { contextStorage } from "#context/container.js";
-import { TaskPromotionAllowedKey } from "#context/keys.js";
 import { approvedClearance, type Clearance } from "#harness/clearance.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import {
@@ -41,7 +39,13 @@ import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
 import { toModelSchema } from "#tools/schema.js";
-import { isTaskPromotion, type PromotedTaskCall } from "#tools/task-handoff.js";
+import {
+  canPromoteToTask,
+  cancelPromotedTasks,
+  isTaskPromotion,
+  withTaskPromotionAllowed,
+  type PromotedTaskCall,
+} from "#tools/task-handoff.js";
 import { projectToolLabel } from "#harness/action-presentation.js";
 import { displayTitle } from "#protocol/session-projection/display-name.js";
 
@@ -246,12 +250,20 @@ export async function executeToolCall(
       };
     }
     if (!failed && isTaskPromotion(output)) {
+      if (!canPromoteToTask()) {
+        await Promise.resolve(output.onCancel?.()).catch(() => {});
+        throw new Error(
+          `Tool "${toolName}" attempted to promote call "${callId}" to a task outside a promotable turn step.`,
+        );
+      }
+      await input.beforeResult?.({ failure: undefined, invoked });
       return {
         promoted: {
           callId,
           clearance,
           handoff: output.handoff,
           input: args,
+          ...(output.onCancel !== undefined && { onCancel: output.onCancel }),
           ...(output.preview !== undefined && { preview: output.preview }),
           toolName,
           workflowId: output.workflowId,
@@ -478,16 +490,8 @@ export async function executeInlineCalls(input: {
       !input.excludedCallIds.has(call.toolCallId) &&
       input.tools.get(call.toolName) !== undefined,
   );
-  const store = contextStorage.getStore();
-  const previousPromotion = store?.get(TaskPromotionAllowedKey);
-  store?.setVirtualContext(TaskPromotionAllowedKey, true);
-  let finished: PromiseSettledResult<{
-    call: TypedToolCall<ToolSet>;
-    executed: CallOutcome;
-    approval?: ApprovalAsk;
-  }>[];
-  try {
-    finished = await Promise.allSettled(
+  const finished = await withTaskPromotionAllowed(true, () =>
+    Promise.allSettled(
       calls.map(
         async (
           call,
@@ -520,16 +524,21 @@ export async function executeInlineCalls(input: {
           }
         },
       ),
-    );
-  } finally {
-    if (store !== undefined) {
-      if (previousPromotion === undefined) store.delete(TaskPromotionAllowedKey);
-      else store.setVirtualContext(TaskPromotionAllowedKey, previousPromotion);
-    }
-  }
-  const rejected = finished.find((call) => call.status === "rejected");
-  if (rejected?.status === "rejected") throw rejected.reason;
+    ),
+  );
   const executed = finished.flatMap((call) => (call.status === "fulfilled" ? [call.value] : []));
+  const promotedTasks = executed.flatMap(({ executed }) =>
+    executed.promoted === undefined ? [] : [executed.promoted],
+  );
+  const rejected = finished.find((call) => call.status === "rejected");
+  if (rejected?.status === "rejected") {
+    await cancelPromotedTasks(promotedTasks);
+    throw rejected.reason;
+  }
+  if (input.abortSignal?.aborted === true) {
+    await cancelPromotedTasks(promotedTasks);
+    throwIfTurnAborted(input.abortSignal);
+  }
   return {
     policyApprovals: Object.fromEntries(
       executed.flatMap(({ call, executed }) =>
@@ -538,9 +547,7 @@ export async function executeInlineCalls(input: {
     ),
     approvals: executed.flatMap(({ approval }) => (approval === undefined ? [] : [approval])),
     parts: executed.flatMap(({ executed }) => executed.settled.map((result) => result.part)),
-    promotedTasks: executed.flatMap(({ executed }) =>
-      executed.promoted === undefined ? [] : [executed.promoted],
-    ),
+    promotedTasks,
     signIns: executed.flatMap(({ executed }) =>
       executed.signIn === undefined ? [] : [executed.signIn],
     ),

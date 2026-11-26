@@ -42,6 +42,8 @@
       "agent",
       "lookup",
       "deploy",
+      "eve__task_wait",
+      "eve__task_cancel",
       "eve__skill"
     ]
   },
@@ -115,6 +117,8 @@
       "agent",
       "lookup",
       "deploy",
+      "eve__task_wait",
+      "eve__task_cancel",
       "eve__skill"
     ]
   },
@@ -206,6 +210,8 @@
       "agent",
       "lookup",
       "deploy",
+      "eve__task_wait",
+      "eve__task_cancel",
       "eve__skill"
     ]
   },
@@ -340,6 +346,8 @@
       "agent",
       "lookup",
       "deploy",
+      "eve__task_wait",
+      "eve__task_cancel",
       "eve__skill"
     ]
   },
@@ -492,6 +500,8 @@
       "agent",
       "lookup",
       "deploy",
+      "eve__task_wait",
+      "eve__task_cancel",
       "eve__skill"
     ]
   },
@@ -583,6 +593,8 @@
       "agent",
       "lookup",
       "deploy",
+      "eve__task_wait",
+      "eve__task_cancel",
       "eve__skill"
     ]
   }

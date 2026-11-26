@@ -199,7 +199,11 @@ describe("buildStepCatalog", () => {
         session: {},
       });
 
-      expect(names(catalog.advertised)).toEqual(["add"]);
+      expect(names(catalog.advertised)).toEqual([
+        "add",
+        TASK_WAIT_TOOL_NAME,
+        TASK_CANCEL_TOOL_NAME,
+      ]);
     });
 
     it("keeps the catalog tools a model call offered, unchanged, once nothing reaches them", async () => {
@@ -257,13 +261,22 @@ describe("buildStepCatalog", () => {
       "billing",
       "agent",
       "delegate",
+      TASK_WAIT_TOOL_NAME,
+      TASK_CANCEL_TOOL_NAME,
       SEARCH_TOOL_NAME,
       CALL_TOOL_NAME,
     ]);
     expect(names(root.deferred)).toEqual(["archive", "researcher"]);
 
     const child = (await catalogContext({ session: CHILD, tools })).catalog;
-    expect(names(child.advertised)).toEqual(["add", "delegate", SEARCH_TOOL_NAME, CALL_TOOL_NAME]);
+    expect(names(child.advertised)).toEqual([
+      "add",
+      "delegate",
+      TASK_WAIT_TOOL_NAME,
+      TASK_CANCEL_TOOL_NAME,
+      SEARCH_TOOL_NAME,
+      CALL_TOOL_NAME,
+    ]);
     expect(names(child.deferred)).toEqual(["researcher"]);
     expect(await validateTool(child, { name: "archive" })).toEqual({
       issues: [
@@ -280,27 +293,28 @@ describe("buildStepCatalog", () => {
     const OFFERED = true;
     const NOT_OFFERED = false;
 
-    it("are omitted before the session has started any task", async () => {
+    it("are offered while a tool the session sees starts tasks, deferred or not", async () => {
       expect(await offeredFor({ tools: [inlineTool("add")] })).toEqual(NOT_OFFERED);
       expect(await offeredFor({ tools: [workflowTool("deploy_service")] })).toEqual(NOT_OFFERED);
       expect(
         await offeredFor({ tools: [workflowTool("research", "task", { deferred: true })] }),
-      ).toEqual(NOT_OFFERED);
-      expect(await offeredFor({ tools: [subagentTool("delegate")] })).toEqual(NOT_OFFERED);
+      ).toEqual(OFFERED);
+      expect(await offeredFor({ tools: [subagentTool("delegate")] })).toEqual(OFFERED);
       expect(
         await offeredFor({ dynamicSubagents: ["specialist"], tools: [inlineTool("add")] }),
-      ).toEqual(NOT_OFFERED);
+      ).toEqual(OFFERED);
     });
 
-    it("latch on once a task starts and stay offered after it ends", async () => {
+    it("are omitted for a leaf subagent without task tools until a task starts, then stay offered after it ends", async () => {
       const tools = [inlineTool("add"), subagentTool("agent", { rootOnly: true })];
 
-      expect(await offeredFor({ tasks: { task_1: { status: "running" } }, tools })).toEqual(
-        OFFERED,
-      );
-      expect(await offeredFor({ tasks: { task_1: { status: "ended" } }, tools })).toEqual(OFFERED);
+      expect(await offeredFor({ tools })).toEqual(OFFERED);
+      expect(await offeredFor({ session: CHILD, tools })).toEqual(NOT_OFFERED);
       expect(
         await offeredFor({ session: CHILD, tasks: { task_1: { status: "running" } }, tools }),
+      ).toEqual(OFFERED);
+      expect(
+        await offeredFor({ session: CHILD, tasks: { task_1: { status: "ended" } }, tools }),
       ).toEqual(OFFERED);
     });
   });
@@ -391,7 +405,6 @@ describe("buildStepCatalog", () => {
             execute: undefined,
           },
         ],
-        tasks: { task_0: { status: "running" } },
       }));
     });
 

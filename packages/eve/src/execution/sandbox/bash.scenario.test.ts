@@ -14,6 +14,7 @@ import {
   cancelBashJobOnSandbox,
   executeBashOnSandbox,
   pollBashJobOnSandbox,
+  timeoutBashJobOnSandbox,
 } from "./bash.js";
 import { createConnectionSession } from "./session.js";
 
@@ -254,6 +255,100 @@ describe("executeBashOnSandbox with a real shell", () => {
     });
     await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 10_000 });
     expect(existsSync(longRunning.outputDirectory)).toBe(false);
+  });
+
+  it("keeps the saved output file on disk when onTimeout kill truncates output", async () => {
+    const { sandbox } = await createHostSandbox();
+
+    const result = await executeBashOnSandbox(
+      sandbox,
+      {
+        command: "seq 1 5000; sleep 60",
+        timeout: 1,
+      },
+      { onTimeout: "kill" },
+    );
+
+    expect(result.status).toBe("completed");
+    if (result.status !== "completed") return;
+    expect(result.exitCode).toBe(124);
+    expect(result.truncated).toBe(true);
+    const path = /^\[stdout truncated: showing last \d+ of \d+ lines; full output: (\S+)\]\n/u.exec(
+      result.stdout,
+    )?.[1];
+    expect(path).toBeDefined();
+    try {
+      expect(existsSync(path!)).toBe(true);
+      expect(readFileSync(path!, "utf8")).toContain("5000\n");
+    } finally {
+      await rm(join(path!, ".."), { force: true, recursive: true });
+    }
+  });
+
+  it("reports truncation when polled output has 2001 lines without a trailing newline", async () => {
+    const { sandbox } = await createHostSandbox();
+
+    const started = await executeBashOnSandbox(sandbox, {
+      command: "sleep 2; awk 'BEGIN{for(i=1;i<=2000;i++) print i; printf \"2001\"}'",
+      timeout: 1,
+    });
+    if (started.status !== "running") {
+      throw new Error(`expected running: ${JSON.stringify(started)}`);
+    }
+    const handoff = { directory: started.outputDirectory, pid: started.pid };
+    const polled = await vi.waitFor(
+      async () => {
+        const next = await pollBashJobOnSandbox(sandbox, handoff);
+        expect(next.status).toBe("completed");
+        return next;
+      },
+      { interval: 200, timeout: 10_000 },
+    );
+    if (polled.status !== "completed") return;
+    try {
+      expect(polled.result.truncated).toBe(true);
+      expect(polled.result.stdout).toContain("showing last 2000 of 2001 lines; full output:");
+      expect(existsSync(join(handoff.directory, "stdout"))).toBe(true);
+    } finally {
+      await rm(handoff.directory, { force: true, recursive: true });
+    }
+  });
+
+  it("captures the final output tail when timeoutBashJobOnSandbox kills a running job", async () => {
+    const { home, sandbox } = await createHostSandbox();
+    const pidFile = join(home, "timeout-tail.pid");
+
+    const started = await executeBashOnSandbox(sandbox, {
+      command: `echo before-timeout; sleep 60 & echo $! > ${pidFile}; wait`,
+      timeout: 1,
+    });
+    if (started.status !== "running") {
+      throw new Error(`expected running: ${JSON.stringify(started)}`);
+    }
+    const childPid = await readPid(pidFile);
+    const timedOut = await timeoutBashJobOnSandbox(
+      sandbox,
+      { directory: started.outputDirectory, pid: started.pid },
+      "Command timed out after 30 minutes and was killed.",
+    );
+
+    expect(timedOut.status).toBe("completed");
+    expect(timedOut.exitCode).toBe(124);
+    expect(timedOut.stdout).toContain("before-timeout");
+    expect(timedOut.stderr).toContain("Command timed out after 30 minutes and was killed.");
+    await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 10_000 });
+    expect(existsSync(started.outputDirectory)).toBe(false);
+  });
+
+  it("rejects non-positive process group ids in poll and cancel helpers", async () => {
+    const { sandbox } = await createHostSandbox();
+
+    await expect(
+      pollBashJobOnSandbox(sandbox, { directory: "/tmp/unused", pid: 0 }),
+    ).rejects.toThrow(RangeError);
+    await expect(
+      cancelBashJobOnSandbox(sandbox, { directory: "/tmp/unused", pid: -1 }),
+    ).rejects.toThrow(RangeError);
   });
 });
 

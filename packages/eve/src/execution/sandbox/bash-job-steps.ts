@@ -10,6 +10,7 @@ import { ownerReference } from "#execution/agent-sessions/owner.js";
 import {
   cancelBashJobOnSandbox,
   pollBashJobOnSandbox,
+  timeoutBashJobOnSandbox,
   type BashCompletedResult,
   type BashJobHandoff,
 } from "#execution/sandbox/bash.js";
@@ -23,13 +24,14 @@ import {
   withDevelopmentWorkflowGeneration,
 } from "#runtime/development-generation.js";
 import { resolveSessionAgent } from "#runtime/sessions/runtime-context-keys.js";
-import { runtimeNodeId } from "#runtime/sessions/session-agent.js";
+import { runtimeNodeId, type SessionAgent } from "#runtime/sessions/session-agent.js";
+import type { SandboxState } from "#sandbox/state.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 type BashJobStepSession = WorkflowStepContext["session"];
 
 export type PollBashJobResult =
-  | { readonly status: "running" }
+  | { readonly atMs: number; readonly status: "running" }
   | { readonly result: BashCompletedResult; readonly status: "completed" };
 
 export async function pollBashJobStep(
@@ -39,9 +41,10 @@ export async function pollBashJobStep(
 ): Promise<PollBashJobResult> {
   "use step";
 
-  return await withStepSandbox(sandboxRef, session, (sandbox) =>
-    pollBashJobOnSandbox(sandbox, handoff),
-  );
+  return await withStepSandbox(sandboxRef, session, async (sandbox) => {
+    const polled = await pollBashJobOnSandbox(sandbox, handoff);
+    return polled.status === "running" ? { atMs: Date.now(), status: "running" } : polled;
+  });
 }
 
 export async function cancelBashJobStep(
@@ -52,6 +55,46 @@ export async function cancelBashJobStep(
   "use step";
 
   await withStepSandbox(sandboxRef, session, (sandbox) => cancelBashJobOnSandbox(sandbox, handoff));
+}
+
+export async function timeoutBashJobStep(
+  sandboxRef: WorkflowStepSandbox,
+  session: BashJobStepSession,
+  handoff: BashJobHandoff,
+  message: string,
+): Promise<BashCompletedResult> {
+  "use step";
+
+  return await withStepSandbox(sandboxRef, session, (sandbox) =>
+    timeoutBashJobOnSandbox(sandbox, handoff, message),
+  );
+}
+
+export async function cancelBashJobForAgent(input: {
+  readonly agent: SessionAgent;
+  readonly handoff: BashJobHandoff;
+  readonly sandboxSessionId: string;
+  readonly sandboxState: SandboxState | undefined;
+}): Promise<void> {
+  try {
+    const sandbox = await input.agent.sandbox();
+    if (sandbox === undefined) return;
+    const access = await ensureSandboxAccess({
+      ...sandbox.template,
+      nodeId: runtimeNodeId(input.agent),
+      ownsSandbox: false,
+      registry: sandbox.registry,
+      sessionId: input.sandboxSessionId,
+      state: input.sandboxState ?? null,
+      shutdownTracking: "none",
+    });
+    try {
+      const active = await access.get();
+      if (active !== null) await cancelBashJobOnSandbox(active, input.handoff);
+    } finally {
+      await access.release();
+    }
+  } catch {}
 }
 
 function populateStepContext(store: AlsContext, session: BashJobStepSession): void {
@@ -99,7 +142,5 @@ async function withStepSandbox<T>(
   if (generation !== undefined) {
     return await withDevelopmentWorkflowGeneration(generation, run);
   }
-  const context = new ContextContainer();
-  populateStepContext(context, session);
-  return await contextStorage.run(context, run);
+  return await contextStorage.run(new ContextContainer(), run);
 }

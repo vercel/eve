@@ -38,9 +38,9 @@ export { default } from "eve/tools/bash";
 
 `bash` waits up to 60 seconds by default. Passing an explicit `timeout` up to 120 seconds kills the command on expiry (exit code 124) with any partial output. Omitting `timeout` or passing a value above 120 waits up to 60 or 120 seconds (leaving room within the Vercel Functions time limit) and then promotes a still-running command to a background [task](/docs/tools/tasks).
 
-A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A promoted command keeps running in its own process group under `/tmp/.eve/jobs/` and delivers its final result in `<task_result>` when it finishes, or stops its process group when cancelled via `eve__task_cancel` or turn cancellation.
+A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A promoted command keeps running in its own process group under `/tmp/.eve/jobs/` (up to 30 minutes before being killed with exit code 124 and its final output tail) and delivers its final result in `<task_result>` when it finishes, or stops its process group when cancelled via `eve__task_cancel` or turn cancellation.
 
-The model reads the result as plain text: `stdout`, then any `stderr` after a `[stderr]` line, or `(no output)` when the command printed nothing. Each stream keeps its last 2,000 lines or 50 KB. A line longer than 2,000 characters keeps its start and ends with `[truncated]`. A stream with lines left out starts with a note naming the saved file under `/tmp/.eve/jobs/` when job files are available (`just-bash` has no background processes and stops commands on expiry). A command that exits non-zero ends with `[exit code: N]` and reaches the model as an error result. Channels and hooks receive `status: "completed"` (or `status: "running"` when `bash` runs outside a turn).
+The model reads the result as plain text: `stdout`, then any `stderr` after a `[stderr]` line, or `(no output)` when the command printed nothing. Each stream keeps its last 2,000 lines or 50 KB. A line longer than 2,000 characters keeps its start and ends with `[truncated]`. A stream with lines left out starts with a note naming the saved file under `/tmp/.eve/jobs/` when job files are available (`just-bash` has no background processes and stops commands on expiry). A command that exits non-zero ends with `[exit code: N]` and reaches the model as an error result. Channels and hooks receive `status: "completed"` (or `status: "running"` when `bash` runs outside a promotable turn step, such as in a code-mode program).
 
 A message that arrives while `bash` waits reaches the model after the foreground wait returns. Output files last until the sandbox stops.
 
@@ -60,9 +60,9 @@ export default defineTool({
 });
 ```
 
-A wrapper that spreads `bash` keeps its `timeout` input. If the wrapper supplies its own `execute` or input schema, forward `timeout` to `bash.execute` or remove it from the schema.
+A wrapper that spreads `bash` keeps its `timeout` input. If the wrapper supplies its own `execute` or input schema, forward `timeout` to `bash.execute` or remove it from the schema. Return the value from `bash.execute` directly when a command may promote to a background task: inside a turn it can return an internal task handoff rather than a `BashToolOutput` object.
 
-The wrapper also keeps the plain-text view through the spread `toModelOutput`. If your `execute` returns a string, the model sees that text. Any other shape, including a `bash` result with extra fields, reaches the model as JSON; set your own [`toModelOutput`](../tools#shape-what-the-model-sees-with-tomodeloutput) to change that.
+The wrapper also keeps the plain-text view through the spread `toModelOutput`. If your `execute` returns a string, the model sees that text. Any other completed shape, including a `bash` result with extra fields, reaches the model as JSON; set your own [`toModelOutput`](../tools#shape-what-the-model-sees-with-tomodeloutput) to change that.
 
 To keep a large result out of the model's context, set [`offloadContent`](../tools#keep-large-results-out-of-context-with-offloadcontent) as the wrapper's `toModelOutput`. `bash` already saves long output under `/tmp/.eve/jobs/`, so it doesn't need it.
 
@@ -452,7 +452,7 @@ The tools eve adds itself live in the `eve` namespace: `eve__search`, `eve__tool
 
 ### `eve__task_wait` and `eve__task_cancel`
 
-eve adds `eve__task_wait` and `eve__task_cancel` once a session starts its first [task](/docs/tools/tasks) (via `agent`, a subagent, a remote agent, `agentRouter()`, the `workflow` tool, an authored `task`/`serve` workflow tool, or a long-running `bash` command), and keeps them available for the rest of the session. There is no add command.
+eve adds `eve__task_wait` and `eve__task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/tasks) (the built-in `agent` tool, declared subagents, remote agents, `agentRouter()`, the `workflow` tool, or authored `task`/`serve` workflow tools), or once a long-running `bash` command promotes to a task, and keeps them available for the rest of the session. Task guidance is appended once the session starts its first task. There is no add command.
 
 - `eve__task_wait({ timeoutSeconds? })` waits until any task has a result, a new message arrives, or `timeoutSeconds` pass. It returns at once when a result is already waiting. The turn stays running, not paused, because `turn.paused` only reports approvals, questions, and other requests for input. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
 - `eve__task_cancel({ taskId })` stops a task's current work and says so. When the task already finished or is an idle [resumable task](/docs/tools/workflows#resumable-tasks-serve), it says the task had no work to stop. An id that names no task fails with `UNKNOWN_TASK`. Cancelling an agent task ends it; other resumable tasks stay available after a cancel.

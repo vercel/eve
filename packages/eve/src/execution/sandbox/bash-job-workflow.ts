@@ -1,12 +1,17 @@
 import { ownerFieldsOf } from "#execution/agent-sessions/owner.js";
 import type { BashCompletedResult, BashJobHandoff } from "#execution/sandbox/bash.js";
-import { cancelBashJobStep, pollBashJobStep } from "#execution/sandbox/bash-job-steps.js";
+import {
+  cancelBashJobStep,
+  pollBashJobStep,
+  timeoutBashJobStep,
+} from "#execution/sandbox/bash-job-steps.js";
 import { findWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import type { WorkflowStepSandbox } from "#execution/tools/workflow/step-context.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
 const POLL_INTERVALS_MS = [500, 1_000, 2_000, 5_000] as const;
 const MAX_BASH_TASK_MS = 30 * 60_000;
+const BASH_TASK_TIMEOUT_MESSAGE = "Command timed out after 30 minutes and was killed.";
 
 export async function bashJobTaskWorkflow(
   handoff: BashJobHandoff,
@@ -32,48 +37,43 @@ export async function runBashJobTask(
   };
   const session = ctx.session;
 
-  let elapsedMs = 0;
+  let startedAtMs: number | undefined;
   let attempt = 0;
   for (;;) {
     if (ctx.abortSignal.aborted) {
       await cancelBashJobStep(sandboxRef, session, handoff);
-      return {
-        exitCode: 143,
-        status: "completed",
-        stderr: "Command cancelled.\n",
-        stdout: "",
-        truncated: false,
-      };
+      return cancelledResult();
     }
     const polled = await pollBashJobStep(sandboxRef, session, handoff);
     if (polled.status === "completed") {
       return polled.result;
     }
-    if (elapsedMs >= MAX_BASH_TASK_MS) {
+    startedAtMs ??= polled.atMs;
+    if (polled.atMs - startedAtMs >= MAX_BASH_TASK_MS) {
+      return await timeoutBashJobStep(sandboxRef, session, handoff, BASH_TASK_TIMEOUT_MESSAGE);
+    }
+    if (ctx.abortSignal.aborted) {
       await cancelBashJobStep(sandboxRef, session, handoff);
-      return {
-        exitCode: 124,
-        status: "completed",
-        stderr: "Command timed out after 30 minutes.\n",
-        stdout: "",
-        truncated: false,
-      };
+      return cancelledResult();
     }
     const delayMs = POLL_INTERVALS_MS[Math.min(attempt, POLL_INTERVALS_MS.length - 1)]!;
     attempt += 1;
-    elapsedMs += delayMs;
     const woke = await sleepOrAbort(run.host.sleep(delayMs), ctx.abortSignal);
     if (woke === "aborted") {
       await cancelBashJobStep(sandboxRef, session, handoff);
-      return {
-        exitCode: 143,
-        status: "completed",
-        stderr: "Command cancelled.\n",
-        stdout: "",
-        truncated: false,
-      };
+      return cancelledResult();
     }
   }
+}
+
+function cancelledResult(): BashCompletedResult {
+  return {
+    exitCode: 143,
+    status: "completed",
+    stderr: "Command cancelled.\n",
+    stdout: "",
+    truncated: false,
+  };
 }
 
 function sleepOrAbort(timer: Promise<void>, signal: AbortSignal): Promise<"elapsed" | "aborted"> {

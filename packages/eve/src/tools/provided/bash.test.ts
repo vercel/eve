@@ -89,7 +89,6 @@ describe("bash timeout mode", () => {
     { expected: "kill", timeout: 15 },
     { expected: "kill", timeout: 120 },
     { expected: "background", timeout: 121 },
-    { expected: "background", timeout: 300 },
   ])("uses onTimeout=$expected when timeout=$timeout", async ({ expected, timeout }) => {
     const spy = vi.spyOn(sandboxBash, "executeBashToolOnSandbox").mockResolvedValueOnce({
       exitCode: 0,

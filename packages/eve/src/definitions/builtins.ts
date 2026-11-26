@@ -1,18 +1,12 @@
+import { sessionOffersTasks } from "#execution/catalog/step-catalog.js";
 import { withTaskTools } from "#execution/tasks/model-step.js";
 import { FINAL_REPLY_TASK_SYSTEM_BLOCK, TASK_SYSTEM_BLOCK } from "#execution/tasks/render.js";
-import {
-  type Definition,
-  once,
-  section,
-  SECTION_ORDER,
-  type StepInfo,
-  type ToolEntry,
-} from "./definition.js";
+import { type Definition, once, type StepInfo, type ToolEntry } from "./definition.js";
 
 export const builtins: Definition = {
   contribute: (ctx) => ({
     arrange: (draft) => {
-      const { step } = ctx;
+      const { container, step } = ctx;
       const hasTasks = once(async () => {
         if (step === undefined) return false;
         const active = hasSessionTasks(step);
@@ -21,22 +15,37 @@ export const builtins: Definition = {
         );
         return active || kept?.value === true;
       });
+      const offersTaskTools = once(
+        async () =>
+          step !== undefined &&
+          ((await hasTasks()) ||
+            sessionOffersTasks({
+              ctx: container,
+              session: step.session,
+              tools: [...(await draft.tools()).entries.values()].map(
+                ({ definition }) => definition,
+              ),
+            })),
+      );
       return {
-        system: async () => [
-          ...(await draft.system()),
-          ...((await hasTasks())
-            ? [
-                section(
-                  "eve.tasks",
-                  step!.finalReplyOnly ? FINAL_REPLY_TASK_SYSTEM_BLOCK : TASK_SYSTEM_BLOCK,
-                  { order: SECTION_ORDER.tasks, part: "own" },
-                ),
-              ]
-            : []),
-        ],
+        announcements: async () => {
+          const existing = await draft.announcements();
+          if (step === undefined || !(await hasTasks())) return existing;
+          const variant = step.finalReplyOnly ? "final-reply" : "root";
+          const block = step.finalReplyOnly ? FINAL_REPLY_TASK_SYSTEM_BLOCK : TASK_SYSTEM_BLOCK;
+          return {
+            ...existing,
+            "eve.tasks": {
+              initial: "",
+              kind: "context.state",
+              render: () => block,
+              value: variant,
+            },
+          };
+        },
         tools: async () => {
           const tools = await draft.tools();
-          if (!(await hasTasks())) return tools;
+          if (!(await offersTaskTools())) return tools;
           const definitions = new Map(
             [...tools.entries].map(([name, entry]) => [name, entry.definition]),
           );
