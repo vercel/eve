@@ -73,6 +73,8 @@ await sandbox.setNetworkPolicy("deny-all");
 
 The environment must be the one configured for the current sandbox; eve rejects any other.
 
+Pass `{ create: false }` as the last argument to `ctx.getSandbox()` to return `null` without creating a sandbox when the session has never started one, deleted it, or its persisted sandbox is gone; an idle-stopped persisted sandbox still resumes.
+
 ## Custom state with `defineState`
 
 `defineState` declares a per-session value that tools, hooks, and channel handlers share. The value survives crashes and redeploys. Import it from `eve/context` and declare the handle at module scope. Its `get()` and `update()` methods still work only while eve runs your code. See [State](../concepts/state) for the read, update, reset, and subagent-isolation model.

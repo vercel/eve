@@ -330,6 +330,7 @@ function unresumableSandboxContext(): ContextContainer {
     get: async () => {
       throw new Error('docker session "ses_1" is no longer available to resume.');
     },
+    getIfStarted: async () => null,
     open: async () => {
       throw new Error('docker session "ses_1" is no longer available to resume.');
     },

@@ -78,3 +78,14 @@ export {
   authenticateVercel,
   type BrokeredCredentialOptions,
 } from "./credentials.ts";
+export {
+  discoverRepositories,
+  readRepositoryFile,
+  type DiscoverRepositoriesOptions,
+  type ReadRepositoryFileOptions,
+} from "./repositories.ts";
+export type {
+  DiscoveredRepository,
+  RepositoryInstructionFile,
+  RepositoryInstructionSpec,
+} from "../extension.ts";

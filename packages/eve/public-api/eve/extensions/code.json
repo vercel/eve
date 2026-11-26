@@ -1,1 +1,12 @@
-["CredentialPolicyBroker", "default"]
+[
+  "CredentialPolicyBroker",
+  "DiscoveredRepository",
+  "EnteredRepository",
+  "RepositoriesConfig",
+  "RepositoryContribution",
+  "RepositoryInstructionFile",
+  "RepositoryInstructionSpec",
+  "RepositoryRule",
+  "RepositoryRuleContext",
+  "default"
+]

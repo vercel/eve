@@ -41,3 +41,63 @@ test("rejects the removed worker option with a migration hint", () => {
     assert.throws(() => extension(config as Parameters<typeof extension>[0]), { message });
   }
 });
+
+test("accepts valid repositories config with rules, specs, syncAfter, and caps", () => {
+  const customTool = {
+    description: "Sync workspace",
+    inputSchema: {},
+    execute: () => ({ ok: true }),
+  };
+  extension({
+    repositories: {
+      roots: [".", "repos", "packages/app"],
+      instructions: [["AGENTS.md", "CLAUDE.md"], "docs/GUIDE.md"],
+      scopedInstructions: true,
+      discoverOnStart: "on-sandbox-use",
+      rules: [
+        {
+          match: "vercel/*",
+          files: ["CONTRIBUTING.md", ["DOCS.md", "README.md"]],
+          onEnter: () => ({ instructions: "Follow Vercel conventions." }),
+        },
+        {
+          match: /^acme\//u,
+        },
+        {
+          match: (repo) => repo.sparse,
+        },
+      ],
+      syncAfter: [customTool as never],
+      maxFileBytes: 32_000,
+      maxTotalBytes: 128_000,
+    },
+  });
+  assert.equal(extension.config.repositories?.discoverOnStart, "on-sandbox-use");
+  assert.equal(extension.config.repositories?.maxFileBytes, 32_000);
+  assert.equal(extension.config.repositories?.rules?.length, 3);
+});
+
+test("rejects path traversal, invalid byte caps, and unknown keys inside repositories config", () => {
+  const invalidCases: readonly object[] = [
+    { repositories: { roots: ["../escape"] } },
+    { repositories: { roots: ["/etc"] } },
+    { repositories: { roots: ["a\\b"] } },
+    { repositories: { instructions: ["../AGENTS.md"] } },
+    { repositories: { instructions: ["/AGENTS.md"] } },
+    { repositories: { instructions: ["a/./b"] } },
+    { repositories: { instructions: [[]] } },
+    { repositories: { rules: [{ files: ["../secret.md"] }] } },
+    { repositories: { maxFileBytes: 0 } },
+    { repositories: { maxFileBytes: 1.5 } },
+    { repositories: { maxTotalBytes: -10 } },
+    { repositories: { unknownFlag: true } },
+    { repositories: { rules: [{ unknownRuleKey: true }] } },
+  ];
+  for (const invalid of invalidCases) {
+    assert.throws(
+      () => extension(invalid as Parameters<typeof extension>[0]),
+      /Invalid extension config/u,
+      JSON.stringify(invalid),
+    );
+  }
+});

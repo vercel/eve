@@ -1,17 +1,26 @@
-import { defineDynamic, defineInstructions } from "eve/instructions";
+import { defineDynamic } from "eve/instructions";
 
-import { formatProjectInstructions, readProjectInstructions } from "../lib/project-instructions.ts";
+import extension from "../extension.ts";
+import { buildKeyedInstructions } from "../lib/project-instructions.ts";
+import { isWorkspaceCovered } from "../lib/repo-reconcile.ts";
+import { initialRepositorySessionState, repoState } from "../lib/repo-state.ts";
+import { resolveRepositoriesConfig } from "../lib/repositories.ts";
 
-export default defineDynamic(async (ctx) => {
+export default defineDynamic((ctx) => {
   if (ctx.turn === null) return null;
+  const resolved = resolveRepositoriesConfig(extension.config.repositories);
+  let state = initialRepositorySessionState();
   try {
-    const file = await ctx.memo("project-instructions", async () =>
-      readProjectInstructions(await ctx.getSandbox()),
-    );
-    return file === null
-      ? null
-      : defineInstructions({ content: formatProjectInstructions(file), role: "user" });
-  } catch {
-    return null;
-  }
+    state = repoState.get();
+  } catch {}
+  const workspaceCovered = isWorkspaceCovered(state.workspaceRoot, state.byRoot, state.scopes);
+  return buildKeyedInstructions(
+    {
+      workspaceInstruction: workspaceCovered ? [] : state.workspaceInstruction,
+      byRoot: state.byRoot,
+      scopes: state.scopes,
+      overflowPaths: state.overflowPaths,
+    },
+    resolved.maxTotalBytes,
+  );
 });

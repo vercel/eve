@@ -41,6 +41,7 @@ test("without github config, GitHub goes through the shell's gh and git", async 
   assert.doesNotMatch(skill.content, /gh-signed-commit|gh`? tool/u);
   assert.doesNotMatch(skill.description, /signed commit/u);
   assert.match(skill.content, /commit them, and push the branch/u);
+  assert.match(skill.content, /AGENTS\.md.*CLAUDE\.md.*pull request template/u);
   assert.match(skill.content, /gh pr create --draft/u);
 });
 
@@ -71,6 +72,7 @@ test("with github config, GitHub goes through the brokered gh tool and signed co
   assert.match(content, /gh repo list <owner>/u);
   assert.match(content, /Do not ask the requester for an exact `owner\/name`/u);
   assert.match(skill.content, /gh-signed-commit/u);
+  assert.match(skill.content, /AGENTS\.md.*CLAUDE\.md.*pull request template/u);
   assert.match(skill.description, /signed commit/u);
   assert.match(skill.content, /gh pr create --draft/u);
 });

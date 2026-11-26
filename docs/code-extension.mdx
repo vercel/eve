@@ -59,6 +59,7 @@ export default code({});
 | `vercel.connector` | With `vercel` | Vercel Connect connector that gets a Vercel token for the app, not for a user                  |
 | `vercel.delivery`  | No            | `"firewall"` (default) or `"command"`                                                          |
 | `broker`           | No            | `broker(sandbox, rules)` callback that merges Vercel credential rules into your network policy |
+| `repositories`     | No            | Configure repository discovery, post-clone rules, scoped subdirectory instructions, and limits |
 
 ```ts title="agent/extensions/code.ts"
 import code from "eve/extensions/code";
@@ -76,9 +77,77 @@ To use a personal access token or another credential provider, omit the connecto
 
 ## Project instructions
 
-The extension reads `AGENTS.md` from the workspace root, or `CLAUDE.md` when there is no `AGENTS.md`, and adds it to the conversation as project instructions. The content joins the conversation again only when it changes. A file over 64,000 bytes is cut off with a note that tells the model where to read the rest.
+The extension discovers git repositories in the sandbox and adds each repository's `AGENTS.md` (or `CLAUDE.md` when there is no `AGENTS.md`) as user-role instructions. Discovery covers pre-seeded sandboxes, channel checkouts, subagents, worktrees, submodules, and repositories cloned mid-turn through `git__gh` or `bash`. When the workspace root is not a git repository, the extension reads `AGENTS.md` or `CLAUDE.md` from the workspace root.
 
-The extension reads the file once per session, with one sandbox command at the start of the first turn, which starts the session's sandbox. Later edits to the file reach the model only when it reads the file itself. If the read fails, the turn continues without project instructions, and the next model call tries again. For other directories, the extension's instructions tell the model to read the nearest `AGENTS.md` or `CLAUDE.md` before working there.
+Discovery runs at the start of each turn and after completed commands that clone, fetch, switch refs, unpack archives, or run in a new directory. Each repository and directory scope joins the conversation under its own instruction key, so newly entered repositories append without changing earlier history. Root and matching rule instruction files refresh whenever they change on subsequent reconciliations, including when a sparse checkout materializes a previously unavailable file. When a repository's `HEAD` commit changes, the extension also clears cached subdirectory instructions for that repository. Deleted repositories are removed along with their subdirectory scopes.
+
+For each configured instruction file in a repository, the extension reads in three tiers:
+
+1. **Worktree.** Reads the checked-out file when it is non-empty and its resolved path stays inside the repository root.
+2. **Git `HEAD`.** When a sparse or partial checkout excludes the file from the working tree, reads `HEAD:<path>` offline from `.git/objects` (paired with `eve/extensions/git` prefetching configured files during partial clones).
+3. **Unavailable directive.** When the file exists at `HEAD` but is not in `.git/objects`, adds a note naming the path so the model checks it out or reads it before editing.
+
+As `read_file`, `edit_file`, `write_file`, `glob`, or `grep` touch files inside nested directories, the extension loads `AGENTS.md` (or `CLAUDE.md`) from each newly entered ancestor directory. A file over `maxFileBytes` (default `64_000`) is truncated with a note naming the path. When total instructions exceed `maxTotalBytes` (default `256_000`), an overflow note lists the remaining paths for `read_file`.
+
+### Repositories and post-clone rules
+
+Configure `repositories` on `code()` to customize discovery roots, instruction files, start-of-turn sandbox behavior, and per-repository rules:
+
+| Option               | Default                        | Effect                                                                                                                                                                                                                                                                |
+| -------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `roots`              | `["."]`                        | Workspace-relative directories scanned up to depth 3 for repositories                                                                                                                                                                                                 |
+| `instructions`       | `[["AGENTS.md", "CLAUDE.md"]]` | Repository-relative paths or fallback tuples where the first present file wins; pass `[]` to disable                                                                                                                                                                  |
+| `scopedInstructions` | `true`                         | Load matching instruction files from ancestor directories as file tools enter subdirectories                                                                                                                                                                          |
+| `discoverOnStart`    | `"eager"`                      | `"eager"` opens the sandbox at turn start when needed; `"on-sandbox-use"` checks via `ctx.getSandbox({ create: false })` (skips creating a new sandbox before first use, and resumes an idle-stopped persisted sandbox on later turns if the session already has one) |
+| `rules`              | `[]`                           | Rules (`{ match?, files?, onEnter? }`) applied when matching repositories are discovered                                                                                                                                                                              |
+| `syncAfter`          | `[]`                           | Additional `ToolDefinition` values whose completed calls trigger repository discovery                                                                                                                                                                                 |
+| `maxFileBytes`       | `64_000`                       | Maximum UTF-8 bytes read per instruction file before truncation                                                                                                                                                                                                       |
+| `maxTotalBytes`      | `256_000`                      | Maximum total UTF-8 bytes across emitted repository and scoped instructions                                                                                                                                                                                           |
+
+Each entry in `rules` accepts:
+
+- `match`: `"owner/name"` (case-insensitive exact slug), `"owner/*"` (wildcard prefix), `"*"`, a `RegExp` tested against `repo.slug` or `repo.root`, or a predicate `(repo) => boolean`. Omit `match` to match every discovered repository.
+- `files`: Extra repository-relative paths or fallback tuples to load alongside `instructions`.
+- `onEnter(repo, ctx)`: Runs once per session when a matching repository is first discovered. `repo` provides `root`, `slug`, `remote`, `head`, `branch`, `sparse`, `instructions`, and `repo.readFile(relativePath)`. `ctx` provides `sandbox`, `session`, `channel`, `conversation`, and `trigger` (`"turn.started"` or `"call.settled"`). Return `{ instructions? }` to attach extra user-role instructions for the session. If a rule throws, eve logs a warning and skips it without failing the turn or suppressing default instructions or other rules.
+
+```ts title="agent/extensions/code.ts"
+import code from "eve/extensions/code";
+
+export default code({
+  repositories: {
+    discoverOnStart: "on-sandbox-use",
+    rules: [
+      {
+        match: "acme/*",
+        files: [".github/PULL_REQUEST_TEMPLATE.md"],
+        async onEnter(repo) {
+          const guide = await repo.readFile("CONTRIBUTING.md");
+          return {
+            instructions: guide?.content ? [guide.content] : undefined,
+          };
+        },
+      },
+    ],
+  },
+});
+```
+
+### Repository sandbox helpers
+
+`eve/extensions/code/sandbox` exports `discoverRepositories(sandbox, options?)` and `readRepositoryFile(sandbox, repoRoot, relativePath, options?)` for custom sandbox scripts and tools:
+
+```ts
+import { discoverRepositories, readRepositoryFile } from "eve/extensions/code/sandbox";
+
+const repos = await discoverRepositories(sandbox, {
+  roots: ["."],
+  instructions: [["AGENTS.md", "CLAUDE.md"]],
+  maxFileBytes: 64_000,
+});
+const readme = repos[0] ? await readRepositoryFile(sandbox, repos[0].root, "README.md") : null;
+```
+
+`readRepositoryFile` validates relative POSIX paths, keeps symlinks inside `repoRoot`, falls back to `HEAD:<relativePath>`, and applies `maxFileBytes`.
 
 ## Publish with the git extension
 
@@ -96,16 +165,19 @@ Configure `github` to get GitHub tokens through Vercel Connect instead. The exte
 
 `gh-signed-commit` adds or updates non-executable regular files and deletes tracked entries. It rejects additions or updates involving executable files, symlinks, submodules, or file-mode changes before contacting GitHub. Your staged changes remain intact. For those changes, use native `git commit -S` with a configured signing key, then `git push` through the authenticated tool.
 
-| Option                 | Required      | Effect                                                                                     |
-| ---------------------- | ------------- | ------------------------------------------------------------------------------------------ |
-| `github.connector`     | With `github` | Connector that mints a GitHub token                                                        |
-| `github.broker`        | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules |
-| `github.principalType` | With `github` | `"app"` for GitHub App installation tokens, or `"user"` for the caller's own token         |
-| `github.authorize`     | With `github` | `authorize(request)` returns `true` to let a `gh` call run                                 |
-| `github.attribution`   | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`       |
-| `github.permissions`   | No            | With `"app"`, the installation permissions each token carries, such as `"contents:write"`  |
+| Option                 | Required      | Effect                                                                                                                                                       |
+| ---------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `github.connector`     | With `github` | Connector that mints a GitHub token                                                                                                                          |
+| `github.broker`        | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules                                                                   |
+| `github.principalType` | With `github` | `"app"` for GitHub App installation tokens, or `"user"` for the caller's own token                                                                           |
+| `github.authorize`     | With `github` | `authorize(request)` returns `true` to let a `gh` call run                                                                                                   |
+| `github.attribution`   | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`                                                                         |
+| `github.permissions`   | No            | With `"app"`, the installation permissions each token carries, such as `"contents:write"`                                                                    |
+| `github.prefetchFiles` | No            | Relative file paths prefetched into `.git/objects` on partial clones while the lease is open. Defaults to `["AGENTS.md", "CLAUDE.md"]`; pass `[]` to disable |
 
 With `"app"`, each token carries every permission the App holds unless `github.permissions` lists the ones it needs. Set it to keep tokens narrower than the App's installation without rewriting the credential rules in your broker.
+
+After a successful `git clone`, `gh repo clone`, `git fetch`, `git pull`, `git checkout`, `git switch`, or `git sparse-checkout` on a partial clone inside the workspace, eve prefetches `github.prefetchFiles` into `.git/objects` before closing the GitHub credential lease. Prefetching leaves the working tree untouched so `eve/extensions/code` can read those files from `HEAD` after the lease ends. Pass `prefetchFiles: []` to disable prefetching.
 
 Each `gh` call runs one `gh`, `git`, or `gh-signed-commit` command. Processes in the sandbox see only a placeholder `GH_TOKEN`. The sandbox firewall replaces it with the real token on GitHub requests. Your `github.broker` callback receives the header rules before the command runs, then `null` after it to remove them. The callback must keep your other network rules. GitHub authentication has no `"command"` delivery option.
 

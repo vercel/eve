@@ -49,6 +49,10 @@ function sandbox(id: string) {
         await queue;
         return await open();
       },
+      getIfStarted: async () => {
+        await queue;
+        return opened > 0 ? await open() : null;
+      },
       open,
       prepare(work?: (open: () => Promise<unknown>) => Promise<void>) {
         queue = queue.then(() => work?.(open)).catch(() => undefined);

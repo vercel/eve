@@ -183,6 +183,84 @@ describe("ensureSandboxAccess", () => {
     expect(value.create).not.toHaveBeenCalled();
   });
 
+  it("getIfStarted returns null without starting when unopened, and returns the live or resumed sandbox once started", async () => {
+    const setup = vi.fn();
+    const value = fixture({ setup });
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "session-probe",
+      state: null,
+    });
+
+    await expect(access.getIfStarted()).resolves.toBeNull();
+    expect(setup).not.toHaveBeenCalled();
+    expect(value.start).not.toHaveBeenCalled();
+    expect(value.resume).not.toHaveBeenCalled();
+
+    const started = await access.get();
+    expect(started).toBeTruthy();
+    expect(value.start).toHaveBeenCalledOnce();
+    await expect(access.getIfStarted()).resolves.toBe(started);
+    expect(value.start).toHaveBeenCalledOnce();
+
+    await access.stop();
+    const resumedAfterStop = await access.getIfStarted();
+    expect(resumedAfterStop).toBeTruthy();
+    expect(value.resume).toHaveBeenCalledTimes(1);
+    expect(value.start).toHaveBeenCalledOnce();
+    await expect(access.get()).resolves.toBe(resumedAfterStop);
+    expect(value.resume).toHaveBeenCalledTimes(1);
+
+    const persisted = await access.captureState();
+    await access.release();
+
+    const resumed = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "session-probe",
+      state: persisted,
+    });
+    await expect(resumed.getIfStarted()).resolves.toBeTruthy();
+    expect(value.resume).toHaveBeenCalledTimes(2);
+    expect(value.start).toHaveBeenCalledOnce();
+    expect(setup).toHaveBeenCalledOnce();
+
+    await resumed.delete?.();
+    await expect(resumed.getIfStarted()).resolves.toBeNull();
+    expect(value.start).toHaveBeenCalledOnce();
+    expect(value.resume).toHaveBeenCalledTimes(2);
+  });
+
+  it("getIfStarted returns null without starting a fresh sandbox when a persisted sandbox is gone", async () => {
+    const setup = vi.fn();
+    const value = fixture({ setup });
+    value.create.mockRejectedValueOnce(
+      new SandboxSessionGoneError('docker session "ses_1" is no longer available to resume.'),
+    );
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "session-gone",
+      state: {
+        session: { providerName: "test", state: { key: "old" }, stateProtocolVersion: 1 },
+      },
+    });
+
+    await expect(access.getIfStarted()).resolves.toBeNull();
+    expect(value.resume).toHaveBeenCalledOnce();
+    expect(value.start).not.toHaveBeenCalled();
+    expect(setup).not.toHaveBeenCalled();
+    await expect(access.captureState()).resolves.toEqual({ session: null });
+
+    await expect(access.getIfStarted()).resolves.toBeNull();
+    expect(value.resume).toHaveBeenCalledOnce();
+    expect(value.start).not.toHaveBeenCalled();
+  });
+
   it("opens on prepare without waiting, and get waits for the work queued behind it", async () => {
     const value = fixture();
     let opened!: () => void;

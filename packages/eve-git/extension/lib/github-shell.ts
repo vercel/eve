@@ -14,6 +14,7 @@ import { validateRepositoryRoot } from "./repository-root.ts";
 import { withSandboxLeaseLock } from "./sandbox-lease-lock.ts";
 import { connectUserAuthorization } from "./connect-user-auth.ts";
 import { GITHUB_TARGET } from "./github-shell-schema.ts";
+import { prefetchRepositoryFiles } from "./prefetch.ts";
 import { shellQuote } from "./shell.ts";
 import { GITHUB_TOOLING_PATHS } from "./tooling.ts";
 
@@ -55,6 +56,12 @@ interface GitHubConfigBase {
     rules: Readonly<Record<string, readonly GitHubLeaseRule[]>> | null,
   ) => Promise<void>;
   readonly connector: string;
+  /**
+   * Relative file paths prefetched into `.git/objects` on partial clones while
+   * the GitHub credential lease is open, without modifying the working tree.
+   * Defaults to `["AGENTS.md", "CLAUDE.md"]`. Pass `[]` to disable.
+   */
+  readonly prefetchFiles?: readonly string[];
 }
 
 /** Mints GitHub App installation tokens scoped to the declared repository or owner. */
@@ -210,7 +217,8 @@ export async function executeGitHubShell(
     );
   }
   const sandbox = await dependencies.getSandbox();
-  let workingDirectory = resolveWorkingDirectory(sandbox, input.workingDirectory);
+  const workspaceRoot = posix.resolve("/", sandbox.resolvePath(""));
+  let workingDirectory = resolveWorkingDirectory(sandbox, workspaceRoot, input.workingDirectory);
   if (argv[0] === "gh-signed-commit") {
     const repositoryRoot = await validateRepositoryRoot(sandbox, workingDirectory);
     if ("refused" in repositoryRoot) throw new GitHubCommandInputError(repositoryRoot.refused);
@@ -279,7 +287,7 @@ export async function executeGitHubShell(
       sandbox,
       dependencies,
       { authorization, placeholder, placeholderAuthorization, token },
-      () => {
+      async () => {
         const env: Record<string, string> = {
           GH_CONFIG_DIR: githubConfig,
           GH_PROMPT_DISABLED: "1",
@@ -290,6 +298,7 @@ export async function executeGitHubShell(
           ["url.https://github.com/.insteadOf", "git@github.com:"],
           ["url.https://github.com/.insteadOf", "ssh://git@github.com/"],
           ["core.hooksPath", "/dev/null"],
+          ["core.fsmonitor", "false"],
           ["protocol.allow", "never"],
           ["protocol.https.allow", "always"],
         ];
@@ -298,9 +307,23 @@ export async function executeGitHubShell(
           env[`GIT_CONFIG_KEY_${index}`] = key;
           env[`GIT_CONFIG_VALUE_${index}`] = value;
         });
+        env.GIT_ALLOW_PROTOCOL = "https";
         env.GIT_TERMINAL_PROMPT = "0";
         env.PATH = "/usr/local/bin:/usr/bin:/bin";
-        return sandbox.run({ command, env });
+        const mainResult = await sandbox.run({ command, env });
+        if (mainResult.exitCode === 0) {
+          await prefetchRepositoryFiles({
+            argv,
+            workingDirectory,
+            workspaceRoot,
+            repository: input.repository,
+            prefetchFiles: config.prefetchFiles,
+            sandbox,
+            env,
+            abortSignal: dependencies.abortSignal,
+          });
+        }
+        return mainResult;
       },
       config.broker,
     );
@@ -498,9 +521,9 @@ function executablePath(executable: string): string {
 
 function resolveWorkingDirectory(
   sandbox: Pick<SandboxSession, "resolvePath">,
+  workspace: string,
   workingDirectory: string | undefined,
 ): string {
-  const workspace = posix.resolve("/", sandbox.resolvePath(""));
   const resolved = posix.resolve("/", sandbox.resolvePath(workingDirectory?.trim() || ""));
   if (resolved !== workspace && !resolved.startsWith(`${workspace}/`)) {
     throw new GitHubCommandInputError(

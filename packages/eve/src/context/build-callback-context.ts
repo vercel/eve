@@ -1,6 +1,9 @@
 import { forwardSessionFastPaths } from "#execution/sandbox/internal-shell.js";
-import type { SessionContext } from "#context/session-context.js";
-import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
+import type { GetSandboxOptions, SessionContext } from "#context/session-context.js";
+import {
+  isSandboxEnvironment,
+  type SandboxEnvironmentIdentity,
+} from "#shared/sandbox-environment.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
 import { loadContext } from "#context/container.js";
@@ -28,8 +31,24 @@ export function buildCallbackContext(): SessionContext {
   };
 }
 
+export function parseGetSandboxArgs(
+  first?: SandboxEnvironmentIdentity | GetSandboxOptions,
+  second?: GetSandboxOptions,
+): {
+  readonly environment?: SandboxEnvironmentIdentity;
+  readonly options?: GetSandboxOptions;
+} {
+  if (first === undefined) return { options: second };
+  if (isSandboxEnvironment(first)) return { environment: first, options: second };
+  return { options: first };
+}
+
 export function sandboxOf(ctx: Pick<ContextReader, "get">): SessionContext["getSandbox"] {
-  return ((environment?: SandboxEnvironmentIdentity): Promise<RuntimeSandboxSession> => {
+  return ((
+    first?: SandboxEnvironmentIdentity | GetSandboxOptions,
+    second?: GetSandboxOptions,
+  ): Promise<RuntimeSandboxSession | null> => {
+    const { environment, options } = parseGetSandboxArgs(first, second);
     const access = ctx.get(SandboxKey);
     if (access === undefined) {
       throw new Error(
@@ -40,17 +59,20 @@ export function sandboxOf(ctx: Pick<ContextReader, "get">): SessionContext["getS
     if (environment !== undefined && access.environment !== environment) {
       throw new Error("The requested sandbox environment is not active for the current session.");
     }
-    return access.get().then((sandbox) => {
+    const create = options?.create !== false;
+    const resolve = create ? access.get() : access.getIfStarted();
+    return resolve.then((sandbox) => {
       if (sandbox === null) {
+        if (!create) return null;
         throw new Error("The sandbox is not available in the current authored runtime context.");
       }
       return withRuntimeSandboxLifecycle(
         sandbox,
-        async (options) => {
+        async (deleteOptions) => {
           if (access.delete === undefined) {
             throw new Error("The active sandbox runtime does not support deletion.");
           }
-          await access.delete(options);
+          await access.delete(deleteOptions);
         },
         async () => await access.stop(),
       );

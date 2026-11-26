@@ -64,6 +64,8 @@ await sandbox.setNetworkPolicy("deny-all");
 
 The environment you pass must match the one configured for the current sandbox.
 
+Pass `{ create: false }` (either `ctx.getSandbox({ create: false })` or `ctx.getSandbox(environment, { create: false })`) to return `null` without creating a sandbox when the session has never started one, deleted it, or its persisted sandbox is gone. If an idle-stopped persisted sandbox exists, eve resumes and returns it.
+
 ## Providers
 
 | Provider                             | Use it for                                                                                  |

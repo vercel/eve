@@ -1,6 +1,7 @@
 [
   "DynamicContext",
   "DynamicInstructionsResult",
+  "DynamicInstructionsSet",
   "DynamicKey",
   "DynamicModelContext",
   "DynamicSentinel",

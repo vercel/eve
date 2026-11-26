@@ -3,6 +3,7 @@
   "ConversationSpace",
   "ConversationSpaceType",
   "ConversationSpaceVisibility",
+  "GetSandboxOptions",
   "HistoryMessage",
   "SessionAuth",
   "SessionAuthContext",

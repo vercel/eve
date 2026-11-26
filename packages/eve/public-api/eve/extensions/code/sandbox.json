@@ -1,1 +1,13 @@
-["BrokeredCredentialOptions", "authenticateGitHub", "authenticateVercel", "installCodeTooling"]
+[
+  "BrokeredCredentialOptions",
+  "DiscoverRepositoriesOptions",
+  "DiscoveredRepository",
+  "ReadRepositoryFileOptions",
+  "RepositoryInstructionFile",
+  "RepositoryInstructionSpec",
+  "authenticateGitHub",
+  "authenticateVercel",
+  "discoverRepositories",
+  "installCodeTooling",
+  "readRepositoryFile"
+]

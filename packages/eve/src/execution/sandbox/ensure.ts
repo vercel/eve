@@ -119,6 +119,7 @@ export async function ensureSandboxAccess(
   let opened: OpenedSandbox | undefined;
   let stopped: OpenedSandbox | undefined;
   let opening: Promise<OpenedSandbox> | undefined;
+  let probing: Promise<OpenedSandbox | null> | undefined;
   let requiring: Promise<OpenedSandbox> | undefined;
   const tracking = input.shutdownTracking ?? "session";
   const appRoot =
@@ -138,6 +139,9 @@ export async function ensureSandboxAccess(
       async end() {},
       idleTimeoutMs,
       async get() {
+        return null;
+      },
+      async getIfStarted() {
         return null;
       },
       async open() {
@@ -278,7 +282,7 @@ export async function ensureSandboxAccess(
     return opened;
   }
 
-  async function resolveOpened(): Promise<OpenedSandbox> {
+  async function prepareProviderContext(): Promise<SandboxSessionContext> {
     const definition = activeDefinition();
     const provider = getSandboxEnvironmentRuntime(definition.environment);
     const context = providerContext("sandbox-initialization");
@@ -292,20 +296,40 @@ export async function ensureSandboxAccess(
         providerName: provider.providerName,
       });
     }
+    return context;
+  }
 
-    if (persisted !== null) {
-      try {
-        return await resumePersisted(context);
-      } catch (error) {
-        if (!SandboxSessionGoneError.is(error)) throw error;
-        log.warn("session sandbox is gone, starting a fresh one", {
-          error,
-          providerName: persisted.providerName,
-          sessionId: input.sessionId,
-        });
-        persisted = null;
-      }
+  async function resumeIfPersisted(
+    context: SandboxSessionContext,
+    warnMessage: string,
+  ): Promise<OpenedSandbox | null> {
+    if (persisted === null) return null;
+    try {
+      return await resumePersisted(context);
+    } catch (error) {
+      if (!SandboxSessionGoneError.is(error)) throw error;
+      log.warn(warnMessage, {
+        error,
+        providerName: persisted.providerName,
+        sessionId: input.sessionId,
+      });
+      persisted = null;
+      return null;
     }
+  }
+
+  async function resolveOpened(): Promise<OpenedSandbox> {
+    if (probing !== undefined) {
+      const resumed = await probing;
+      if (resumed !== null) return resumed;
+    }
+    if (opened !== undefined) return opened;
+    const context = await prepareProviderContext();
+    const resumed = await resumeIfPersisted(
+      context,
+      "session sandbox is gone, starting a fresh one",
+    );
+    if (resumed !== null) return resumed;
 
     const startKey = [appRoot, ownerNodeId, input.sessionId].join("\0");
     let concurrentStart = pendingSandboxStarts.get(startKey);
@@ -328,6 +352,34 @@ export async function ensureSandboxAccess(
         pendingSandboxStarts.delete(startKey);
       }
     }
+  }
+
+  async function tryResumeOpened(): Promise<OpenedSandbox | null> {
+    if (requiring !== undefined) return await requiring;
+    if (opened !== undefined) return opened;
+    if (probing !== undefined) return await probing;
+    if (opening !== undefined) return await opening;
+    if (persisted === null) return null;
+    const attempt = (async (): Promise<OpenedSandbox | null> => {
+      const context = await prepareProviderContext();
+      if (persisted === null) return null;
+      const resumed = await resumeIfPersisted(
+        context,
+        "session sandbox is gone during create: false lookup; not starting a fresh one",
+      );
+      if (resumed === null) {
+        running = false;
+        return null;
+      }
+      running = true;
+      requiring = Promise.resolve(resumed);
+      return resumed;
+    })();
+    const probe = attempt.finally(() => {
+      if (probing === probe) probing = undefined;
+    });
+    probing = probe;
+    return await probe;
   }
 
   async function startOpened(context: SandboxSessionContext) {
@@ -400,6 +452,7 @@ export async function ensureSandboxAccess(
     const current = opened;
     opened = undefined;
     opening = undefined;
+    probing = undefined;
     requiring = undefined;
     return current;
   }
@@ -446,6 +499,7 @@ export async function ensureSandboxAccess(
     async end(reason: SandboxSessionEndReason) {
       if (input.ownsSandbox === false) return;
       await preparations;
+      if (probing !== undefined) await probing.catch(() => undefined);
       if (requiring !== undefined) await requiring.catch(() => undefined);
       await disposeConnections();
       await opened?.close().catch((error: unknown) => {
@@ -469,6 +523,11 @@ export async function ensureSandboxAccess(
       await preparations;
       return await openSession();
     },
+    async getIfStarted() {
+      await preparations;
+      const current = await tryResumeOpened();
+      return current === null ? null : current.sandbox;
+    },
     open: openSession,
     prepare(work) {
       enqueue(work === undefined ? requireOpened : () => work(openSession));
@@ -478,6 +537,7 @@ export async function ensureSandboxAccess(
     },
     async release() {
       await preparations;
+      if (probing !== undefined) await probing.catch(() => undefined);
       if (requiring !== undefined) await requiring.catch(() => undefined);
       await disposeConnections();
       const current = forgetOpened();

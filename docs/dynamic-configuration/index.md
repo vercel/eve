@@ -16,19 +16,19 @@ The module's top-level code runs at build time and at runtime, so keep caller-sp
 
 Every dynamic function receives:
 
-| Field                     | Contents                                                                                                                                             |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ctx.session`             | Session ID, authenticated caller and initiator, and optional schedule and predecessor.                                                               |
-| `ctx.session.parent`      | In a delegated session: the parent session, its turn, the call that opened this session, and `rootSessionId`. Absent in a root session.              |
-| `ctx.channel`             | Channel kind, continuation token, and metadata. Narrow typed metadata with `isChannel`.                                                              |
-| `ctx.conversation`        | Where the conversation happens: its audience and, when the channel reports one, its [space](/docs/channels#spaces).                                  |
-| `ctx.view`                | Read-only view of the session so far. Read it with selectors from `eve/events`, such as `turns(ctx.view)`.                                           |
-| `ctx.turn`                | Latest turn, with its ID, input, and status; `null` before the first turn.                                                                           |
-| `ctx.now`                 | Time of the latest recorded session event, as a `Date`.                                                                                              |
-| `ctx.model.id`            | Selected model ID. Unavailable inside the `model` field, before the model is chosen.                                                                 |
-| `await ctx.messages()`    | The conversation so far, assembled only when you call it.                                                                                            |
-| `await ctx.memo(key, fn)` | A saved JSON result for a key.                                                                                                                       |
-| `await ctx.getSandbox()`  | The session's sandbox, started on first use. Unavailable inside the `model` field. Call it inside a memo; see [Read the sandbox](#read-the-sandbox). |
+| Field                            | Contents                                                                                                                                                                                                                |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ctx.session`                    | Session ID, authenticated caller and initiator, and optional schedule and predecessor.                                                                                                                                  |
+| `ctx.session.parent`             | In a delegated session: the parent session, its turn, the call that opened this session, and `rootSessionId`. Absent in a root session.                                                                                 |
+| `ctx.channel`                    | Channel kind, continuation token, and metadata. Narrow typed metadata with `isChannel`.                                                                                                                                 |
+| `ctx.conversation`               | Where the conversation happens: its audience and, when the channel reports one, its [space](/docs/channels#spaces).                                                                                                     |
+| `ctx.view`                       | Read-only view of the session so far. Read it with selectors from `eve/events`, such as `turns(ctx.view)`.                                                                                                              |
+| `ctx.turn`                       | Latest turn, with its ID, input, and status; `null` before the first turn.                                                                                                                                              |
+| `ctx.now`                        | Time of the latest recorded session event, as a `Date`.                                                                                                                                                                 |
+| `ctx.model.id`                   | Selected model ID. Unavailable inside the `model` field, before the model is chosen.                                                                                                                                    |
+| `await ctx.messages()`           | The conversation so far, assembled only when you call it.                                                                                                                                                               |
+| `await ctx.memo(key, fn)`        | A saved JSON result for a key.                                                                                                                                                                                          |
+| `await ctx.getSandbox(options?)` | The session's sandbox, created on first use. Pass `{ create: false }` to return `null` instead of creating one. Unavailable inside the `model` field. Call it inside a memo; see [Read the sandbox](#read-the-sandbox). |
 
 For session state inside a dynamic function, query `ctx.view` with selectors from `eve/events` instead of reconstructing it yourself. See [Session views & selectors](/docs/concepts/session-views-and-selectors).
 
@@ -88,7 +88,7 @@ A memo callback receives `{ idempotencyKey, abortSignal }`. Pass `idempotencyKey
 
 ### Read the sandbox
 
-`ctx.getSandbox()` returns the session's sandbox, the same handle tools and hooks get. eve runs a dynamic function before every model call, so a sandbox call outside a memo makes every model call wait for the sandbox, and the first one waits for the sandbox to start. Read the sandbox inside a memo, keyed on something in the session that changes when the files might have changed.
+`ctx.getSandbox()` returns the session's sandbox, the same handle tools and hooks get. Pass `{ create: false }` to look up an existing sandbox without creating one: it returns `null` when the session has never started a sandbox, deleted it, or its persisted sandbox is gone, and resumes an idle-stopped persisted sandbox if one exists. eve runs a dynamic function before every model call, so a sandbox call outside a memo makes every model call wait for the sandbox, and the first one waits for the sandbox to start. Read the sandbox inside a memo, keyed on something in the session that changes when the files might have changed.
 
 This instruction reads the repository's `AGENTS.md` once after each completed `checkout` call:
 
@@ -285,7 +285,7 @@ A skill with only `content` doesn't start a sandbox. A skill with files installs
 
 ## Dynamic instructions
 
-Return `defineInstructions({ content, role? })` or `null`. System instructions apply while the function returns them and stay outside history. User instructions join the conversation history only when their content changes:
+Return `defineInstructions({ content, role? })`, a keyed map (`Record<string, InstructionsDefinition>`), or `null`. System instructions apply while the function returns them and stay outside history. User instructions join the conversation history only when their content changes:
 
 ```ts title="agent/instructions/brief.ts"
 import { defineDynamic, defineInstructions } from "eve/instructions";
@@ -299,6 +299,8 @@ export default defineDynamic(async (ctx) => {
 ```
 
 Before a turn's first model call, new user content joins just before the turn's input; mid-turn changes append at the current position. Returning `null` adds nothing and resets content tracking, so returning the earlier content later adds it again, but it doesn't remove earlier history. Unchanged content isn't added again after a deployment, or after a compaction that keeps it in the history; a clear or compaction that removes it adds it again.
+
+When you return a keyed map (`DynamicInstructionsSet`), eve tracks each key independently. Keys must be non-empty strings without control characters. Adding or updating one user-role key appends only that key's entry so earlier prompt context stays cached. Removing a key resets tracking for that key without editing history, and a compaction or clear that removes a key adds it again before the next model call. System-role map entries apply outside history while returned.
 
 ## Errors and recovery
 
