@@ -40,11 +40,14 @@ export const FINAL_REPLY_TASK_SYSTEM_BLOCK = [
   ...TASK_SYSTEM_BLOCK_CLOSING,
 ].join("\n");
 
+export const TASK_TOOL_DESCRIPTION =
+  "Runs asynchronously as a task (start independent calls together in one turn).";
+
 export const SERVE_TOOL_DESCRIPTION =
-  "To send this task more input, call this tool again with its taskId; without taskId, each call starts a new task.";
+  "Runs asynchronously as a task (start independent calls together in one turn). To send this task more input, call this tool again with its taskId; without taskId, each call starts a new task.";
 
 export const AGENT_SERVE_TOOL_DESCRIPTION =
-  "It does not see this conversation, so put everything it needs in message. To correct or continue an agent task, call this tool again with its taskId; without taskId, each call starts a new agent.";
+  "Runs asynchronously as a task (start independent calls together in one turn). It does not see this conversation, so put everything it needs in message. To correct or continue an agent task, call this tool again with its taskId; without taskId, each call starts a new agent.";
 
 export const TASK_ID_INPUT_DESCRIPTION = `The id of a task this tool started, ${TASK_ID_SOURCE}, to send it this input. Omit it to start a new task.`;
 

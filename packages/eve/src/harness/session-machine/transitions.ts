@@ -330,10 +330,12 @@ export function startTask(
       },
     });
   }
-  events.push({
-    type: "call.started",
-    data: defined({ callId: task.callId, taskId: task.taskId, clearedBy: task.clearedBy }),
-  });
+  if (view.projection.view.calls[task.callId]?.status !== "running") {
+    events.push({
+      type: "call.started",
+      data: defined({ callId: task.callId, taskId: task.taskId, clearedBy: task.clearedBy }),
+    });
+  }
   return unchanged(view, events);
 }
 

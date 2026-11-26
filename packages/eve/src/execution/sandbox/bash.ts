@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { bashJobTaskWorkflowReference } from "#execution/sandbox/bash-job-reference.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import {
@@ -10,6 +11,7 @@ import {
   truncateTail,
 } from "#execution/sandbox/truncate-output.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { canPromoteToTask, promoteToTask } from "#tools/task-handoff.js";
 
 /** How long a `bash` call waits by default before it leaves the command running in the background. */
 export const BASH_YIELD_SECONDS = 60;
@@ -83,6 +85,7 @@ export interface BashInput {
 
 export interface BashExecutionOptions {
   readonly abortSignal?: AbortSignal;
+  readonly onTimeout?: "background" | "kill";
 }
 
 interface BashStreams {
@@ -91,14 +94,24 @@ interface BashStreams {
   readonly truncated: boolean;
 }
 
-type BashResult =
-  | (BashStreams & { readonly status: "completed"; readonly exitCode: number })
-  | (BashStreams & {
-      readonly status: "running";
-      readonly pid: number;
-      readonly outputDirectory: string;
-      readonly message: string;
-    });
+export type BashCompletedResult = BashStreams & {
+  readonly status: "completed";
+  readonly exitCode: number;
+};
+
+type BashRunningResult = BashStreams & {
+  readonly status: "running";
+  readonly pid: number;
+  readonly outputDirectory: string;
+  readonly message: string;
+};
+
+type BashResult = BashCompletedResult | BashRunningResult;
+
+export interface BashJobHandoff {
+  readonly directory: string;
+  readonly pid: number;
+}
 
 type StreamTail =
   | { readonly text: string; readonly totalLines: number }
@@ -109,6 +122,23 @@ interface StreamTails {
   readonly stdout: StreamTail;
 }
 
+export async function executeBashToolOnSandbox(
+  sandbox: SandboxSession,
+  args: BashInput,
+  options: BashExecutionOptions = {},
+): Promise<BashResult> {
+  const result = await executeBashOnSandbox(sandbox, args, options);
+  if (result.status !== "running" || !canPromoteToTask()) {
+    return result;
+  }
+  const waitSeconds = resolveBashWaitSeconds(args.timeout);
+  return promoteToTask<BashResult>({
+    handoff: { directory: result.outputDirectory, pid: result.pid },
+    preview: formatBashPromotionPreview(result, waitSeconds),
+    workflowId: bashJobTaskWorkflowReference.workflowId,
+  });
+}
+
 export async function executeBashOnSandbox(
   sandbox: SandboxSession,
   args: BashInput,
@@ -116,13 +146,9 @@ export async function executeBashOnSandbox(
 ): Promise<BashResult> {
   const command = formatCommand(args.command);
   logDevelopmentSandboxCommand(`eve: starting sandbox command: ${command}`);
-  const { timeout } = args;
-  const waitSeconds =
-    timeout !== undefined && Number.isFinite(timeout)
-      ? Math.min(Math.max(timeout, 1), BASH_MAX_YIELD_SECONDS)
-      : BASH_YIELD_SECONDS;
+  const waitSeconds = resolveBashWaitSeconds(args.timeout);
   const result = await withDevelopmentSandboxProgress(command, () =>
-    runCommand(sandbox, args.command, waitSeconds, options.abortSignal),
+    runCommand(sandbox, args.command, waitSeconds, options.abortSignal, options.onTimeout),
   );
   logDevelopmentSandboxCommand(
     result.status === "running"
@@ -132,11 +158,121 @@ export async function executeBashOnSandbox(
   return result;
 }
 
+function resolveBashWaitSeconds(timeout: number | undefined): number {
+  return timeout !== undefined && Number.isFinite(timeout)
+    ? Math.min(Math.max(timeout, 1), BASH_MAX_YIELD_SECONDS)
+    : BASH_YIELD_SECONDS;
+}
+
+function formatBashPromotionPreview(result: BashRunningResult, waitSeconds: number): string {
+  const streams = [result.stdout, result.stderr && `[stderr]\n${result.stderr}`]
+    .filter((stream) => stream.length > 0)
+    .map((stream) => (stream.endsWith("\n") ? stream : `${stream}\n`))
+    .join("\n");
+  return (
+    `${streams}` +
+    `Still running after ${waitSeconds}s (pid ${result.pid}, output in ${result.outputDirectory}). ` +
+    `Stop it with task_cancel if it appears hung.`
+  );
+}
+
+export async function pollBashJobOnSandbox(
+  sandbox: SandboxSession,
+  handoff: BashJobHandoff,
+): Promise<
+  | { readonly status: "running" }
+  | { readonly result: BashCompletedResult; readonly status: "completed" }
+> {
+  const marker = `eve-bash-poll:${randomUUID().slice(0, 8)}`;
+  const quoted = shellQuote(handoff.directory);
+  const pid = String(handoff.pid);
+  const raw = await sandbox.run({
+    command: [
+      `cd ${quoted} 2>/dev/null || { printf '%s %s %s %s %s\\n' ${marker} missing 1 0 0; exit 0; }`,
+      `if [ ! -e exit ] && kill -0 -- -${pid} 2>/dev/null; then printf '%s running\\n' ${marker}; exit 0; fi`,
+      `code="$(cat exit 2>/dev/null)"`,
+      `case "$code" in ''|*[!0-9]*) code=1 ;; esac`,
+      `out_bytes="$(($(wc -c < stdout 2>/dev/null || echo 0)))"`,
+      `out_lines="$(($(wc -l < stdout 2>/dev/null || echo 0)))"`,
+      `err_bytes="$(($(wc -c < stderr 2>/dev/null || echo 0)))"`,
+      `err_lines="$(($(wc -l < stderr 2>/dev/null || echo 0)))"`,
+      `keep=0`,
+      `[ "$out_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$out_lines" -gt ${KEEP_OUTPUT_LINES} ] || [ "$err_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$err_lines" -gt ${KEEP_OUTPUT_LINES} ] && keep=1`,
+      `printf '%s done %s %s %s %s %s %s\\n' ${marker} "$code" "$out_bytes" "$out_lines" "$err_bytes" "$err_lines" "$keep"`,
+      `tail -c ${MAX_OUTPUT_BYTES} stdout 2>/dev/null`,
+      `tail -c ${MAX_OUTPUT_BYTES} stderr 2>/dev/null >&2`,
+      `[ "$keep" -eq 0 ] && rm -rf ${quoted}`,
+    ].join("\n"),
+  });
+  if (new RegExp(`(?:^|\\n)${marker} running(?:\\n|$)`).test(raw.stdout)) {
+    return { status: "running" };
+  }
+  const doneMatch = new RegExp(
+    `(?:^|\\n)${marker} done (\\d+) (\\d+) (\\d+) (\\d+) (\\d+) (\\d+)\\n`,
+  ).exec(raw.stdout);
+  if (doneMatch === null) {
+    return {
+      result: {
+        exitCode: 1,
+        status: "completed",
+        stderr: `Process group ${handoff.pid} exited without an exit code.\n`,
+        stdout: "",
+        truncated: false,
+      },
+      status: "completed",
+    };
+  }
+  const exitCode = Number(doneMatch[1]);
+  const outBytes = Number(doneMatch[2]);
+  const outLines = Number(doneMatch[3]);
+  const errBytes = Number(doneMatch[4]);
+  const errLines = Number(doneMatch[5]);
+  const keep = doneMatch[6] === "1";
+  const stdoutText = raw.stdout.slice(doneMatch.index + doneMatch[0].length);
+  const stderrText = raw.stderr;
+  const outOmitted = Math.max(0, outBytes - Buffer.byteLength(stdoutText));
+  const errOmitted = Math.max(0, errBytes - Buffer.byteLength(stderrText));
+  const tails: StreamTails = {
+    stdout:
+      outOmitted === 0
+        ? { text: stdoutText, totalLines: outLines }
+        : { omittedBytes: outOmitted, text: stdoutText },
+    stderr:
+      errOmitted === 0
+        ? { text: stderrText, totalLines: errLines }
+        : { omittedBytes: errOmitted, text: stderrText },
+  };
+  return {
+    result: {
+      ...formatStreams(tails, keep ? handoff.directory : undefined),
+      exitCode,
+      status: "completed",
+    },
+    status: "completed",
+  };
+}
+
+export async function cancelBashJobOnSandbox(
+  sandbox: SandboxSession,
+  handoff: BashJobHandoff,
+): Promise<void> {
+  const quoted = shellQuote(handoff.directory);
+  const pid = String(handoff.pid);
+  try {
+    await sandbox.run({
+      command:
+        `kill -TERM -- -${pid} 2>/dev/null; sleep 0.2; kill -KILL -- -${pid} 2>/dev/null; ` +
+        `rm -rf ${quoted}`,
+    });
+  } catch {}
+}
+
 async function runCommand(
   sandbox: SandboxSession,
   command: string,
   waitSeconds: number,
   signal: AbortSignal | undefined,
+  onTimeout: "background" | "kill" = "background",
 ): Promise<BashResult> {
   signal?.throwIfAborted();
   const jobId = randomUUID().slice(0, 8);
@@ -201,6 +337,20 @@ async function runCommand(
       };
     }
     void finished.catch(() => {});
+    if (onTimeout === "kill") {
+      await cancelBashJobOnSandbox(sandbox, {
+        directory: running.outputDirectory,
+        pid: running.pid,
+      });
+      const stderr = `${running.stderr}${running.stderr && !running.stderr.endsWith("\n") ? "\n" : ""}Command timed out after ${waitSeconds} seconds and was killed.\n`;
+      return {
+        exitCode: 124,
+        status: "completed",
+        stderr,
+        stdout: running.stdout,
+        truncated: running.truncated,
+      };
+    }
     return running;
   } finally {
     signal?.removeEventListener("abort", cancel);
@@ -222,7 +372,7 @@ async function claimRunningJob(
   directory: string,
   jobId: string,
   waitSeconds: number,
-): Promise<BashResult | undefined> {
+): Promise<BashRunningResult | undefined> {
   const marker = `eve-bash:${jobId}`;
   const raw = await sandbox.run({
     command: [

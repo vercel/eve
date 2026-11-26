@@ -9,7 +9,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
-import { BASH_YIELD_SECONDS, executeBashOnSandbox } from "./bash.js";
+import {
+  BASH_YIELD_SECONDS,
+  cancelBashJobOnSandbox,
+  executeBashOnSandbox,
+  pollBashJobOnSandbox,
+} from "./bash.js";
 import { createConnectionSession } from "./session.js";
 
 const createScratchDirectory = useTemporaryDirectories();
@@ -178,6 +183,77 @@ describe("executeBashOnSandbox with a real shell", () => {
 
     await expect(call).rejects.toThrow();
     await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 10_000 });
+  });
+
+  it("kills the process group with exit 124 and partial output when onTimeout is kill", async () => {
+    const { home, sandbox } = await createHostSandbox();
+    const pidFile = join(home, "kill-child.pid");
+
+    const result = await executeBashOnSandbox(
+      sandbox,
+      {
+        command: `echo partial-line; sleep 60 & echo $! > ${pidFile}; wait`,
+        timeout: 1,
+      },
+      { onTimeout: "kill" },
+    );
+
+    expect(result.status).toBe("completed");
+    if (result.status !== "completed") return;
+    expect(result.exitCode).toBe(124);
+    expect(result.stdout).toContain("partial-line");
+    expect(result.stderr).toContain("Command timed out after 1 seconds and was killed.");
+    const childPid = Number(readFileSync(pidFile, "utf8").trim());
+    await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 10_000 });
+  });
+
+  it("polls a running job until completion and cancels a running job cleanly", async () => {
+    const { home, sandbox } = await createHostSandbox();
+
+    const finishing = await executeBashOnSandbox(sandbox, {
+      command: "echo step-one; sleep 2; echo step-two",
+      timeout: 1,
+    });
+    if (finishing.status !== "running") {
+      throw new Error(`expected running: ${JSON.stringify(finishing)}`);
+    }
+    const handoff = { directory: finishing.outputDirectory, pid: finishing.pid };
+    const finalPoll = await vi.waitFor(
+      async () => {
+        const polled = await pollBashJobOnSandbox(sandbox, handoff);
+        expect(polled.status).toBe("completed");
+        return polled;
+      },
+      { interval: 200, timeout: 10_000 },
+    );
+    if (finalPoll.status !== "completed") return;
+    expect(finalPoll.result.exitCode).toBe(0);
+    expect(finalPoll.result.stdout).toContain("step-one");
+    expect(finalPoll.result.stdout).toContain("step-two");
+    expect(existsSync(handoff.directory)).toBe(false);
+
+    const pidFile = join(home, "cancel-child.pid");
+    const longRunning = await executeBashOnSandbox(sandbox, {
+      command: `sleep 60 & echo $! > ${pidFile}; wait`,
+      timeout: 1,
+    });
+    if (longRunning.status !== "running") {
+      throw new Error(`expected running: ${JSON.stringify(longRunning)}`);
+    }
+    const childPid = await readPid(pidFile);
+    expect(
+      await pollBashJobOnSandbox(sandbox, {
+        directory: longRunning.outputDirectory,
+        pid: longRunning.pid,
+      }),
+    ).toEqual({ status: "running" });
+
+    await cancelBashJobOnSandbox(sandbox, {
+      directory: longRunning.outputDirectory,
+      pid: longRunning.pid,
+    });
+    await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 10_000 });
+    expect(existsSync(longRunning.outputDirectory)).toBe(false);
   });
 });
 

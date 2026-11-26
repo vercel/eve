@@ -18,7 +18,8 @@ import {
 } from "#harness/workflow-tool-runs.js";
 import { normalizeToolModelOutput, toolModelOutputContext } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { commitCallEntry, isTaskTool } from "#execution/tasks/model-step.js";
+import { commitCallEntry, commitPromotedTask, isTaskTool } from "#execution/tasks/model-step.js";
+import type { PromotedTaskCall } from "#tools/task-handoff.js";
 import { requireClearance, type Clearance } from "#harness/clearance.js";
 import { admitWorkflowTask } from "#harness/workflow-admission.js";
 import { startsTasks } from "#execution/tasks/tool-entry-point.js";
@@ -142,6 +143,46 @@ export function collectWorkflowCalls(input: {
           tools: input.tools,
         }),
         clearance,
+      ),
+    );
+  }
+  return { session, workflowRequests };
+}
+
+export function collectPromotedTasks(input: {
+  readonly promotedTasks: readonly PromotedTaskCall[];
+  readonly session: HarnessSession;
+  readonly turnId: string;
+}): {
+  readonly session: HarnessSession;
+  readonly workflowRequests: readonly RuntimeWorkflowTaskRequest[];
+} {
+  let { session } = input;
+  const workflowRequests: RuntimeWorkflowTaskRequest[] = [];
+  for (const promoted of input.promotedTasks) {
+    requireClearance(promoted.clearance, promoted.callId);
+    const committed = commitPromotedTask(session, {
+      callId: promoted.callId,
+      toolName: promoted.toolName,
+      turnId: input.turnId,
+    });
+    session = committed.session;
+    workflowRequests.push(
+      admitWorkflowTask(
+        {
+          callId: promoted.callId,
+          entry: committed.entry,
+          executeInput: promoted.handoff,
+          input: resolveToolCallInputObject(promoted.input, {
+            callId: promoted.callId,
+            toolName: promoted.toolName,
+          }),
+          kind: "workflow-task",
+          ...(promoted.preview !== undefined && { preview: promoted.preview }),
+          toolName: promoted.toolName,
+          workflowId: promoted.workflowId,
+        },
+        promoted.clearance,
       ),
     );
   }

@@ -418,6 +418,14 @@ function foldSpecifics(
       }
       return;
     }
+    case "task.started": {
+      const callId = fact.data.startedBy.callId;
+      const call = view.calls[callId];
+      if (call !== undefined && call.status === "running" && call.taskId === undefined) {
+        view.calls[callId] = { ...call, taskId: fact.data.taskId };
+      }
+      return;
+    }
     case "context.settled": {
       const { outcome, selects } = fact.data;
       if (outcome === "completed" && "selects" in fact.data && selects !== undefined)

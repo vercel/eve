@@ -103,29 +103,27 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
   return `Mock reply: ${message}`;
 }
 
-/** Starts the slow command, reads its output once, stops it, then replies. */
+/** Starts the slow command, reads its output once, cancels the promoted task, then replies. */
 function respondToBashJob(message: string, request: MockModelRequest): MockModelResponse | string {
-  const outputs = request.toolResults
+  const bashResults = request.toolResults
     .filter((result) => result.name === "bash")
     .map((result) => formatOutput(result.output));
-  if (outputs.length === 0) {
+  const cancelResults = request.toolResults.filter((result) => result.name === "eve__task_cancel");
+  if (bashResults.length === 0) {
     const command = /by running: `([^`]+)`/u.exec(message)?.[1] ?? "";
-    return { toolCalls: [{ input: { command, timeout: 5 }, name: "bash" }] };
+    return { toolCalls: [{ input: { command }, name: "bash" }] };
   }
-  // The model reads the job's process group and output directory from the running message.
-  const pid = /as process group (\d+)/u.exec(outputs[0]!)?.[1];
-  const outputDirectory = /keeps writing to (\S+)\/stdout/u.exec(outputs[0]!)?.[1];
-  if (outputDirectory === undefined || pid === undefined) {
-    return outputs[0]!;
+  const outputDirectory = /output in ([^)\s]+)/u.exec(bashResults[0]!)?.[1];
+  const taskId = /Started task (\S+?)\./u.exec(bashResults[0]!)?.[1];
+  if (outputDirectory === undefined || taskId === undefined) {
+    return bashResults[0]!;
   }
-  if (outputs.length === 1) {
+  if (bashResults.length === 1) {
     const command = `sleep 2; tail -n 1 ${outputDirectory}/stdout`;
     return { toolCalls: [{ input: { command }, name: "bash" }] };
   }
-  if (outputs.length === 2) {
-    const exitFile = `${outputDirectory}/exit`;
-    const command = `kill -- -${pid}; for i in 1 2 3 4 5; do [ -f ${exitFile} ] && break; sleep 1; done; cat ${exitFile}`;
-    return { toolCalls: [{ input: { command }, name: "bash" }] };
+  if (cancelResults.length === 0) {
+    return { toolCalls: [{ input: { taskId }, name: "eve__task_cancel" }] };
   }
   return "index job stopped";
 }

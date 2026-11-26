@@ -86,6 +86,26 @@ export function commitCallEntry(session: HarnessSession, call: WorkflowCall): Co
   }
 }
 
+export function commitPromotedTask(
+  session: HarnessSession,
+  call: { readonly callId: string; readonly toolName: string; readonly turnId: string },
+): {
+  readonly entry: { readonly entryPoint: "task"; readonly taskId: string };
+  readonly session: HarnessSession;
+} {
+  const created = createTask(readTaskTable(session.state), {
+    callId: call.callId,
+    kind: "tool",
+    name: call.toolName,
+    resumable: false,
+    turnId: call.turnId,
+  });
+  return {
+    entry: { entryPoint: "task", taskId: created.taskId },
+    session: writeTaskTable(session, created.table),
+  };
+}
+
 function commitTask(
   session: HarnessSession,
   call: WorkflowCall,

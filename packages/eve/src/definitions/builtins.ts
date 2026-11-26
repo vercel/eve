@@ -1,4 +1,3 @@
-import { sessionOffersTasks } from "#execution/catalog/step-catalog.js";
 import { withTaskTools } from "#execution/tasks/model-step.js";
 import { FINAL_REPLY_TASK_SYSTEM_BLOCK, TASK_SYSTEM_BLOCK } from "#execution/tasks/render.js";
 import {
@@ -11,24 +10,21 @@ import {
 } from "./definition.js";
 
 export const builtins: Definition = {
-  contribute: ({ container, step }) => ({
+  contribute: (ctx) => ({
     arrange: (draft) => {
-      const offersTasks = once(
-        async () =>
-          step !== undefined &&
-          (hasRunningTask(step) ||
-            sessionOffersTasks({
-              ctx: container,
-              session: step.session,
-              tools: [...(await draft.tools()).entries.values()].map(
-                ({ definition }) => definition,
-              ),
-            })),
-      );
+      const { step } = ctx;
+      const hasTasks = once(async () => {
+        if (step === undefined) return false;
+        const active = hasSessionTasks(step);
+        const kept = await ctx.keep((_evaluation, previous) =>
+          previous === true || active ? { value: true } : null,
+        );
+        return active || kept?.value === true;
+      });
       return {
         system: async () => [
           ...(await draft.system()),
-          ...((await offersTasks())
+          ...((await hasTasks())
             ? [
                 section(
                   "eve.tasks",
@@ -40,7 +36,7 @@ export const builtins: Definition = {
         ],
         tools: async () => {
           const tools = await draft.tools();
-          if (!(await offersTasks())) return tools;
+          if (!(await hasTasks())) return tools;
           const definitions = new Map(
             [...tools.entries].map(([name, entry]) => [name, entry.definition]),
           );
@@ -62,7 +58,7 @@ export const builtins: Definition = {
   label: "eve's builtins",
 };
 
-function hasRunningTask(step: StepInfo): boolean {
+function hasSessionTasks(step: StepInfo): boolean {
   const tasks = step.view?.().projection.view.tasks ?? {};
-  return Object.values(tasks).some((task) => task.status === "running");
+  return Object.keys(tasks).length > 0;
 }

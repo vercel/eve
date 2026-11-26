@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import * as sandboxBash from "#execution/sandbox/bash.js";
 import { bash, type BashToolOutput } from "./bash.js";
 import { toolModelOutputContext } from "#harness/tool-model-output.js";
 
@@ -79,5 +80,38 @@ describe("bash model output", () => {
     expect(
       await bash.toModelOutput!(output as BashToolOutput, toolModelOutputContext("bash", "call_1")),
     ).toEqual(expected);
+  });
+});
+
+describe("bash timeout mode", () => {
+  it.each([
+    { expected: "background", timeout: undefined },
+    { expected: "kill", timeout: 15 },
+    { expected: "kill", timeout: 120 },
+    { expected: "background", timeout: 121 },
+    { expected: "background", timeout: 300 },
+  ])("uses onTimeout=$expected when timeout=$timeout", async ({ expected, timeout }) => {
+    const spy = vi.spyOn(sandboxBash, "executeBashToolOnSandbox").mockResolvedValueOnce({
+      exitCode: 0,
+      status: "completed",
+      stderr: "",
+      stdout: "ok\n",
+      truncated: false,
+    });
+    const fakeSandbox = {} as never;
+    const ctx = { abortSignal: new AbortController().signal, getSandbox: async () => fakeSandbox };
+    try {
+      await bash.execute!(
+        { command: "echo ok", ...(timeout !== undefined && { timeout }) },
+        ctx as never,
+      );
+      expect(spy).toHaveBeenCalledWith(
+        fakeSandbox,
+        { command: "echo ok", ...(timeout !== undefined && { timeout }) },
+        { abortSignal: ctx.abortSignal, onTimeout: expected },
+      );
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
