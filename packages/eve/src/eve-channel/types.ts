@@ -31,7 +31,33 @@ export interface EveAuthResult extends AuthResult {
    * and callers a configured `localDev()` admits). Never persisted or forwarded.
    */
   readonly allowAgentInfo?: boolean;
+  /**
+   * Decides which existing sessions this request may reach through the session routes under
+   * `/eve/v1/session/:id`. Omitted or `"any"` lets the caller reach every session id it knows.
+   * `"owner"` answers `404 Session not found.` unless the caller's identity (authenticator,
+   * issuer, principal type, principal id and subject) equals that of the principal that created
+   * the session; sessions created without a recorded owner are unreachable. A function decides
+   * per session: return `false` for the same 404, or throw an `HttpError` from
+   * `eve/channels/auth` to refuse with its response. Request-local: stripped from session
+   * identity, never persisted or forwarded.
+   */
+  readonly sessionAccess?: EveSessionAccessPolicy;
 }
+
+/** Context passed to a custom `sessionAccess` predicate returned by an eve-channel authenticator. */
+export interface EveSessionAccessContext {
+  readonly sessionId: string;
+  /** Lazily checks whether this request's verified caller created the session. Memoized per request. */
+  readonly isOwner: () => Promise<boolean>;
+  readonly auth: SessionAuthContext;
+  readonly request: Request;
+}
+
+/** Session reach granted to one request: `"any"`, `"owner"`, or a custom predicate. */
+export type EveSessionAccessPolicy =
+  | "any"
+  | "owner"
+  | ((ctx: EveSessionAccessContext) => boolean | Promise<boolean>);
 
 /** An eve-channel authenticator; ordinary identity-only authenticators also satisfy this type. */
 export type EveAuthFn = AuthFn<Request, EveAuthResult>;

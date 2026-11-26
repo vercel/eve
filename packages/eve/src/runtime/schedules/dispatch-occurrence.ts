@@ -88,6 +88,7 @@ export function createScheduleProviderContext(input: {
     namespace:
       input.namespace ?? deriveScheduleNamespace(input.application, input.collection, input.scope),
     operationId: input.operationId,
+    scope: input.scope,
     target: {
       key: input.application,
       deliver: async ({ payload, occurrence }) => {

@@ -64,7 +64,13 @@ import {
   inactiveCommandResult,
 } from "#execution/session-commands.js";
 import { walkCauseChain } from "#shared/errors.js";
-import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
+import {
+  buildInvocationAttributes,
+  INVOCATION_OWNER_ATTRIBUTE,
+  invocationOwnerKey,
+} from "#internal/invocation/metadata.js";
+import { sessionOwnedBy } from "#internal/invocation/owned-run.js";
+import { sessionOwnerAuth } from "#channel/conversation-context.js";
 import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import {
   SESSION_INBOX_SESSION_ID_METADATA_KEY,
@@ -154,6 +160,7 @@ export function createWorkflowRuntime(config: SessionRuntimeConfig): Runtime {
     const attributes = {
       ...sessionAttributes,
       [EVE_PREWARM_ATTRIBUTE]: "1",
+      [INVOCATION_OWNER_ATTRIBUTE]: invocationOwnerKey(sessionOwnerAuth(input)),
       [EVE_STREAM_VERSION_ATTRIBUTE]: EVE_MESSAGE_STREAM_VERSION,
       ...(input.externalInvocation === undefined
         ? {}
@@ -257,6 +264,8 @@ export function createWorkflowRuntime(config: SessionRuntimeConfig): Runtime {
     },
 
     dispatchContinuation,
+
+    ownsSession: sessionOwnedBy,
 
     async dispatchSession<TCommand extends SessionCommand>(
       input: DispatchSessionInput<TCommand>,

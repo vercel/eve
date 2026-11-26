@@ -95,7 +95,7 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -d '{"answers":[{"interactionId":"req_A","optionId":"approve"}]}'
 ```
 
-A follow-up message joins the running turn by default. Set `turnPolicy: "queue"` on `eveChannel(...)` to make follow-ups wait for running turns to finish. Set `turnPolicy: { mode: "steer", principal }` on `eveChannel(...)` to let a message from someone other than the running turn's caller join it. A request body's `turnPolicy` is `"steer"` or `"queue"`. It cannot set `principal`, and a request that steers keeps the channel's `principal`. See [Overlapping messages](/docs/channels#overlapping-messages). `answers` only answer the requests they name.
+A follow-up message joins the running turn by default. Set `turnPolicy: "queue"` on `eveChannel(...)` to make follow-ups wait for running turns to finish. Set `turnPolicy: { mode: "steer", principal }` on `eveChannel(...)` to let a message from someone other than the running turn's caller join it. A request body's `turnPolicy` is `"steer"` or `"queue"`. It cannot set `principal`, and a request that steers keeps the channel's `principal`. See [Overlapping messages](/docs/channels#overlapping-messages). With [`sessionAccess: "owner"`](#restrict-session-access) returned from the authenticator, a steering message from another principal is refused. `answers` only answer the requests they name.
 
 | Session state                | Response                                                                                         |
 | ---------------------------- | ------------------------------------------------------------------------------------------------ |
@@ -189,6 +189,31 @@ Neither admits browser users or external clients in production. For a public app
 `/eve/v1/info` also requires an operator caller. To let your own operator credential read it, return `principalType: "service"` from its `AuthFn`, as `jwtHmac()` and `jwtEcdsa()` do, or return `allowAgentInfo: true` from an `EveAuthFn`. See [Agent info access](../guides/auth-and-route-protection#agent-info-access). Keep end-user strategies returning `"user"` without the grant, so end users can't read it.
 
 For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).
+
+### Restrict session access
+
+By default any caller that passes `auth` can reach any session by id, so the session id acts as a capability. To restrict the `/eve/v1/session/:sessionId` routes (message, prewarm, cancel, compact, clear, end, stream, descendant stream, subagent stream, and tool stubs), return `sessionAccess` from the authenticator. Return `"owner"` to limit that caller to the sessions its own identity created:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel, type EveAuthFn } from "eve/channels/eve";
+
+const authenticateTenant: EveAuthFn = async (request) => {
+  const tenant = await verifyTenant(request);
+  return tenant ? { ...tenant, sessionAccess: "owner" } : null;
+};
+
+export default eveChannel({ auth: [authenticateTenant] });
+```
+
+With `"owner"`, a caller whose identity differs from the recorded owner gets the same `404 Session not found.` as for an unknown id. Identity means the authenticator, issuer, principal type, principal id, and subject of the route's auth result. A session created without auth, or by an anonymous caller, is owned by the anonymous principal, so only an anonymous caller reaches it. eve records the owner on every session it starts, so you can turn the option on later. A session that has no recorded owner, such as one created before eve recorded it, is unreachable under `"owner"`.
+
+The policy belongs to the authenticator, so callers on one channel can differ: return `"any"` (or nothing) for an operator who needs every session, or a function for a custom rule such as sharing a session with collaborators. See [Session access](../guides/auth-and-route-protection#session-access) for the function form.
+
+Keep these cases in mind before you turn it on:
+
+- A request that sets the multi-principal `turnPolicy: { mode: "steer", principal }` from a different principal reaches the route directly and gets `404`. That flow works under `"owner"` only when a trusted forwarder sends the message.
+- Behind a [trusted forwarder](../guides/auth-and-route-protection#accepting-forwarded-identity-from-another-deployment), the owner is the route caller, which is the forwarder, not the end user it forwards for. Everyone behind one forwarder shares its sessions. Scope them in the forwarder.
+- A custom channel that creates a session with `from(address).create({ auth })` records that `auth` as the owner. To let a client resume the session over `/eve/v1/session/:sessionId`, build `auth` with the same `AuthFn` the eve channel uses, so the identity matches.
 
 ## Web Chat with Sign in with Vercel
 
