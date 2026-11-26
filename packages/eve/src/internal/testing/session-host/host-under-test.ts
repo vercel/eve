@@ -58,7 +58,6 @@ export interface HostUnderTest {
 
 export interface SessionHostKind {
   readonly capabilities: HostCapabilities;
-  readonly dispatchStep?: string;
   make(setup?: HostSetup): Promise<HostUnderTest>;
 }
 
@@ -87,7 +86,6 @@ export const inProcessHost: SessionHostKind = {
 
 export const workflowHost: SessionHostKind = {
   capabilities: WORKFLOW_CAPABILITIES,
-  dispatchStep: "publishDispatchedCallsStep",
   make: makeWorkflowHost,
 };
 
