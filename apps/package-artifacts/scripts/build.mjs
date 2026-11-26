@@ -4,7 +4,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { BlobPreconditionFailedError, get, put } from "@vercel/blob";
+import { BlobNotFoundError, BlobPreconditionFailedError, get, head, put } from "@vercel/blob";
 
 import { resolveDeploymentTarget, vercelOidcCredentials } from "../lib/deployment-target.mjs";
 import {
@@ -109,13 +109,13 @@ async function assertTargetIsCurrent(ref, sourceSha) {
 
 async function updatePointer(pathname, manifest, ref, sourceSha, credentials) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const existing = await get(pathname, {
-      ...credentials,
-      access: "private",
-      useCache: false,
-    });
-    const etag = existing?.blob.etag;
-    await existing?.stream.cancel();
+    const etag = await head(pathname, credentials).then(
+      (blob) => blob.etag,
+      (error) => {
+        if (error instanceof BlobNotFoundError) return undefined;
+        throw error;
+      },
+    );
     await assertTargetIsCurrent(ref, sourceSha);
 
     try {
