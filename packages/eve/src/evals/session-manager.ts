@@ -1,6 +1,7 @@
 import { createLogger } from "#internal/logging.js";
 import { createClientError } from "#client/client-error.js";
 import { getDeliveryReceipt } from "#client/delivery.js";
+import { serializeFilePartForRequest } from "#client/file-parts.js";
 import type { ClientSession } from "#client/session.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { SendTurnInput, SendTurnOptions } from "#client/types.js";
@@ -72,7 +73,18 @@ export class EvalSessionManager {
     }
     const headers = new Headers(options.headers);
     headers.set("content-type", "application/json");
-    const body: Record<string, unknown> = { history: options.history };
+    const body: Record<string, unknown> = {
+      history: options.history.map((message) =>
+        message.role === "user" && message.parts !== undefined
+          ? {
+              ...message,
+              parts: message.parts.map((part) =>
+                part.type === "file" ? serializeFilePartForRequest(part) : part,
+              ),
+            }
+          : message,
+      ),
+    };
     if (options.stubs !== undefined) body.stubs = options.stubs;
     const response = await this.#client.fetch(EVE_DEV_SESSION_ROUTE_PATH, {
       body: JSON.stringify(body),

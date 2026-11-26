@@ -11,8 +11,10 @@ import { mockTool } from "#internal/testing/mocks/mock-tool.js";
 import {
   hydrateSandboxAttachments,
   stageAttachmentsToSandbox,
+  stageHistoryAttachments,
   stageToolResultMedia,
 } from "#harness/attachment-staging.js";
+import { createImportedHistoryMessages } from "#harness/messages.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { pngBytes } from "#internal/testing/media-fixtures.js";
 import { requestPublicUrl } from "#execution/web-fetch/request.js";
@@ -1167,6 +1169,78 @@ describe("hydrateSandboxAttachments (integration)", () => {
     } finally {
       readSpy.mockRestore();
     }
+  });
+  it("stages imported user file parts via fetchFile and enforces one shared download cap across history", async () => {
+    const sandbox = mockSandbox({ id: "sbx_imported_history" });
+    const fetchFile = vi.fn<NonNullable<ChannelAdapter["fetchFile"]>>(async () => ({
+      bytes: pdfBytes(64),
+      filename: "contract.pdf",
+      mediaType: "application/pdf",
+    }));
+    const adapter: ChannelAdapter = { fetchFile, kind: "chatjs" };
+    const runtime = await createTestRuntime();
+    vi.mocked(requestPublicUrl).mockReset();
+    vi.mocked(requestPublicUrl).mockImplementation(async () => {
+      return new Response(new Uint8Array(smallImageBytes), {
+        headers: { "content-type": "image/png" },
+        status: 200,
+      });
+    });
+
+    const fetched = await runtime.runAsSession({ channel: adapter, sandbox }, async () => {
+      const lowered = createImportedHistoryMessages([
+        {
+          parts: [
+            { text: "See contract", type: "text" },
+            {
+              data: "eve-url:chatjs-file://doc-1",
+              filename: "contract.pdf",
+              mediaType: "application/pdf",
+              type: "file",
+            },
+          ],
+          role: "user",
+        },
+        { role: "assistant", text: "Got it." },
+      ]);
+      const staged = await stageHistoryAttachments(lowered);
+      const hydrated = await hydrateSandboxAttachments(staged);
+      return { hydrated, staged };
+    });
+
+    expect(fetchFile).toHaveBeenCalledTimes(1);
+    const stagedParts = fetched.staged[0]?.content as UserContent;
+    expect(isSandboxRefUrl((stagedParts[1] as FilePart).data)).toBe(true);
+    const hydratedParts = fetched.hydrated[0]?.content as UserContent;
+    expect(hydratedParts[1]).toEqual({
+      text: expect.stringContaining("contract.pdf (application/pdf)"),
+      type: "text",
+    });
+    expect(hydratedParts[2]).toEqual(
+      expect.objectContaining({ mediaType: "application/pdf", type: "file" }),
+    );
+
+    const manyMessages = Array.from({ length: 12 }, (_, index) => ({
+      parts: [
+        {
+          data: `https://files.example/img-${String(index)}.png`,
+          filename: `img-${String(index)}.png`,
+          mediaType: "image/png",
+          type: "file" as const,
+        },
+      ],
+      role: "user" as const,
+    }));
+    const bounded = await runtime.runAsSession({ sandbox }, async () =>
+      stageHistoryAttachments(createImportedHistoryMessages(manyMessages)),
+    );
+
+    expect(vi.mocked(requestPublicUrl)).toHaveBeenCalledTimes(10);
+    const eleventh = ((bounded[10]?.content as UserContent | undefined) ?? [])[0];
+    expect(eleventh).toEqual({
+      text: expect.stringContaining("eve downloads at most 10 links per message."),
+      type: "text",
+    });
   });
 });
 

@@ -1,6 +1,7 @@
 import type { ContextContainer } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
 import { preserveStoppedTurnMessage } from "#execution/cancelled-model-call-batch.js";
+import { stageHistoryAttachments } from "#harness/attachment-staging.js";
 import type { OrphanedLine } from "#execution/publish-session-events.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
@@ -201,7 +202,9 @@ export async function recoverInterruptedStep(input: {
 
   const { settledTurn } = attempt;
   if (settledTurn !== undefined && activeTurnIdOf(currentProjection(ctx)) === undefined) {
-    const imported = createImportedHistoryMessages(input.stepInput?.history ?? [], session.history);
+    const imported = await stageHistoryAttachments(
+      createImportedHistoryMessages(input.stepInput?.history ?? [], session.history),
+    );
     const hasUserMessage =
       normalizeMessage(input.stepInput?.message) !== undefined &&
       frameworkMessageKindForStepInput(input.stepInput) === undefined;

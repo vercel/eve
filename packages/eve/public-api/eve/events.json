@@ -73,6 +73,7 @@
   "FactType",
   "Family",
   "INTERACTION_OUTCOMES",
+  "ImportedFilePart",
   "ImportedMessage",
   "ImportedPart",
   "ImportedTextPart",

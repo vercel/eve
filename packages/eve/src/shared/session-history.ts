@@ -1,4 +1,6 @@
-import type { ImportedMessage } from "#protocol/session-events/families/delivery.js";
+import { describeFilePart } from "#internal/attachments/file-part.js";
+import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
+import type { ImportedMessage, ImportedPart } from "#protocol/session-events/families/delivery.js";
 import { isObject } from "#shared/guards.js";
 import {
   checkJsonBounds,
@@ -7,6 +9,7 @@ import {
   type JsonObject,
   type JsonValue,
 } from "#shared/json.js";
+import type { MessageFilePart } from "#shared/message-content.js";
 
 /** A text block inside a structured {@link SessionHistoryMessage}. */
 export interface SessionHistoryTextPart {
@@ -14,6 +17,16 @@ export interface SessionHistoryTextPart {
   /** Non-empty plain text. */
   readonly text: string;
 }
+
+/**
+ * A file attachment inside a user {@link SessionHistoryMessage}.
+ *
+ * Uses the same shape as {@link MessageFilePart}: `data` is the file inline as bytes, base64, or a
+ * `data:` URL, or a URL resolved through the channel's `fetchFile` hook or public HTTPS download.
+ */
+export type SessionHistoryFilePart<
+  TData extends Uint8Array | ArrayBuffer | string | URL = Uint8Array | ArrayBuffer | string | URL,
+> = MessageFilePart<TData>;
 
 /**
  * One completed tool call inside an assistant {@link SessionHistoryMessage}.
@@ -41,14 +54,14 @@ export type SessionHistoryToolPart = {
 );
 
 /** One content part accepted inside a user {@link SessionHistoryMessage}. */
-export type SessionHistoryUserPart = SessionHistoryTextPart;
+export type SessionHistoryUserPart = SessionHistoryTextPart | SessionHistoryFilePart;
 
 /** One content part accepted inside an assistant {@link SessionHistoryMessage}. */
 export type SessionHistoryAssistantPart = SessionHistoryTextPart | SessionHistoryToolPart;
 
 /**
  * One prior user message passed as `history` to `send()`, `create()`, or `t.session()`.
- * Supply either `text` or non-empty `parts`, never both.
+ * Supply either `text` or non-empty `parts` (ordered text and file attachments), never both.
  */
 export type SessionHistoryUserMessage = {
   /** Optional app-owned id, echoed in `delivery.consumed` history so clients can join annotations. */
@@ -62,7 +75,7 @@ export type SessionHistoryUserMessage = {
     }
   | {
       readonly text?: never;
-      /** Ordered content parts for the user message. */
+      /** Ordered text and file attachment parts for the user message. */
       readonly parts: readonly SessionHistoryUserPart[];
     }
 );
@@ -107,6 +120,7 @@ export class InvalidSessionHistoryError extends Error {
 
 const HISTORY_FIELDS: readonly string[] = ["id", "role", "text", "parts"];
 const TEXT_PART_FIELDS: readonly string[] = ["type", "text"];
+const FILE_PART_FIELDS: readonly string[] = ["type", "mediaType", "filename", "data"];
 const TOOL_PART_FIELDS: readonly string[] = ["type", "name", "input", "output", "error"];
 const HISTORY_TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/u;
 
@@ -158,7 +172,12 @@ export function toImportedHistoryMessages(
     const text = message.parts
       .flatMap((part) => (part.type === "text" ? [part.text] : []))
       .join("\n");
-    return { ...base, parts: message.parts, text };
+    const parts: readonly ImportedPart[] = message.parts.map((part): ImportedPart =>
+      part.type === "file"
+        ? { type: "file", ...describeFilePart(part.data, part.mediaType, part.filename) }
+        : part,
+    );
+    return { ...base, parts, text };
   });
 }
 
@@ -182,14 +201,22 @@ function validateParts(
   parts: unknown,
   role: "user" | "assistant",
   at: string,
-): readonly SessionHistoryAssistantPart[] {
+): readonly (SessionHistoryUserPart | SessionHistoryAssistantPart)[] {
   if (!Array.isArray(parts) || parts.length === 0) {
     throw new InvalidSessionHistoryError(`${at} must be a non-empty array.`);
   }
-  return parts.map((part: unknown, index): SessionHistoryAssistantPart => {
+  return parts.map((part: unknown, index): SessionHistoryUserPart | SessionHistoryAssistantPart => {
     const partAt = `${at}[${index}]`;
     if (!isObject(part)) throw new InvalidSessionHistoryError(`${partAt} must be an object.`);
     if (part.type === "text") return validateTextPart(part, partAt);
+    if (part.type === "file") {
+      if (role === "assistant") {
+        throw new InvalidSessionHistoryError(
+          `${partAt} with type "file" is only accepted on a user message.`,
+        );
+      }
+      return validateFilePart(part, partAt);
+    }
     if (part.type === "tool") {
       if (role === "user") {
         throw new InvalidSessionHistoryError(
@@ -200,7 +227,7 @@ function validateParts(
     }
     throw new InvalidSessionHistoryError(
       role === "user"
-        ? `${partAt}.type must be "text".`
+        ? `${partAt}.type must be "text" or "file".`
         : `${partAt}.type must be "text" or "tool".`,
     );
   });
@@ -215,6 +242,51 @@ function validateTextPart(
     throw new InvalidSessionHistoryError(`${at}.text must be a non-empty string.`);
   }
   return { text: part.text, type: "text" };
+}
+
+function validateFilePart(
+  part: Readonly<Record<string, unknown>>,
+  at: string,
+): SessionHistoryFilePart {
+  rejectUnknownFields(part, at, FILE_PART_FIELDS);
+  const { data, filename, mediaType } = part;
+  if (typeof mediaType !== "string" || mediaType.trim().length === 0) {
+    throw new InvalidSessionHistoryError(`${at}.mediaType must be a non-empty string.`);
+  }
+  if (filename !== undefined && (typeof filename !== "string" || filename.trim().length === 0)) {
+    throw new InvalidSessionHistoryError(`${at}.filename must be a non-empty string.`);
+  }
+  const validatedData = validateFileData(data, `${at}.data`);
+  return filename === undefined
+    ? { data: validatedData, mediaType, type: "file" }
+    : { data: validatedData, filename, mediaType, type: "file" };
+}
+
+function validateFileData(data: unknown, at: string): SessionHistoryFilePart["data"] {
+  if (typeof data === "string") {
+    if (data.length === 0) {
+      throw new InvalidSessionHistoryError(`${at} must be a non-empty string.`);
+    }
+    if (hasInternalRefScheme(data)) {
+      throw new InvalidSessionHistoryError(`${at} must not use a framework-internal ref scheme.`);
+    }
+    return data;
+  }
+  if (data instanceof URL) {
+    if (hasInternalRefScheme(data.href)) {
+      throw new InvalidSessionHistoryError(`${at} must not use a framework-internal ref scheme.`);
+    }
+    return data;
+  }
+  if (data instanceof Uint8Array || data instanceof ArrayBuffer) {
+    if (data.byteLength === 0) {
+      throw new InvalidSessionHistoryError(`${at} must be non-empty.`);
+    }
+    return data;
+  }
+  throw new InvalidSessionHistoryError(
+    `${at} must be a non-empty string, URL, Uint8Array, or ArrayBuffer.`,
+  );
 }
 
 function validateToolPart(

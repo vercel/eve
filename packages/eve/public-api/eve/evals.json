@@ -63,6 +63,7 @@
   "ScoreInput",
   "SessionHistoryAssistantMessage",
   "SessionHistoryAssistantPart",
+  "SessionHistoryFilePart",
   "SessionHistoryMessage",
   "SessionHistoryTextPart",
   "SessionHistoryToolPart",

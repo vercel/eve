@@ -9,7 +9,11 @@ import {
   type ChannelDeliverySource,
 } from "#channel/delivery-metadata.js";
 import type { SendPayload } from "#channel/routes.js";
-import { normalizeSendInput, serializeFilePartsInMessage } from "#channel/send-input.js";
+import {
+  normalizeSendInput,
+  serializeFilePartsInHistory,
+  serializeFilePartsInMessage,
+} from "#channel/send-input.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
 import { createSession, sessionCallbackToTurnCaller, type Session } from "#channel/session.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
@@ -187,7 +191,7 @@ export function createChannelAddress<TState = undefined>(input: {
       );
     },
     async create(options) {
-      const history = validateSessionHistory(options.history);
+      const history = serializeFilePartsInHistory(validateSessionHistory(options.history));
       const toSession = (sessionId: string) =>
         createSession(sessionId, input.runtime, { ...metadata, turnPolicy: input.turnPolicy });
       let owner: { readonly sessionId: string } | undefined;
@@ -292,6 +296,6 @@ export function createChannelAddressFn<TState = undefined>(input: {
 
 function withValidatedHistory(payload: SendPayload): SendPayload {
   const { history, ...rest } = payload;
-  const validated = validateSessionHistory(history);
+  const validated = serializeFilePartsInHistory(validateSessionHistory(history));
   return validated === undefined ? rest : { ...rest, history: validated };
 }

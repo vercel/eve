@@ -100,6 +100,7 @@ export type {
   DeliverySource,
   DeliveryAdmittedData,
   DeliveryConsumedData,
+  ImportedFilePart,
   ImportedMessage,
   ImportedPart,
   ImportedTextPart,

@@ -8,7 +8,7 @@ import { getAdapterKind } from "#channel/adapter.js";
 import { buildChannelContext } from "#channel/session.js";
 import { contextStorage, loadContext } from "#context/container.js";
 import { SandboxKey, SessionIdKey } from "#context/keys.js";
-import { createFrameworkUserMessage } from "#harness/messages.js";
+import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { isUnresolvedFileData, readFileData } from "#internal/attachments/data.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
@@ -68,42 +68,64 @@ export async function stageAttachmentsForAdapter(
     return content;
   }
 
-  const reconstituted = reconstitueFilePartUrls(content);
   const policy = adapterCtx.ctx.get(ChannelKey)?.uploadPolicy;
   const downloads = createPublicDownloads(maxBytesOf(policy ?? DEFAULT_UPLOAD_POLICY));
-
-  return Promise.all(
-    reconstituted.map(async (part) => {
-      if (part.type === "file") {
-        return stageFilePart(part, sandbox, adapterCtx, downloads, policy);
-      }
-      return part;
-    }),
-  );
+  return stageContentWithDownloads(content, sandbox, adapterCtx, downloads, policy);
 }
 
 export async function stageAttachmentsToSandbox(
   message: string | UserContent,
 ): Promise<string | UserContent> {
-  if (typeof message === "string") {
-    return message;
+  return (await stageUserContentBatch([message]))[0]!;
+}
+
+export async function stageHistoryAttachments(
+  messages: readonly HarnessModelMessage[],
+): Promise<HarnessModelMessage[]> {
+  const fileMessageIndexes: number[] = [];
+  const contents: UserContent[] = [];
+  for (const [index, message] of messages.entries()) {
+    if (
+      message.role === "user" &&
+      Array.isArray(message.content) &&
+      hasFileParts(message.content)
+    ) {
+      fileMessageIndexes.push(index);
+      contents.push(message.content);
+    }
   }
-  if (!Array.isArray(message)) {
-    return message;
+  if (fileMessageIndexes.length === 0) return [...messages];
+  const staged = await stageUserContentBatch(contents);
+  const result = [...messages];
+  for (const [offset, messageIndex] of fileMessageIndexes.entries()) {
+    const original = messages[messageIndex]!;
+    if (original.role === "user") {
+      result[messageIndex] = { ...original, content: staged[offset]! };
+    }
   }
-  if (!hasFileParts(message)) {
-    return message;
+  return result;
+}
+
+async function stageUserContentBatch(
+  contents: readonly (string | UserContent)[],
+): Promise<(string | UserContent)[]> {
+  if (!contents.some((content) => Array.isArray(content) && hasFileParts(content))) {
+    return [...contents];
   }
 
   const container = loadContext();
   const sandbox = await activeSandbox(container.get(SandboxKey));
   if (sandbox === null) {
-    return message.map((part) =>
-      part.type === "file" &&
-      !isSandboxRefUrl(part.data) &&
-      readFileData(part.data).kind !== "reference"
-        ? attachmentNote(part, "could not be stored: no sandbox is available.")
-        : part,
+    return contents.map((content) =>
+      !Array.isArray(content)
+        ? content
+        : content.map((part) =>
+            part.type === "file" &&
+            !isSandboxRefUrl(part.data) &&
+            readFileData(part.data).kind !== "reference"
+              ? attachmentNote(part, "could not be stored: no sandbox is available.")
+              : part,
+          ),
     );
   }
 
@@ -115,8 +137,31 @@ export async function stageAttachmentsToSandbox(
         state: {},
         session: buildChannelContext(container).session,
       };
+  const policy = adapterCtx.ctx.get(ChannelKey)?.uploadPolicy;
+  const downloads = createPublicDownloads(maxBytesOf(policy ?? DEFAULT_UPLOAD_POLICY));
 
-  return stageAttachmentsForAdapter(message, sandbox, adapterCtx);
+  return Promise.all(
+    contents.map((content) =>
+      Array.isArray(content)
+        ? stageContentWithDownloads(content, sandbox, adapterCtx, downloads, policy)
+        : content,
+    ),
+  );
+}
+
+function stageContentWithDownloads(
+  content: Exclude<UserContent, string>,
+  sandbox: SandboxSession,
+  adapterCtx: ChannelAdapterContext,
+  downloads: PublicDownloads,
+  policy: UploadPolicy | undefined,
+): Promise<UserContent> {
+  const reconstituted = reconstitueFilePartUrls(content);
+  return Promise.all(
+    reconstituted.map(async (part) =>
+      part.type === "file" ? stageFilePart(part, sandbox, adapterCtx, downloads, policy) : part,
+    ),
+  );
 }
 
 export async function stageToolResultMedia<T extends ModelMessage>(

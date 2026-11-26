@@ -648,7 +648,16 @@ describe("the conversation", () => {
           history: [
             {
               id: "u1",
-              parts: [{ text: "Is T-1 open?", type: "text" }],
+              parts: [
+                { text: "Is T-1 open?", type: "text" },
+                {
+                  filename: "contract.pdf",
+                  mediaType: "application/pdf",
+                  size: 1024,
+                  type: "file",
+                  url: "https://example.com/contract.pdf",
+                },
+              ],
               role: "user",
               text: "Is T-1 open?",
             },
@@ -683,7 +692,16 @@ describe("the conversation", () => {
     expect(conversation.state.messages[0]).toEqual({
       id: "d_0:imported:0",
       metadata: { historyId: "u1", imported: true, status: "complete" },
-      parts: [{ state: "done", text: "Is T-1 open?", type: "text" }],
+      parts: [
+        { state: "done", text: "Is T-1 open?", type: "text" },
+        {
+          filename: "contract.pdf",
+          mediaType: "application/pdf",
+          size: 1024,
+          type: "file",
+          url: "https://example.com/contract.pdf",
+        },
+      ],
       role: "user",
     });
     expect(conversation.state.messages[1]).toEqual({

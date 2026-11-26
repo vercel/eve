@@ -33,14 +33,16 @@ export function createTextWithFileContent(input: {
   return [textPart, filePart];
 }
 
+export function serializeFilePartForRequest<T extends MessageFilePart>(part: T): T {
+  if (part.data instanceof URL) return { ...part, data: part.data.href };
+  if (!(part.data instanceof Uint8Array || part.data instanceof ArrayBuffer)) return part;
+  const base64 = bytesToBase64(new Uint8Array(part.data));
+  return { ...part, data: `data:${part.mediaType};base64,${base64}` };
+}
+
 export function messageForRequest(message: MessageContent): MessageContent {
   if (typeof message === "string") return message;
-  return message.map((part) => {
-    if (part.type !== "file") return part;
-    if (!(part.data instanceof Uint8Array || part.data instanceof ArrayBuffer)) return part;
-    const base64 = bytesToBase64(new Uint8Array(part.data));
-    return { ...part, data: `data:${part.mediaType};base64,${base64}` };
-  });
+  return message.map((part) => (part.type === "file" ? serializeFilePartForRequest(part) : part));
 }
 
 function bytesToBase64(bytes: Uint8Array): string {

@@ -63,6 +63,7 @@
   "RouteHandlerArgs",
   "SessionHistoryAssistantMessage",
   "SessionHistoryAssistantPart",
+  "SessionHistoryFilePart",
   "SessionHistoryMessage",
   "SessionHistoryTextPart",
   "SessionHistoryToolPart",

@@ -1,4 +1,8 @@
-import { stageAttachmentsToSandbox, stageToolResultMedia } from "#harness/attachment-staging.js";
+import {
+  stageAttachmentsToSandbox,
+  stageHistoryAttachments,
+  stageToolResultMedia,
+} from "#harness/attachment-staging.js";
 import { stepCatalog } from "#definitions/step.js";
 import { forgetFinishedRuns, runtimeResultCalls } from "#harness/coordination.js";
 import { endsTurnTools } from "#harness/model-call/tools.js";
@@ -131,7 +135,9 @@ export async function prepareTurnInput(
     (clientContext ?? storedClientContext?.messages)?.map((content) =>
       createFrameworkUserMessage("context.instruction", content),
     ) ?? [];
-  const imported = createImportedHistoryMessages(input?.history ?? [], step.session.history);
+  const imported = await stageHistoryAttachments(
+    createImportedHistoryMessages(input?.history ?? [], step.session.history),
+  );
   const messages: HarnessModelMessage[] = [
     ...imported,
     ...(input?.context ?? []).map((entry) =>

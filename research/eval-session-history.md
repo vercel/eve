@@ -104,7 +104,7 @@ export default eveChannel({
 
 ## Non-goals
 
-- File attachments in session history (`#5340`). Structured `parts` with completed tool exchanges are specified in [`session-history-parts.md`](./session-history-parts.md) and apply automatically to `t.session({ history })`.
+- Assistant file attachments or files inside imported tool-result outputs. User file attachments and completed assistant tool exchanges are specified in [`session-history-parts.md`](./session-history-parts.md) and apply automatically to `t.session({ history })`.
 - Client-supplied history on `POST /eve/v1/session`, `eve/client`, or follow-up message requests.
 - `history` on `t.send()`.
 - Per-turn scripted replies (`AX-5300`), which run the turn lifecycle rather than importing prior context.
