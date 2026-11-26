@@ -7,7 +7,7 @@ description: "Generate, edit, and extend videos in eve agents with a durable bac
 
 ## Install and mount
 
-Install `@eve/video` in your agent project (`eve >= 1.5.0`, Node.js `>= 24`):
+Install `@eve/video` in your agent project (`eve >= 1.6.0`, Node.js `>= 24`):
 
 ```bash
 pnpm add @eve/video
@@ -172,7 +172,7 @@ Pass `storage: r2VideoStorage` to `video(...)` in `agent/extensions/video.ts`.
 When your agent has a [sandbox](/docs/sandbox), `video__generate` can read input media from sandbox paths and write generated videos directly to disk.
 
 - **Inputs (`video`, `start`, `end`, `references`):** pass public `https://` URLs, sandbox file paths, or a `storageKey` when configured storage implements `get`. `video` accepts videos (MP4, WebM, MOV); `start` and `end` accept images (PNG, JPEG, WebP, GIF); `references` accepts images, videos, or audio (MP3, WAV, OGG, FLAC, M4A). Non-HTTPS URLs, embedded credentials, and private, loopback, link-local, or metadata hosts are blocked before any request runs.
-- **Automatic staging:** for asynchronous models, local inputs totaling over 180 KiB (and any local bytes passed to Grok edit/extend) upload to public HTTPS storage (`ttlDays: 1`) before the request and are deleted in `finally` when the task ends.
+- **Automatic staging:** for AI Gateway asynchronous models, local inputs that would exceed the inline request budget (and any local bytes passed to Grok edit/extend) upload incrementally to public HTTPS storage (`ttlDays: 1`) before the request and are deleted in `finally` when the task ends. Direct provider models (such as `@ai-sdk/google`) keep local inputs inline.
 - **Output (`path`):** pass `path` (for example `output/clip.mp4`) to save videos into the sandbox. When `n > 1`, `@eve/video` writes `output/clip.mp4`, `output/clip-1.mp4`, and so on. When both storage and `path` are present, `@eve/video` writes to both and returns both `url` and `path`; set `storage: false` to write only to the sandbox.
 
 ## Require approval and set limits
@@ -238,7 +238,7 @@ Because `generate` is a `defineWorkflowTool`, configure `approval`, `defaults`, 
 | `mode`        | `"edit" \| "extend"` | No       | Operation applied to `video`: `"edit"` (default when `video` is set) modifies it; `"extend"` continues from last frame. |
 | `start`       | `string`             | No       | Opening frame image as a public `https://` URL or sandbox file path. Cannot be combined with `video`.                   |
 | `end`         | `string`             | No       | Closing frame image as a public `https://` URL or sandbox file path. Cannot be combined with `video`.                   |
-| `references`  | `string[]`           | No       | Reference images, videos, or audio clips as public `https://` URLs or sandbox file paths.                               |
+| `references`  | `string[]`           | No       | Up to 16 reference images, videos, or audio clips as public `https://` URLs or sandbox file paths.                      |
 | `duration`    | `number`             | No       | Target duration in seconds.                                                                                             |
 | `aspectRatio` | `string`             | No       | Aspect ratio such as `"16:9"`, `"9:16"`, `"1:1"`, or `"auto"`.                                                          |
 | `resolution`  | `string`             | No       | Output resolution: `"480p"`, `"720p"`, `"1080p"`, `"4k"`, or `"widthxheight"` such as `"1280x720"`.                     |

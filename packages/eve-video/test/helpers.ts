@@ -22,6 +22,11 @@ export const MP3_BYTES = hex("4944330300000000");
 export const WAV_BYTES = hex("524946460400000057415645");
 export const createLargePng = () => pad(PNG_BYTES);
 export const createLargeMp4 = () => pad(MP4_BYTES);
+export const createSizedPng = (bytes: number) => {
+  const b = new Uint8Array(bytes);
+  b.set(PNG_BYTES);
+  return b;
+};
 export const createHttpError = (statusCode: number, msg: string) =>
   Object.assign(new Error(msg), { statusCode });
 
@@ -114,7 +119,10 @@ export function createSyncVideoModel(
   return { model, generateCalls };
 }
 
-export interface FakeSandbox extends Pick<SandboxSession, "readBinaryFile" | "writeBinaryFile"> {
+export interface FakeSandbox extends Pick<
+  SandboxSession,
+  "readFile" | "readBinaryFile" | "writeBinaryFile"
+> {
   readonly files: Map<string, Uint8Array>;
 }
 
@@ -122,6 +130,21 @@ export function createFakeSandbox(initial?: Readonly<Record<string, Uint8Array>>
   const files = new Map(Object.entries(initial ?? {}).map(([k, v]) => [k, Uint8Array.from(v)]));
   return {
     files,
+    readFile: async ({ path, signal }) => {
+      signal?.throwIfAborted();
+      const data = files.get(path);
+      if (!data) return null;
+      const copy = Uint8Array.from(data);
+      let off = 0;
+      const chunk = 64 * 1024;
+      return new ReadableStream<Uint8Array>({
+        pull(c) {
+          if (off >= copy.byteLength) return c.close();
+          c.enqueue(copy.subarray(off, Math.min(off + chunk, copy.byteLength)));
+          off += chunk;
+        },
+      });
+    },
     readBinaryFile: async ({ path, signal }) => (
       signal?.throwIfAborted(),
       files.has(path) ? Uint8Array.from(files.get(path)!) : null

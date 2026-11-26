@@ -7,6 +7,7 @@ import { BlockList, isIP } from "node:net";
 export const DEFAULT_MAX_INPUT_BYTES = 100 * 1024 * 1024;
 export const DEFAULT_MAX_OUTPUT_BYTES = 512 * 1024 * 1024;
 export const ASYNC_INLINE_INPUT_LIMIT_BYTES = 180 * 1024;
+export const MAX_REFERENCE_COUNT = 16;
 
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const MPEG_SYNC = new Set([0xfb, 0xf3, 0xf2, 0xe3, 0xfa]);

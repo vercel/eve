@@ -1,6 +1,7 @@
 import type { ApprovalConfiguration, ApprovalPromptContext } from "eve/tools/approval";
 import { z } from "zod";
 
+import { MAX_REFERENCE_COUNT } from "./media.ts";
 import { describeDefaultModel } from "./model.ts";
 import type * as t from "./types.ts";
 
@@ -23,6 +24,7 @@ export const generateVideoInputSchema = z.object({
   references: z
     .array(str())
     .min(1)
+    .max(MAX_REFERENCE_COUNT)
     .optional()
     .describe("Reference images, videos, or audio clips."),
   duration: z.number().positive().optional().describe("Target duration in seconds."),

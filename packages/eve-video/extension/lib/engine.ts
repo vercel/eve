@@ -90,6 +90,8 @@ export async function submitToolVideoJob(
   for (const k of ["video", "start", "end", "path"] as const)
     if (input[k] !== undefined && !input[k].trim())
       throw new Error(`Input "${k}" must be a non-empty string.`);
+  if (input.references && input.references.length > media.MAX_REFERENCE_COUNT)
+    throw new Error(`At most ${media.MAX_REFERENCE_COUNT} reference items are allowed.`);
   if (input.references?.some((r) => !r.trim()))
     throw new Error('Entries in "references" must be non-empty.');
 
@@ -155,68 +157,6 @@ export async function submitToolVideoJob(
         )
       : undefined;
 
-  const load = async (
-    raw: string,
-    slot: string,
-    allowed: readonly ("image" | "video" | "audio")[],
-    frameType?: "first_frame" | "last_frame",
-    defaultUrlType?: string,
-  ): Promise<ResolvedMedia> => {
-    const trimmed = raw.trim();
-    const checkKind = (mt: string, target: string) => {
-      const k = media.mediaKind(mt);
-      if (k === "other" || !allowed.includes(k))
-        throw new Error(`Unsupported media type "${mt}" for ${target}.`);
-    };
-    if (media.isUrlLike(trimmed)) {
-      const safe = await media.assertSafePublicUrl(trimmed, { resolveDns: false });
-      const inf = media.mediaTypeFromUrl(safe.href);
-      if (inf) checkKind(inf, `"${slot}" URL "${trimmed}"`);
-      const mediaType = inf ?? defaultUrlType;
-      return {
-        slot,
-        url: safe.href,
-        ...(frameType && { frameType }),
-        ...(mediaType && { mediaType }),
-      };
-    }
-    let data = sb?.sandbox ? await sb.sandbox.readBinaryFile({ path: trimmed, signal }) : null;
-    let declared: string | undefined;
-    if (data === null && storage?.get) {
-      const key = tryKey(trimmed);
-      const stored = key ? await storage.get({ key, signal }) : null;
-      if (stored) ({ data, mediaType: declared } = stored);
-    }
-    if (data === null) {
-      if (sb?.sandbox)
-        throw new Error(
-          `File not found in sandbox${storage?.get ? " or storage" : ""}: ${trimmed}`,
-        );
-      if (slot === "video" && storage?.get)
-        throw new Error(`Video "${trimmed}" not found in storage and no sandbox is configured.`);
-      throw sb?.error ?? new Error("Reading local input files requires an agent sandbox.");
-    }
-    if (!data.byteLength) throw new Error(`Media file is empty: ${trimmed}`);
-    if (data.byteLength > maxIn)
-      throw new Error(
-        `Media "${trimmed}" (${data.byteLength} bytes) exceeds maximum allowed size of ${maxIn} bytes.`,
-      );
-    const mediaType = media.detectMediaType(data) ?? usableType(declared);
-    if (!mediaType) throw new Error(`Unsupported or unrecognized media file format: ${trimmed}`);
-    checkKind(mediaType, `"${trimmed}"`);
-    return { slot, data, mediaType, ...(frameType && { frameType }) };
-  };
-
-  const videoEntry = input.video
-    ? await load(input.video, "video", ["video"], undefined, "video/mp4")
-    : undefined;
-  const frames: ResolvedMedia[] = [];
-  if (input.start) frames.push(await load(input.start, "start", ["image"], "first_frame"));
-  if (input.end) frames.push(await load(input.end, "end", ["image"], "last_frame"));
-  const references: ResolvedMedia[] = videoEntry && !grok ? [videoEntry] : [];
-  for (let i = 0; i < (input.references?.length ?? 0); i += 1)
-    references.push(await load(input.references![i], `ref-${i}`, ["image", "video", "audio"]));
-
   const stagedKeys: string[] = [];
   let stagePrefix: string | undefined;
   const stage = async (entry: ResolvedMedia): Promise<string | null> => {
@@ -242,26 +182,113 @@ export async function submitToolVideoJob(
     return safe.href;
   };
 
-  try {
-    let grokUrl: string | undefined;
-    if (videoEntry && grok) {
-      grokUrl = videoEntry.url ?? (await stage(videoEntry)) ?? undefined;
-      if (!grokUrl)
-        throw new Error(`Model "${modelId}" requires public HTTPS storage or an https:// URL.`);
+  const isGateway = model.provider === "gateway" || typeof model.handleWebhookOption === "function";
+  let totalInputBytes = 0;
+  let inlineBytes = 0;
+  let canStageInline = isAsync && isGateway && Boolean(storage);
+
+  const load = async (
+    raw: string,
+    slot: string,
+    allowed: readonly ("image" | "video" | "audio")[],
+    frameType?: "first_frame" | "last_frame",
+    defaultUrlType?: string,
+  ): Promise<ResolvedMedia> => {
+    const trimmed = raw.trim();
+    const checkKind = (mt: string, target: string) => {
+      const k = media.mediaKind(mt);
+      if (k === "other" || !allowed.includes(k))
+        throw new Error(`Unsupported media type "${mt}" for ${target}.`);
+    };
+    if (media.isUrlLike(trimmed)) {
+      const safe = await media.assertSafePublicUrl(trimmed, { resolveDns: false });
+      const inf = media.mediaTypeFromUrl(safe.href);
+      if (inf) checkKind(inf, `"${slot}" URL "${trimmed}"`);
+      const mediaType = inf ?? defaultUrlType;
+      return {
+        slot,
+        url: safe.href,
+        ...(frameType && { frameType }),
+        ...(mediaType && { mediaType }),
+      };
     }
-    const local = [...frames, ...references].filter((x) => x.data && x.mediaType);
-    let inlineBytes = local.reduce((sum, x) => sum + x.data!.byteLength, 0);
-    if (isAsync && storage && inlineBytes > media.ASYNC_INLINE_INPUT_LIMIT_BYTES) {
-      local.sort((a, b) => b.data!.byteLength - a.data!.byteLength);
-      for (const entry of local) {
-        if (inlineBytes <= media.ASYNC_INLINE_INPUT_LIMIT_BYTES) break;
-        const url = await stage(entry);
-        if (!url) break;
-        inlineBytes -= entry.data!.byteLength;
-        entry.url = url;
-        entry.data = undefined;
+    const remaining = maxIn - totalInputBytes;
+    if (remaining <= 0)
+      throw new Error(`Total input media size exceeds maximum allowed size of ${maxIn} bytes.`);
+    let data: Uint8Array | null = null;
+    if (sb?.sandbox) {
+      const stream = await sb.sandbox.readFile({ path: trimmed, signal });
+      if (stream) {
+        try {
+          data = await media.readBoundedStream(stream, remaining, { signal });
+        } catch (err) {
+          if (err instanceof media.StreamLimitExceededError)
+            throw new Error(
+              `Media "${trimmed}" exceeds maximum allowed input size of ${maxIn} bytes.`,
+            );
+          throw err;
+        }
       }
     }
+    let declared: string | undefined;
+    if (data === null && storage?.get) {
+      const key = tryKey(trimmed);
+      const stored = key ? await storage.get({ key, signal }) : null;
+      if (stored) ({ data, mediaType: declared } = stored);
+    }
+    if (data === null) {
+      if (sb?.sandbox)
+        throw new Error(
+          `File not found in sandbox${storage?.get ? " or storage" : ""}: ${trimmed}`,
+        );
+      if (slot === "video" && storage?.get)
+        throw new Error(`Video "${trimmed}" not found in storage and no sandbox is configured.`);
+      throw sb?.error ?? new Error("Reading local input files requires an agent sandbox.");
+    }
+    if (!data.byteLength) throw new Error(`Media file is empty: ${trimmed}`);
+    if (data.byteLength > remaining)
+      throw new Error(
+        `Media "${trimmed}" (${totalInputBytes + data.byteLength} total bytes) exceeds maximum allowed size of ${maxIn} bytes.`,
+      );
+    const mediaType = media.detectMediaType(data) ?? usableType(declared);
+    if (!mediaType) throw new Error(`Unsupported or unrecognized media file format: ${trimmed}`);
+    checkKind(mediaType, `"${trimmed}"`);
+    totalInputBytes += data.byteLength;
+    const entry: ResolvedMedia = { slot, data, mediaType, ...(frameType && { frameType }) };
+    if (slot === "video" && grok) {
+      const url = await stage(entry);
+      if (!url)
+        throw new Error(`Model "${modelId}" requires public HTTPS storage or an https:// URL.`);
+      entry.url = url;
+      entry.data = undefined;
+      return entry;
+    }
+    const weight = data.byteLength * (frameType === "first_frame" ? 2 : 1);
+    if (canStageInline && inlineBytes + weight > media.ASYNC_INLINE_INPUT_LIMIT_BYTES) {
+      const url = await stage(entry);
+      if (url) {
+        entry.url = url;
+        entry.data = undefined;
+        return entry;
+      }
+      canStageInline = false;
+    }
+    inlineBytes += weight;
+    return entry;
+  };
+
+  try {
+    const videoEntry = input.video
+      ? await load(input.video, "video", ["video"], undefined, "video/mp4")
+      : undefined;
+    const frames: ResolvedMedia[] = [];
+    if (input.start) frames.push(await load(input.start, "start", ["image"], "first_frame"));
+    if (input.end) frames.push(await load(input.end, "end", ["image"], "last_frame"));
+    const references: ResolvedMedia[] = videoEntry && !grok ? [videoEntry] : [];
+    for (let i = 0; i < (input.references?.length ?? 0); i += 1)
+      references.push(await load(input.references![i], `ref-${i}`, ["image", "video", "audio"]));
+
+    const grokUrl = videoEntry && grok ? videoEntry.url : undefined;
 
     const xai = grokUrl
       ? {

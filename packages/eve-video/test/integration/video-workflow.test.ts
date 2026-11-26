@@ -242,7 +242,25 @@ describe("pre-flight gating before paid submission", () => {
       [{ video: "in/frame.png" }, {}, /Unsupported media type/, sb],
       [{ n: 3 }, { limits: { maxVideosPerCall: 2 } }, /maximum of 2 videos/],
       [{ duration: 12 }, { limits: { maxDurationSeconds: 8 } }, /maximum of 8s/],
+      [
+        { references: Array.from({ length: 17 }, (_, i) => `${C}/r${i}.png`) },
+        {},
+        /At most 16 reference items/,
+      ],
+      [
+        { references: ["in/frame.png", "in/frame.png", "in/frame.png"] },
+        { limits: { maxInputBytes: 25 } },
+        /exceeds maximum allowed/,
+        sb,
+      ],
     ];
+    eq(
+      T.generateVideoInputSchema.safeParse({
+        prompt: "p",
+        references: Array.from({ length: 17 }, () => `${C}/a.png`),
+      }).success,
+      false,
+    );
     for (const [inp, cfg, re, sandbox] of rows) {
       const f = mkAsync();
       extension({ model: f.model, storage, ...cfg });
@@ -275,6 +293,26 @@ describe("pre-flight gating before paid submission", () => {
       await failStep(() => sub({ prompt: "p", ...inp }, { getSandbox }), /Refusing non-HTTPS URL/);
       deq([sbCalls, f.startCalls.length], [0, 0]);
     }
+
+    let chunksPulled = 0;
+    const hugeStreamSandbox: H.FakeSandbox = {
+      ...mkSb(),
+      readFile: async () =>
+        new ReadableStream<Uint8Array>({
+          pull(c) {
+            chunksPulled += 1;
+            c.enqueue(new Uint8Array(64));
+          },
+        }),
+    };
+    const fStream = mkAsync();
+    extension({ model: fStream.model, storage, limits: { maxInputBytes: 100 } });
+    await failStep(
+      () => sub({ prompt: "Huge", start: "in/huge.png" }, { sandbox: hugeStreamSandbox }),
+      /exceeds maximum allowed input size/,
+    );
+    assert.ok(chunksPulled <= 3);
+    eq(fStream.startCalls.length, 0);
   });
 });
 
@@ -383,6 +421,30 @@ describe("video iteration routing across Grok, Seedance, and FLUX 3", () => {
       /not found in storage/,
     );
     eq(flux.startCalls.length, 4);
+
+    const midPng = H.createSizedPng(120 * 1024);
+    const gw = mkAsync({ modelId: "bytedance/seedance-2.5-flash", provider: "gateway" });
+    extension({ model: gw.model, storage });
+    const midRes = await sub(
+      { prompt: "MidStart", start: "in/mid.png" },
+      { sandbox: mkSb({ "in/mid.png": midPng }) },
+    );
+    if (midRes.kind !== "async") assert.fail();
+    const mk = midRes.handle.stagedInputKeys![0];
+    deq(gw.startCalls[0].image, { type: "url", url: `https://cdn.test/m/${mk}` });
+
+    const directGoogle = mkAsync({
+      modelId: "veo-3.1-fast-generate-001",
+      provider: "google.video",
+    });
+    extension({ model: directGoogle.model, storage });
+    const directRes = await sub(
+      { prompt: "DirectGoogle", start: "in/big.png" },
+      { sandbox: mkSb({ "in/big.png": H.createLargePng() }) },
+    );
+    if (directRes.kind !== "async") assert.fail();
+    eq(directRes.handle.stagedInputKeys, undefined);
+    eq((directGoogle.startCalls[0].image as { type: string }).type, "file");
   });
 });
 

@@ -4,7 +4,7 @@
 
 ## Install
 
-Install `@eve/video` in an eve agent project (`eve >= 1.5.0`, Node.js `>= 24`):
+Install `@eve/video` in an eve agent project (`eve >= 1.6.0`, Node.js `>= 24`):
 
 ```sh
 pnpm add @eve/video
