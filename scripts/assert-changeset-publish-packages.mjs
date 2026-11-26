@@ -9,6 +9,7 @@ const allowedPublicPackages = new Set([
   "@eve/board",
   "@eve/self-improvement",
   "@eve/recall",
+  "@eve/video",
 ]);
 const workspaceRoots = ["apps", "packages"];
 
