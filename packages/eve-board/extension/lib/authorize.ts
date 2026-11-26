@@ -1,9 +1,9 @@
 import type { SessionAuthContext } from "eve/context";
 
 /** Operation passed to {@link BoardAuthorize}. */
-export type BoardAuthorizeAction = "watch" | "watches" | "unwatch";
+export type BoardAuthorizeAction = "watch" | "watches" | "unwatch" | "settle_task";
 
-/** Context passed to `authorize` before creating, listing, or removing board watches. */
+/** Context passed to `authorize` before creating, listing, or removing board watches, or settling a task by its ID. */
 export interface BoardAuthorizeRequest {
   /** Which operation is being requested. */
   readonly action: BoardAuthorizeAction;
@@ -21,10 +21,13 @@ export interface BoardAuthorizeRequest {
   readonly claimChannel?: string;
   /** For `"unwatch"`, the watch ID being removed. */
   readonly watchId?: string;
+  /** For `"settle_task"`, the ID of the task being settled. */
+  readonly taskId?: string;
 }
 
 /**
- * Decides whether the current caller may create, list, or remove watches on a board.
+ * Decides whether the current caller may create, list, or remove watches on a board, or settle
+ * a task by its ID.
  * Return `true` to allow the operation; any other value denies it.
  */
 export type BoardAuthorize = (request: BoardAuthorizeRequest) => boolean | Promise<boolean>;
