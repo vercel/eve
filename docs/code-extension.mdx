@@ -79,13 +79,13 @@ To use a personal access token or another credential provider, omit the connecto
 
 The extension discovers git repositories in the sandbox and adds each repository's `AGENTS.md` (or `CLAUDE.md` when there is no `AGENTS.md`) as user-role instructions. Discovery covers pre-seeded sandboxes, channel checkouts, subagents, worktrees, submodules, and repositories cloned mid-turn through `git__gh` or `bash`. When the workspace root is not a git repository, the extension reads `AGENTS.md` or `CLAUDE.md` from the workspace root.
 
-Discovery runs at the start of each turn and after completed commands that clone, fetch, switch refs, unpack archives, or run in a new directory. Each repository and directory scope joins the conversation under its own instruction key, so newly entered repositories append without changing earlier history. Root and matching rule instruction files refresh whenever they change on subsequent reconciliations (skipping re-transmission when unchanged), including when a sparse checkout materializes a previously unavailable file. When a repository's `HEAD` commit changes, the extension also clears cached subdirectory instructions for that repository. Deleted repositories are removed along with their subdirectory scopes and rule skills.
+Discovery runs at the start of each turn and after completed commands that clone, fetch, switch refs, unpack archives, or run in a new directory. Each repository and directory scope joins the conversation under its own instruction key, so newly entered repositories append without changing earlier history. Root and matching rule instruction files refresh whenever they change on subsequent reconciliations, including when a sparse checkout materializes a previously unavailable file. When a repository's `HEAD` commit changes, the extension also clears cached subdirectory instructions for that repository. Deleted repositories are removed along with their subdirectory scopes.
 
 For each configured instruction file in a repository, the extension reads in three tiers:
 
 1. **Worktree.** Reads the checked-out file when it is non-empty and its resolved path stays inside the repository root.
-2. **Git `HEAD`.** When a sparse or partial checkout excludes the file from the working tree, reads `HEAD:<path>` from the local object store or fetches it over HTTPS with a 5-second timeout.
-3. **Unavailable directive.** When the file exists at `HEAD` but cannot be fetched, adds a note naming the path so the model reads it before editing or opening a pull request.
+2. **Git `HEAD`.** When a sparse or partial checkout excludes the file from the working tree, reads `HEAD:<path>` offline from `.git/objects` (paired with `eve/extensions/git` prefetching configured files during partial clones).
+3. **Unavailable directive.** When the file exists at `HEAD` but is not in `.git/objects`, adds a note naming the path so the model checks it out or reads it before editing.
 
 As `read_file`, `edit_file`, `write_file`, `glob`, or `grep` touch files inside nested directories, the extension loads `AGENTS.md` (or `CLAUDE.md`) from each newly entered ancestor directory. A file over `maxFileBytes` (default `64_000`) is truncated with a note naming the path. When total instructions exceed `maxTotalBytes` (default `256_000`), an overflow note lists the remaining paths for `read_file`.
 
@@ -108,11 +108,10 @@ Each entry in `rules` accepts:
 
 - `match`: `"owner/name"` (case-insensitive exact slug), `"owner/*"` (wildcard prefix), `"*"`, a `RegExp` tested against `repo.slug` or `repo.root`, or a predicate `(repo) => boolean`. Omit `match` to match every discovered repository.
 - `files`: Extra repository-relative paths or fallback tuples to load alongside `instructions`.
-- `onEnter(repo, ctx)`: Runs once per session when a matching repository is first discovered. `repo` provides `root`, `slug`, `remote`, `head`, `branch`, `sparse`, `instructions`, and `repo.readFile(relativePath)`. `ctx` provides `sandbox`, `session`, `channel`, `conversation`, and `trigger` (`"turn.started"` or `"call.settled"`). Return `{ instructions?, skills? }` to attach extra user-role instructions or dynamic skills for the session. If a rule throws, eve logs a warning and skips it without failing the turn or suppressing default instructions or other rules. Contributed skills use the extension namespace (such as `code__<name>`), require keys matching `/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,57}$/` without an `eve__` prefix (invalid keys are skipped with a warning), and keep the first-entered repository's skill on name collisions.
+- `onEnter(repo, ctx)`: Runs once per session when a matching repository is first discovered. `repo` provides `root`, `slug`, `remote`, `head`, `branch`, `sparse`, `instructions`, and `repo.readFile(relativePath)`. `ctx` provides `sandbox`, `session`, `channel`, `conversation`, and `trigger` (`"turn.started"` or `"call.settled"`). Return `{ instructions? }` to attach extra user-role instructions for the session. If a rule throws, eve logs a warning and skips it without failing the turn or suppressing default instructions or other rules.
 
 ```ts title="agent/extensions/code.ts"
 import code from "eve/extensions/code";
-import { defineSkill } from "eve/skills";
 
 export default code({
   repositories: {
@@ -125,12 +124,6 @@ export default code({
           const guide = await repo.readFile("CONTRIBUTING.md");
           return {
             instructions: guide?.content ? [guide.content] : undefined,
-            skills: {
-              repo_verify: defineSkill({
-                description: "Run repository verification checks before opening a PR.",
-                content: `Run tests and checks for ${repo.slug ?? repo.root} before publishing.`,
-              }),
-            },
           };
         },
       },

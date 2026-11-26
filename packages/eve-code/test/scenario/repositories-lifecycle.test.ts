@@ -8,7 +8,6 @@ import { promisify } from "node:util";
 import test from "node:test";
 
 import type { SandboxSession } from "eve/sandbox";
-import { defineSkill } from "eve/skills";
 import { defineTool } from "eve/tools";
 
 import { ContextContainer, contextStorage } from "../../../eve/dist/src/context/container.js";
@@ -38,7 +37,6 @@ import type { SandboxAccess } from "../../../eve/dist/src/sandbox/state.js";
 const { default: extension } = await import("../../extension/extension.ts");
 const { default: repositoriesHook } = await import("../../extension/hooks/repositories.ts");
 const { default: projectInstructions } = await import("../../extension/instructions/project.ts");
-const { default: repositorySkills } = await import("../../extension/skills/repository.ts");
 
 const execFileAsync = promisify(execFile);
 
@@ -72,10 +70,7 @@ async function git(cwd: string, args: readonly string[]): Promise<string> {
   return stdout.trim();
 }
 
-async function initUpstreamRepo(
-  dir: string,
-  files: Readonly<Record<string, string>>,
-): Promise<void> {
+async function initUpstreamRepo(dir: string, files: Readonly<Record<string, string>>) {
   await mkdir(dir, { recursive: true });
   await git(dir, ["init", "-b", "main"]);
   for (const [rel, content] of Object.entries(files)) {
@@ -87,26 +82,13 @@ async function initUpstreamRepo(
   await git(dir, ["commit", "-m", "init"]);
 }
 
-interface InstrumentedSandbox {
-  readonly access: SandboxAccess;
-  readonly commands: string[];
-  readonly writtenFiles: Map<string, Uint8Array>;
-  readonly getOpenCount: () => number;
-}
-
-function createRealSandboxAccess(
-  workspaceDir: string,
-  envOverrides: NodeJS.ProcessEnv = {},
-): InstrumentedSandbox {
+function createRealSandboxAccess(workspaceDir: string) {
   const commands: string[] = [];
-  const writtenFiles = new Map<string, Uint8Array>();
   let openCount = 0;
   let started = false;
 
   const session: SandboxSession = {
-    resolvePath(path: string) {
-      return isAbsolute(path) ? path : join(workspaceDir, path);
-    },
+    resolvePath: (path) => (isAbsolute(path) ? path : join(workspaceDir, path)),
     async run({ command, workingDirectory }) {
       commands.push(command);
       const cwd =
@@ -118,7 +100,7 @@ function createRealSandboxAccess(
       try {
         const { stdout, stderr } = await execFileAsync("bash", ["-c", command], {
           cwd,
-          env: { ...GIT_ENV, ...envOverrides },
+          env: GIT_ENV,
         });
         return { exitCode: 0, stdout, stderr };
       } catch (error) {
@@ -140,7 +122,7 @@ function createRealSandboxAccess(
             : join(workspaceDir, workingDirectory);
       const child = spawnProcess("bash", ["-c", command], {
         cwd,
-        env: { ...GIT_ENV, ...envOverrides, ...env },
+        env: { ...GIT_ENV, ...env },
         stdio: ["ignore", "pipe", "pipe"],
       });
       const exitPromise = new Promise<{ exitCode: number }>((resolve) => {
@@ -153,18 +135,15 @@ function createRealSandboxAccess(
         child.once("error", () => finish(1));
         child.once("close", (code) => finish(typeof code === "number" ? code : 1));
       });
-      const stdout = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
-      const stderr = Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>;
       return {
         ...(child.pid !== undefined && { pid: child.pid }),
-        stdout,
-        stderr,
+        stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+        stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
         wait: () => exitPromise,
         async kill() {
           if (child.exitCode === null && child.signalCode === null) {
             try {
-              if (process.platform === "win32") child.kill();
-              else child.kill("SIGKILL");
+              child.kill("SIGKILL");
             } catch {}
           }
           child.stdout.destroy();
@@ -173,32 +152,17 @@ function createRealSandboxAccess(
         },
       };
     },
-    async readFile() {
-      return null;
-    },
-    async readBinaryFile() {
-      return null;
-    },
-    async readTextFile() {
-      return null;
-    },
-    async writeFile() {},
-    async writeBinaryFile({ path, content }) {
-      writtenFiles.set(path, new Uint8Array(content));
-    },
-    async writeTextFile({ path, content }) {
-      writtenFiles.set(path, new Uint8Array(Buffer.from(content, "utf8")));
-    },
-    async writeFiles({ files }) {
-      for (const file of files) {
-        writtenFiles.set(file.path, new Uint8Array(file.content));
-      }
-    },
-    async removePath() {},
+    readFile: async () => null,
+    readBinaryFile: async () => null,
+    readTextFile: async () => null,
+    writeFile: async () => undefined,
+    writeBinaryFile: async () => undefined,
+    writeTextFile: async () => undefined,
+    writeFiles: async () => undefined,
+    removePath: async () => undefined,
   };
 
   let queue = Promise.resolve();
-
   const open = async () => {
     if (!started) {
       started = true;
@@ -208,9 +172,7 @@ function createRealSandboxAccess(
   };
 
   const access: SandboxAccess = {
-    async captureState() {
-      return { session: null };
-    },
+    captureState: async () => ({ session: null }),
     async get() {
       await queue;
       return await open();
@@ -230,41 +192,18 @@ function createRealSandboxAccess(
     },
   };
 
-  return {
-    access,
-    commands,
-    writtenFiles,
-    getOpenCount: () => openCount,
-  };
+  return { access, commands, getOpenCount: () => openCount };
 }
 
 function unwrapDynamic(sentinel: unknown): (ctx: unknown) => unknown {
-  const symbol = Symbol.for("eve.dynamic");
-  return (sentinel as Record<symbol, (ctx: unknown) => unknown>)[symbol]!;
-}
-
-interface SessionHarness {
-  readonly ctx: ContextContainer;
-  readonly conversation: { role: "user" | "assistant"; content: string; kind?: string }[];
-  readonly startTurn: (turnId: string) => Promise<void>;
-  readonly settleToolCall: (input: {
-    readonly callId: string;
-    readonly name: string;
-    readonly input: Record<string, unknown>;
-    readonly output?: Record<string, unknown>;
-  }) => Promise<void>;
-  readonly nextModelCall: () => Promise<{
-    readonly newUserInstructions: readonly string[];
-    readonly skillNames: readonly string[];
-  }>;
-  readonly compactHistory: () => void;
+  return (sentinel as Record<symbol, (ctx: unknown) => unknown>)[Symbol.for("eve.dynamic")]!;
 }
 
 function createSessionHarness(
   sandboxAccess: SandboxAccess,
   sessionId: string,
   options: { readonly parentSessionId?: string } = {},
-): SessionHarness {
+) {
   const ctx = new ContextContainer();
   ctx.set(SessionIdKey, sessionId);
   const parent =
@@ -276,9 +215,7 @@ function createSessionHarness(
           turn: { id: "turn_1", number: 1 },
         }
       : undefined;
-  if (parent !== undefined) {
-    ctx.set(ParentSessionKey, parent as never);
-  }
+  if (parent !== undefined) ctx.set(ParentSessionKey, parent as never);
   ctx.set(SessionKey, {
     auth: { current: null, initiator: null },
     ...(parent !== undefined && { parent }),
@@ -304,15 +241,6 @@ function createSessionHarness(
             sourceKind: "module",
           },
           {
-            evaluate: unwrapDynamic(repositorySkills),
-            extensionNamespace: "code",
-            kind: "skill",
-            logicalPath: "skills/code__repository.ts",
-            slug: "code__repository",
-            sourceId: "skills/code__repository.ts",
-            sourceKind: "module",
-          },
-          {
             events: repositoriesHook.events,
             kind: "hook",
             logicalPath: "hooks/code__repositories.ts",
@@ -325,30 +253,22 @@ function createSessionHarness(
         skills: [],
       },
       subagentRegistry: { dynamicResolvers: [], preparedTools: [] },
-      turnAgent: {
-        model: "openai/gpt-5.4",
-        tools: new Map(),
-      },
+      turnAgent: { model: "openai/gpt-5.4", tools: new Map() },
     } as never),
   );
 
   let line = 0;
   let currentTurnId = "turn_0";
   const conversation: { role: "user" | "assistant"; content: string; kind?: string }[] = [];
-
   enterSessionProjection(ctx, undefined);
 
-  async function emit(events: readonly Record<string, unknown>[]): Promise<void> {
+  async function emit(events: readonly Record<string, unknown>[]) {
     const positionLine = line;
     line += 1;
     const at = new Date().toISOString();
     const facts = events.map((event, index) => ({
       ...event,
-      meta: {
-        at,
-        id: `evt_${positionLine}_${index}`,
-        position: { index, line: positionLine },
-      },
+      meta: { at, id: `evt_${positionLine}_${index}`, position: { index, line: positionLine } },
     }));
     recordPublishedLine(ctx, { at, facts } as never, positionLine, facts as never);
     const view = currentView(ctx);
@@ -359,17 +279,11 @@ function createSessionHarness(
       view,
     }));
     await contextStorage.run(ctx, () =>
-      runEffects(ctx, {
-        conversation: conversation as never,
-        written: written as never,
-      }),
+      runEffects(ctx, { conversation: conversation as never, written: written as never }),
     );
   }
 
   return {
-    ctx,
-    conversation,
-
     async startTurn(turnId: string) {
       const follows = currentTurnId === "turn_0" ? null : currentTurnId;
       currentTurnId = turnId;
@@ -383,16 +297,21 @@ function createSessionHarness(
         {
           type: "turn.started",
           scope: { sessionId, turnId },
-          data: {
-            turnId,
-            cause: { deliveryId: `del_${turnId}` },
-            follows,
-          },
+          data: { turnId, cause: { deliveryId: `del_${turnId}` }, follows },
         },
       ]);
     },
-
-    async settleToolCall({ callId, name, input, output }) {
+    async settleToolCall({
+      callId,
+      name,
+      input,
+      output,
+    }: {
+      readonly callId: string;
+      readonly name: string;
+      readonly input: Record<string, unknown>;
+      readonly output?: Record<string, unknown>;
+    }) {
       await emit([
         {
           type: "call.requested",
@@ -407,26 +326,20 @@ function createSessionHarness(
         {
           type: "call.settled",
           scope: { sessionId, turnId: currentTurnId },
-          data: {
-            callId,
-            outcome: "completed",
-            output: output ?? { ok: true },
-          },
+          data: { callId, outcome: "completed", output: output ?? { ok: true } },
         },
       ]);
     },
-
     async nextModelCall() {
       const beforeCount = conversation.length;
       return await contextStorage.run(ctx, async () => {
         await evaluateValues(ctx, { conversation: conversation as never });
-        const stepSource = {
+        const draft = await stepDraft({
           config: { tools: new Map() },
           ctx,
           finalReplyOnly: false,
           session: { rootSessionId: sessionId },
-        };
-        const draft = await stepDraft(stepSource as never);
+        } as never);
         const result = await stepMessages(draft, {
           call: {
             currentInput: new Set(),
@@ -436,39 +349,36 @@ function createSessionHarness(
           project: (record) => [...record],
         });
         ctx.set(HistoryStateKey, result.historyState);
-        const skills = await draft.tools();
         conversation.length = 0;
         for (const msg of result.record) {
           conversation.push(msg as (typeof conversation)[number]);
         }
-        const added = conversation
-          .slice(beforeCount)
-          .filter((msg) => msg.role === "user" && msg.kind === "context.instruction")
-          .map((msg) => msg.content);
         return {
-          newUserInstructions: added,
-          skillNames: [...skills.skills.keys()],
+          newUserInstructions: conversation
+            .slice(beforeCount)
+            .filter((msg) => msg.role === "user" && msg.kind === "context.instruction")
+            .map((msg) => msg.content),
         };
       });
     },
-
     compactHistory() {
       conversation.length = 0;
       conversation.push({ role: "user", content: "Compacted summary of earlier work." });
-      const currentHistory = ctx.get(HistoryStateKey) ?? {};
-      ctx.set(HistoryStateKey, keptAnnouncements(currentHistory, conversation as never));
+      ctx.set(
+        HistoryStateKey,
+        keptAnnouncements(ctx.get(HistoryStateKey) ?? {}, conversation as never),
+      );
     },
   };
 }
 
-test("post-clone sparse repo A, repo B deduplication, scoped AGENTS.md caching, compaction re-injection, and subagent sandbox inheritance", async () => {
+test("post-clone sparse repo A, repo B deduplication, scoped AGENTS.md caching, compaction re-injection, and subagent inheritance", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-full-")));
   try {
     const upstreamA = join(root, "upstream-a");
     const upstreamB = join(root, "upstream-b");
     const workspace = join(root, "workspace");
     await mkdir(workspace, { recursive: true });
-
     await initUpstreamRepo(upstreamA, {
       "AGENTS.md": "Repo A root rules from HEAD.\n",
       "packages/sub/AGENTS.md": "Repo A subpackage rules.\n",
@@ -480,7 +390,6 @@ test("post-clone sparse repo A, repo B deduplication, scoped AGENTS.md caching, 
       "src/main.ts": "export const main = true;\n",
     });
 
-    const binaryAsset = new Uint8Array([0x00, 0x01, 0xfe, 0xff, 0x42]);
     const onEnterParents: (string | undefined)[] = [];
     extension({
       repositories: {
@@ -489,18 +398,7 @@ test("post-clone sparse repo A, repo B deduplication, scoped AGENTS.md caching, 
             match: (repo) => repo.root.endsWith("/repoA"),
             onEnter(_repo, ctx) {
               onEnterParents.push(ctx.session.parent?.sessionId);
-              return {
-                instructions: "Custom onEnter note for Repo A.",
-                skills: {
-                  repo_a_helper: defineSkill({
-                    description: "Repo A helper skill",
-                    content: "Use Repo A build pipeline.",
-                    files: {
-                      "assets/data.bin": binaryAsset,
-                    },
-                  }),
-                },
-              };
+              return { instructions: "Custom onEnter note for Repo A." };
             },
           },
         ],
@@ -511,14 +409,8 @@ test("post-clone sparse repo A, repo B deduplication, scoped AGENTS.md caching, 
     const parent = createSessionHarness(sandbox.access, "session-parent");
 
     await parent.startTurn("turn_1");
-    const step1 = await parent.nextModelCall();
-    assert.deepEqual(step1.newUserInstructions, []);
-    assert.deepEqual(step1.skillNames, []);
-    assert.equal(
-      sandbox.commands.length,
-      1,
-      "turn.started + model call 1 must run only a single discovery scan",
-    );
+    assert.deepEqual((await parent.nextModelCall()).newUserInstructions, []);
+    assert.equal(sandbox.commands.length, 1);
 
     const cloneA = join(workspace, "repoA");
     await git(workspace, ["clone", "--no-checkout", `file://${upstreamA}`, cloneA]);
@@ -532,33 +424,23 @@ test("post-clone sparse repo A, repo B deduplication, scoped AGENTS.md caching, 
       input: { command: `git clone --no-checkout file://${upstreamA} repoA` },
       output: { exitCode: 0, status: "completed", stdout: "", stderr: "" },
     });
-
     const step2 = await parent.nextModelCall();
-    await sandbox.access.getIfStarted();
     assert.equal(step2.newUserInstructions.length, 1);
     assert.match(step2.newUserInstructions[0] ?? "", /<repository_rules/u);
     assert.match(step2.newUserInstructions[0] ?? "", /Custom onEnter note for Repo A\./u);
     assert.match(step2.newUserInstructions[0] ?? "", /Repo A root rules from HEAD\./u);
     assert.match(step2.newUserInstructions[0] ?? "", /source="git"/u);
-    assert.deepEqual(step2.skillNames, ["code__repo_a_helper"]);
-    const writtenBin = [...sandbox.writtenFiles.entries()].find(([path]) =>
-      path.endsWith("assets/data.bin"),
-    );
-    assert.ok(writtenBin !== undefined, "Uint8Array skill file is materialized in the sandbox");
-    assert.deepEqual(writtenBin[1], binaryAsset);
     assert.deepEqual(onEnterParents, [undefined]);
 
-    const cloneB = join(workspace, "repoB");
-    await git(workspace, ["clone", `file://${upstreamB}`, cloneB]);
+    await git(workspace, ["clone", `file://${upstreamB}`, join(workspace, "repoB")]);
     await parent.settleToolCall({
       callId: "call_clone_b",
       name: "bash",
       input: { command: `git clone file://${upstreamB} repoB` },
       output: { exitCode: 0, status: "completed", stdout: "", stderr: "" },
     });
-
     const step3 = await parent.nextModelCall();
-    assert.equal(step3.newUserInstructions.length, 1, "only Repo B is newly announced");
+    assert.equal(step3.newUserInstructions.length, 1);
     assert.match(step3.newUserInstructions[0] ?? "", /Repo B root rules\./u);
     assert.doesNotMatch(step3.newUserInstructions[0] ?? "", /Repo A root rules/u);
 
@@ -566,47 +448,35 @@ test("post-clone sparse repo A, repo B deduplication, scoped AGENTS.md caching, 
       callId: "call_read_sub_1",
       name: "read_file",
       input: { filePath: "repoA/packages/sub/index.ts" },
-      output: {
-        path: join(workspace, "repoA", "packages", "sub", "index.ts").replaceAll("\\", "/"),
-      },
+      output: { path: join(workspace, "repoA", "packages", "sub", "index.ts") },
     });
-
     const step4 = await parent.nextModelCall();
     assert.equal(step4.newUserInstructions.length, 1);
     assert.match(step4.newUserInstructions[0] ?? "", /<scoped_instructions/u);
     assert.match(step4.newUserInstructions[0] ?? "", /Repo A subpackage rules\./u);
-    assert.doesNotMatch(step4.newUserInstructions[0] ?? "", /Repo A root rules/u);
 
-    const commandsBeforeSecondRead = sandbox.commands.length;
+    const commandsBeforeRepeat = sandbox.commands.length;
     await parent.settleToolCall({
       callId: "call_read_sub_2",
       name: "read_file",
       input: { filePath: "repoA/packages/sub/other.ts" },
-      output: {
-        path: join(workspace, "repoA", "packages", "sub", "other.ts").replaceAll("\\", "/"),
-      },
+      output: { path: join(workspace, "repoA", "packages", "sub", "other.ts") },
     });
     const step5 = await parent.nextModelCall();
-    assert.equal(
-      sandbox.commands.length,
-      commandsBeforeSecondRead,
-      "second read in cached directory makes 0 extra sandbox calls",
-    );
+    assert.equal(sandbox.commands.length, commandsBeforeRepeat);
     assert.deepEqual(step5.newUserInstructions, []);
 
     parent.compactHistory();
-    const afterCompaction = await parent.nextModelCall();
-    const combinedAfterCompaction = afterCompaction.newUserInstructions.join("\n");
-    assert.match(combinedAfterCompaction, /Repo A root rules from HEAD\./u);
-    assert.match(combinedAfterCompaction, /Repo B root rules\./u);
-    assert.match(combinedAfterCompaction, /Repo A subpackage rules\./u);
+    const afterCompaction = (await parent.nextModelCall()).newUserInstructions.join("\n");
+    assert.match(afterCompaction, /Repo A root rules from HEAD\./u);
+    assert.match(afterCompaction, /Repo B root rules\./u);
+    assert.match(afterCompaction, /Repo A subpackage rules\./u);
 
     const subagent = createSessionHarness(sandbox.access, "session-subagent", {
       parentSessionId: "session-parent",
     });
     await subagent.startTurn("sub_turn_1");
-    const subStep1 = await subagent.nextModelCall();
-    const subCombined = subStep1.newUserInstructions.join("\n");
+    const subCombined = (await subagent.nextModelCall()).newUserInstructions.join("\n");
     assert.match(subCombined, /Repo A root rules from HEAD\./u);
     assert.match(subCombined, /Repo B root rules\./u);
     assert.deepEqual(onEnterParents, [undefined, "session-parent"]);
@@ -615,7 +485,7 @@ test("post-clone sparse repo A, repo B deduplication, scoped AGENTS.md caching, 
   }
 });
 
-test("deterministic pre-seeded repository runs onEnter and injects AGENTS.md before model call 1 without duplicate scans", async () => {
+test("pre-seeded workspace runs onEnter once and injects instructions on Turn 1 without duplicate scans", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-preseeded-")));
   try {
     const workspace = join(root, "workspace");
@@ -633,9 +503,7 @@ test("deterministic pre-seeded repository runs onEnter and injects AGENTS.md bef
             async onEnter(repo) {
               enteredCount += 1;
               const extra = await repo.readFile("CONTRIBUTING.md");
-              return {
-                instructions: `Loaded ${extra?.relativePath ?? "none"} on enter.`,
-              };
+              return { instructions: `Loaded ${extra?.relativePath ?? "none"} on enter.` };
             },
           },
         ],
@@ -650,43 +518,33 @@ test("deterministic pre-seeded repository runs onEnter and injects AGENTS.md bef
     const commandsAfterTurnStart = sandbox.commands.length;
 
     const call1 = await session.nextModelCall();
-    assert.equal(
-      sandbox.commands.length,
-      commandsAfterTurnStart,
-      "model call 1 must not re-scan after turn.started already synced",
-    );
+    assert.equal(sandbox.commands.length, commandsAfterTurnStart);
     assert.equal(call1.newUserInstructions.length, 1);
     assert.match(call1.newUserInstructions[0] ?? "", /Pre-seeded workspace rules\./u);
     assert.match(call1.newUserInstructions[0] ?? "", /Contribution guidelines\./u);
     assert.match(call1.newUserInstructions[0] ?? "", /Loaded CONTRIBUTING\.md on enter\./u);
 
     await session.startTurn("turn_2");
-    assert.equal(enteredCount, 1, "onEnter runs only once per session per repository");
+    assert.equal(enteredCount, 1);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
 });
 
-test("discoverOnStart on-sandbox-use stays idle on non-coding turns and syncs once sandbox opens mid-turn", async () => {
+test("discoverOnStart on-sandbox-use stays idle on Turn 1 and non-sandbox tools, then syncs when sandbox opens mid-turn", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-lazy-")));
   try {
     const workspace = join(root, "workspace");
     await initUpstreamRepo(workspace, { "AGENTS.md": "Lazy workspace rules.\n" });
-
-    extension({
-      repositories: {
-        discoverOnStart: "on-sandbox-use",
-      },
-    });
+    extension({ repositories: { discoverOnStart: "on-sandbox-use" } });
 
     const sandbox = createRealSandboxAccess(workspace);
     const session = createSessionHarness(sandbox.access, "session-lazy");
 
     await session.startTurn("turn_1");
-    const call1 = await session.nextModelCall();
-    assert.equal(sandbox.getOpenCount(), 0, "sandbox must not start on a non-coding turn");
+    assert.deepEqual((await session.nextModelCall()).newUserInstructions, []);
+    assert.equal(sandbox.getOpenCount(), 0);
     assert.equal(sandbox.commands.length, 0);
-    assert.deepEqual(call1.newUserInstructions, []);
 
     await session.settleToolCall({
       callId: "call_external_fetch",
@@ -694,11 +552,7 @@ test("discoverOnStart on-sandbox-use stays idle on non-coding turns and syncs on
       input: { command: "fetch" },
       output: { ok: true },
     });
-    assert.equal(
-      sandbox.getOpenCount(),
-      0,
-      "non-sandbox tool with command input must not open the sandbox",
-    );
+    assert.equal(sandbox.getOpenCount(), 0);
     assert.equal(sandbox.commands.length, 0);
 
     await sandbox.access.open();
@@ -717,7 +571,7 @@ test("discoverOnStart on-sandbox-use stays idle on non-coding turns and syncs on
   }
 });
 
-test("HEAD change prunes deleted scopes, repo delete + re-clone re-runs onEnter, and grep on direct subdir loads scoped AGENTS.md", async () => {
+test("HEAD change prunes deleted scopes, delete + re-clone re-runs onEnter, grep loads scoped AGENTS.md, and stale rule.files clear", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-mutations-")));
   try {
     const upstream = join(root, "upstream");
@@ -737,10 +591,7 @@ test("HEAD change prunes deleted scopes, repo delete + re-clone re-runs onEnter,
     extension({
       repositories: {
         rules: [
-          {
-            match: (repo) => repo.branch === "main",
-            files: ["MAIN_ONLY.md"],
-          },
+          { match: (repo) => repo.branch === "main", files: ["MAIN_ONLY.md"] },
           {
             onEnter() {
               enterCount += 1;
@@ -764,11 +615,9 @@ test("HEAD change prunes deleted scopes, repo delete + re-clone re-runs onEnter,
       callId: "call_grep_sub",
       name: "grep",
       input: { path: "app/sub", pattern: "export" },
-      output: { path: join(workspace, "app", "sub").replaceAll("\\", "/") },
+      output: { path: join(workspace, "app", "sub") },
     });
-    const call2 = await session.nextModelCall();
-    assert.equal(call2.newUserInstructions.length, 1);
-    assert.match(call2.newUserInstructions[0] ?? "", /Sub v1\./u);
+    assert.match((await session.nextModelCall()).newUserInstructions[0] ?? "", /Sub v1\./u);
 
     await git(cloneDir, ["checkout", "-b", "feature/x"]);
     await rm(join(cloneDir, "sub", "AGENTS.md"));
@@ -777,58 +626,50 @@ test("HEAD change prunes deleted scopes, repo delete + re-clone re-runs onEnter,
     await git(cloneDir, ["commit", "-m", "drop sub agents"]);
 
     await session.settleToolCall({
-      callId: "call_commit_v2",
+      callId: "call_checkout_feature",
       name: "bash",
       input: { command: "git -C app checkout feature/x" },
       output: { exitCode: 0, status: "completed", stdout: "", stderr: "" },
     });
     const call3 = await session.nextModelCall();
-    assert.equal(enterCount, 1, "HEAD change refreshes files without re-running onEnter");
+    assert.equal(enterCount, 1);
     assert.match(call3.newUserInstructions[0] ?? "", /Root v2\./u);
-    assert.doesNotMatch(
-      call3.newUserInstructions[0] ?? "",
-      /Main branch checklist\./u,
-      "stale ruleFiles are cleared when a rule stops matching",
-    );
+    assert.doesNotMatch(call3.newUserInstructions[0] ?? "", /Main branch checklist\./u);
 
     session.compactHistory();
-    const afterHeadChangeCompaction = await session.nextModelCall();
-    const afterHeadText = afterHeadChangeCompaction.newUserInstructions.join("\n");
-    assert.match(afterHeadText, /Root v2\./u);
-    assert.doesNotMatch(
-      afterHeadText,
-      /Sub v1\./u,
-      "deleted scoped AGENTS.md was pruned on HEAD change",
-    );
+    const afterHead = (await session.nextModelCall()).newUserInstructions.join("\n");
+    assert.match(afterHead, /Root v2\./u);
+    assert.doesNotMatch(afterHead, /Sub v1\./u);
 
     await rm(cloneDir, { force: true, recursive: true });
     await session.startTurn("turn_2");
 
     await git(workspace, ["clone", `file://${upstream}`, cloneDir]);
     await session.settleToolCall({
-      callId: "call_reclone_repo",
+      callId: "call_reclone",
       name: "bash",
       input: { command: `git clone file://${upstream} app` },
       output: { exitCode: 0, status: "completed", stdout: "", stderr: "" },
     });
     const callReclone = await session.nextModelCall();
-    assert.equal(enterCount, 2, "re-cloning after deletion re-runs onEnter");
+    assert.equal(enterCount, 2);
     assert.match(callReclone.newUserInstructions[0] ?? "", /Enter #2/u);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
 });
 
-test("background bash clone keeps pending reconcile across polls until exit, syncAfter triggers reconciliation, and throwing match / onEnter / malformed skills are isolated", async () => {
+test("syncAfter, background bash guard, throwing rule isolation, read-only 0-RPC calls, same-HEAD rule.files refresh, and rule overflow", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-edge-")));
   try {
     const upstreamA = join(root, "upstream-a");
     const upstreamB = join(root, "upstream-b");
     const workspace = join(root, "workspace");
-    const bgOutputDir = join(root, "bg-job-dir");
     await mkdir(workspace, { recursive: true });
-    await mkdir(bgOutputDir, { recursive: true });
-    await initUpstreamRepo(upstreamA, { "AGENTS.md": "Background clone A rules.\n" });
+    await initUpstreamRepo(upstreamA, {
+      "AGENTS.md": "Repo A rules.\n",
+      "RULE.md": `${"r".repeat(2500)}\n`,
+    });
     await initUpstreamRepo(upstreamB, { "AGENTS.md": "SyncAfter B rules.\n" });
 
     const syncTool = defineTool({
@@ -840,23 +681,20 @@ test("background bash clone keeps pending reconcile across polls until exit, syn
 
     let enterCalls = 0;
     const warnings: string[] = [];
-    const originalWarn = console.warn;
-    console.warn = (...args: unknown[]) => {
-      warnings.push(args.map(String).join(" "));
-    };
+    const origWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
 
     try {
       extension({
         repositories: {
+          maxTotalBytes: 2000,
           syncAfter: [syncTool],
           rules: [
             {
               match() {
                 throw new Error("boom in match predicate");
               },
-              onEnter() {
-                return { instructions: "Should never run" };
-              },
+              onEnter: () => ({ instructions: "Never runs" }),
             },
             {
               onEnter() {
@@ -865,35 +703,8 @@ test("background bash clone keeps pending reconcile across polls until exit, syn
               },
             },
             {
-              onEnter(repo) {
-                return {
-                  instructions: `Second rule ok for ${repo.root.split("/").at(-1)}.`,
-                  skills: {
-                    "bad name!": defineSkill({
-                      description: "Invalid skill name",
-                      content: "Should be skipped",
-                    }),
-                    eve__reserved: defineSkill({
-                      description: "Reserved prefix",
-                      content: "Should be skipped",
-                    }),
-                    malformed_missing_content: {
-                      description: "Missing content field",
-                    } as never,
-                    malformed_bad_files: {
-                      description: "Bad files payload",
-                      content: "Valid body",
-                      files: {
-                        "broken.bin": 12345,
-                      },
-                    } as never,
-                    shared_skill: defineSkill({
-                      description: `Skill from ${repo.root.split("/").at(-1)}`,
-                      content: `Content from ${repo.root.split("/").at(-1)}`,
-                    }),
-                  },
-                };
-              },
+              files: ["RULE.md"],
+              onEnter: (repo) => ({ instructions: `Entered ${repo.root.split("/").at(-1)}.` }),
             },
           ],
         },
@@ -909,62 +720,42 @@ test("background bash clone keeps pending reconcile across polls until exit, syn
         callId: "call_bg_clone",
         name: "bash",
         input: { command: `git clone file://${upstreamA} bgA` },
-        output: {
-          status: "running",
-          outputDirectory: bgOutputDir.replaceAll("\\", "/"),
-          message: "still running",
-          stdout: "",
-          stderr: "",
-          truncated: false,
-        },
+        output: { status: "running", stdout: "", stderr: "", truncated: false },
       });
-      assert.equal(enterCalls, 0, "background bash clone must not onboard prematurely");
-
-      await session.settleToolCall({
-        callId: "call_poll_still_running",
-        name: "bash",
-        input: { command: "echo polling" },
-        output: { exitCode: 0, status: "completed", stdout: "polling\n", stderr: "" },
-      });
-      const whileRunning = await session.nextModelCall();
       assert.equal(enterCalls, 0);
-      assert.deepEqual(whileRunning.newUserInstructions, []);
 
-      await git(workspace, ["clone", `file://${upstreamA}`, join(workspace, "bgA")]);
-      await writeFile(join(bgOutputDir, "exit"), "0\n");
+      const commandsBeforeReadOnly = sandbox.commands.length;
+      for (const [id, command] of [
+        ["ro_1", "git status"],
+        ["ro_2", "cd app && pnpm test"],
+        ["ro_3", "gh pr view 123"],
+        ["ro_4", 'rg "fetch(" src/'],
+      ] as const) {
+        await session.settleToolCall({
+          callId: id,
+          name: "bash",
+          input: { command },
+          output: { exitCode: 0, status: "completed", stdout: "", stderr: "" },
+        });
+      }
+      assert.equal(sandbox.commands.length, commandsBeforeReadOnly);
 
-      await session.settleToolCall({
-        callId: "call_poll_done",
-        name: "bash",
-        input: { command: "echo done" },
-        output: { exitCode: 0, status: "completed", stdout: "done\n", stderr: "" },
-      });
-
-      const afterBg = await session.nextModelCall();
+      const bgA = join(workspace, "bgA");
+      await git(workspace, ["clone", `file://${upstreamA}`, bgA]);
+      await session.startTurn("turn_2");
+      const turn2Text = (await session.nextModelCall()).newUserInstructions.join("\n");
       assert.equal(enterCalls, 1);
-      assert.equal(afterBg.newUserInstructions.length, 1);
-      assert.match(afterBg.newUserInstructions[0] ?? "", /Background clone A rules\./u);
-      assert.match(afterBg.newUserInstructions[0] ?? "", /Second rule ok for bgA\./u);
-      assert.deepEqual(afterBg.skillNames, ["code__shared_skill"]);
+      assert.match(turn2Text, /Repo A rules\./u);
+      assert.match(turn2Text, /Entered bgA\./u);
+      assert.match(turn2Text, /exceeded the automatic instruction byte budget/u);
+      assert.match(turn2Text, /RULE\.md/u);
       assert.ok(warnings.some((w) => w.includes("boom in match predicate")));
       assert.ok(warnings.some((w) => w.includes("boom in first rule")));
-      assert.ok(warnings.some((w) => w.includes("bad name!")));
-      assert.ok(warnings.some((w) => w.includes("eve__reserved")));
-      assert.ok(warnings.some((w) => w.includes("malformed_missing_content")));
-      assert.ok(warnings.some((w) => w.includes("malformed_bad_files")));
 
-      const commandsAfterBgCleared = sandbox.commands.length;
-      await session.settleToolCall({
-        callId: "call_idle_after_bg",
-        name: "bash",
-        input: { command: "echo idle" },
-        output: { exitCode: 0, status: "completed", stdout: "idle\n", stderr: "" },
-      });
-      assert.equal(
-        sandbox.commands.length,
-        commandsAfterBgCleared,
-        "pendingReconcile must be cleared once the background job finishes",
-      );
+      await writeFile(join(bgA, "RULE.md"), "Updated same-HEAD rule.\n");
+      await session.startTurn("turn_3");
+      const turn3Text = (await session.nextModelCall()).newUserInstructions.join("\n");
+      assert.match(turn3Text, /Updated same-HEAD rule\./u);
 
       await git(workspace, ["clone", `file://${upstreamB}`, join(workspace, "syncB")]);
       await session.settleToolCall({
@@ -973,245 +764,12 @@ test("background bash clone keeps pending reconcile across polls until exit, syn
         input: {},
         output: { ok: true },
       });
-
-      const afterSync = await session.nextModelCall();
-      assert.equal(afterSync.newUserInstructions.length, 1);
-      assert.match(afterSync.newUserInstructions[0] ?? "", /SyncAfter B rules\./u);
-      assert.match(afterSync.newUserInstructions[0] ?? "", /Second rule ok for syncB\./u);
-      assert.deepEqual(afterSync.skillNames, ["code__shared_skill"]);
+      const afterSyncText = (await session.nextModelCall()).newUserInstructions.join("\n");
+      assert.match(afterSyncText, /SyncAfter B rules\./u);
+      assert.match(afterSyncText, /Entered syncB\./u);
     } finally {
-      console.warn = originalWarn;
+      console.warn = origWarn;
     }
-  } finally {
-    await rm(root, { force: true, recursive: true });
-  }
-});
-
-test("propagates rule-file overflow paths into the overflow instruction when exceeding maxTotalBytes", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-rule-overflow-")));
-  try {
-    const workspace = join(root, "workspace");
-    await initUpstreamRepo(workspace, {
-      "BIG_RULE.md": `${"r".repeat(600)}\n`,
-    });
-
-    extension({
-      repositories: {
-        instructions: [],
-        maxTotalBytes: 500,
-        rules: [
-          {
-            files: ["BIG_RULE.md"],
-          },
-        ],
-      },
-    });
-
-    const sandbox = createRealSandboxAccess(workspace);
-    const session = createSessionHarness(sandbox.access, "session-rule-overflow");
-
-    await session.startTurn("turn_1");
-    const call1 = await session.nextModelCall();
-    assert.equal(call1.newUserInstructions.length, 1);
-    assert.match(
-      call1.newUserInstructions[0] ?? "",
-      /exceeded the automatic instruction byte budget/u,
-    );
-    assert.match(call1.newUserInstructions[0] ?? "", /BIG_RULE\.md/u);
-
-    await writeFile(join(workspace, "BIG_RULE.md"), "Shrunk rule file.\n");
-    await session.startTurn("turn_2");
-    const call2 = await session.nextModelCall();
-    assert.match(call2.newUserInstructions.join("\n"), /Shrunk rule file\./u);
-
-    const commandsBeforeTurn3 = sandbox.commands.length;
-    await session.startTurn("turn_3");
-    assert.equal(
-      sandbox.commands.length - commandsBeforeTurn3,
-      1,
-      "unchanged turn_3 after overflow recovery must skip readMatchingRuleFiles",
-    );
-  } finally {
-    await rm(root, { force: true, recursive: true });
-  }
-});
-
-test("retries rule.files on subsequent turns after a transient read failure and keeps 0 extra RPCs once loaded", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-rule-retry-")));
-  try {
-    const workspace = join(root, "workspace");
-    const appDir = join(workspace, "app");
-    await initUpstreamRepo(appDir, {
-      "AGENTS.md": "App root rules.\n",
-      "CONTRIBUTING.md": "Transiently failed rule file.\n",
-    });
-
-    extension({
-      repositories: {
-        rules: [
-          {
-            files: ["CONTRIBUTING.md"],
-          },
-        ],
-      },
-    });
-
-    const base = createRealSandboxAccess(workspace);
-    let failNextRuleRead = true;
-    const wrapSession = (inner: SandboxSession): SandboxSession => ({
-      ...inner,
-      async spawn(input) {
-        if (failNextRuleRead && input.command.includes("CONTRIBUTING.md")) {
-          failNextRuleRead = false;
-          base.commands.push(input.command);
-          return {
-            stdout: new ReadableStream({
-              start(controller) {
-                controller.close();
-              },
-            }),
-            stderr: new ReadableStream({
-              start(controller) {
-                controller.enqueue(new TextEncoder().encode("transient failure"));
-                controller.close();
-              },
-            }),
-            wait: async () => ({ exitCode: 1 }),
-            kill: async () => undefined,
-          };
-        }
-        return await inner.spawn(input);
-      },
-    });
-    const flakyAccess: SandboxAccess = {
-      ...base.access,
-      async get() {
-        const inner = await base.access.get();
-        return inner === null ? null : wrapSession(inner);
-      },
-      async getIfStarted() {
-        const inner = await base.access.getIfStarted();
-        return inner === null ? null : wrapSession(inner);
-      },
-      async open() {
-        const inner = await base.access.open();
-        return inner === null ? null : wrapSession(inner);
-      },
-    };
-
-    const session = createSessionHarness(flakyAccess, "session-rule-retry");
-
-    await session.startTurn("turn_1");
-    const call1 = await session.nextModelCall();
-    assert.match(call1.newUserInstructions.join("\n"), /App root rules\./u);
-    assert.doesNotMatch(call1.newUserInstructions.join("\n"), /Transiently failed rule file\./u);
-
-    await session.startTurn("turn_2");
-    const call2 = await session.nextModelCall();
-    assert.match(call2.newUserInstructions.join("\n"), /Transiently failed rule file\./u);
-
-    const commandsBeforeTurn3 = base.commands.length;
-    await session.startTurn("turn_3");
-    assert.equal(
-      base.commands.length - commandsBeforeTurn3,
-      1,
-      "unchanged turn_3 after rule retry recovery must skip readMatchingRuleFiles",
-    );
-  } finally {
-    await rm(root, { force: true, recursive: true });
-  }
-});
-
-test("skips redundant readMatchingRuleFiles on unchanged turns and skips reconciliation for read-only bash calls", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-opt-")));
-  try {
-    const workspace = join(root, "workspace");
-    const appDir = join(workspace, "app");
-    await initUpstreamRepo(appDir, {
-      "AGENTS.md": "App root rules.\n",
-      "CONTRIBUTING.md": "Contributing rules.\n",
-    });
-
-    extension({
-      repositories: {
-        rules: [
-          {
-            files: ["CONTRIBUTING.md", "EXTRA.md"],
-          },
-        ],
-      },
-    });
-
-    const sandbox = createRealSandboxAccess(workspace);
-    const session = createSessionHarness(sandbox.access, "session-opt");
-
-    await session.startTurn("turn_1");
-    const call1 = await session.nextModelCall();
-    assert.equal(call1.newUserInstructions.length, 1);
-    assert.match(call1.newUserInstructions[0] ?? "", /App root rules\./u);
-    assert.match(call1.newUserInstructions[0] ?? "", /Contributing rules\./u);
-
-    const commandsBeforeReadOnlyCalls = sandbox.commands.length;
-    await session.settleToolCall({
-      callId: "call_git_status",
-      name: "bash",
-      input: { command: "git status" },
-      output: { exitCode: 0, status: "completed", stdout: "", stderr: "" },
-    });
-    await session.settleToolCall({
-      callId: "call_cd_test",
-      name: "bash",
-      input: { command: "cd app && pnpm test" },
-      output: { exitCode: 0, status: "completed", stdout: "", stderr: "" },
-    });
-    await session.settleToolCall({
-      callId: "call_gh_pr_view",
-      name: "bash",
-      input: { command: "gh pr view 123" },
-      output: { exitCode: 0, status: "completed", stdout: "", stderr: "" },
-    });
-    await session.settleToolCall({
-      callId: "call_rg_fetch",
-      name: "bash",
-      input: { command: 'rg "fetch(" src/' },
-      output: { exitCode: 0, status: "completed", stdout: "", stderr: "" },
-    });
-    assert.equal(
-      sandbox.commands.length,
-      commandsBeforeReadOnlyCalls,
-      "read-only bash calls must make 0 sandbox calls",
-    );
-
-    const commandsBeforeTurn2 = sandbox.commands.length;
-    await session.startTurn("turn_2");
-    assert.equal(
-      sandbox.commands.length - commandsBeforeTurn2,
-      1,
-      "unchanged turn_2 with rule.files must make only 1 sandbox call and skip readMatchingRuleFiles",
-    );
-
-    await writeFile(join(appDir, "CONTRIBUTING.md"), "Updated contributing rules.\n");
-    await writeFile(join(appDir, "EXTRA.md"), "Newly added rule file.\n");
-    await session.startTurn("turn_3");
-    const call3 = await session.nextModelCall();
-    const turn3Combined = call3.newUserInstructions.join("\n");
-    assert.match(turn3Combined, /Updated contributing rules\./u);
-    assert.match(turn3Combined, /Newly added rule file\./u);
-
-    const commandsBeforeTurn4 = sandbox.commands.length;
-    await session.startTurn("turn_4");
-    assert.equal(
-      sandbox.commands.length - commandsBeforeTurn4,
-      1,
-      "unchanged turn_4 after rule.files update must skip readMatchingRuleFiles again",
-    );
-
-    session.compactHistory();
-    const afterCompaction = await session.nextModelCall();
-    const combined = afterCompaction.newUserInstructions.join("\n");
-    assert.match(combined, /App root rules\./u);
-    assert.match(combined, /Updated contributing rules\./u);
-    assert.match(combined, /Newly added rule file\./u);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

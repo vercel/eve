@@ -5,14 +5,10 @@ import type { RuntimeSandboxSession } from "eve/sandbox";
 import extension from "../extension.ts";
 import {
   classifySettledCall,
-  collectPendingExtraPaths,
-  extractBackgroundBashJob,
   hasUncheckedFileAncestors,
   isBackgroundBashOutput,
-  mergeExtraPaths,
   reconcileTouchedFile,
   reconcileWorkspace,
-  upsertPendingBackgroundJob,
 } from "../lib/repo-reconcile.ts";
 import { repoState } from "../lib/repo-state.ts";
 import { resolveRepositoriesConfig } from "../lib/repositories.ts";
@@ -21,7 +17,6 @@ export default defineHook({
   events: {
     async "turn.started"(_event, ctx) {
       const resolved = resolveRepositoriesConfig(extension.config.repositories);
-      const state = repoState.get();
       let sandbox: RuntimeSandboxSession | null;
       try {
         sandbox =
@@ -32,52 +27,32 @@ export default defineHook({
         return;
       }
       if (sandbox === null) return;
-      const ruleCtx = {
+      await reconcileWorkspace(
         sandbox,
-        session: ctx.session,
-        channel: ctx.channel,
-        trigger: "turn.started" as const,
-        ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
-      };
-      const pendingJobs = state.pendingReconcile?.jobs ?? [];
-      await reconcileWorkspace(sandbox, resolved, ruleCtx, {
-        turnId: ctx.turn?.id ?? null,
-        extraPaths: collectPendingExtraPaths(state.pendingReconcile),
-        pendingJobs,
-      });
+        resolved,
+        {
+          sandbox,
+          session: ctx.session,
+          channel: ctx.channel,
+          trigger: "turn.started",
+          ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
+        },
+        { turnId: ctx.turn?.id ?? null },
+      );
     },
 
     async "call.settled"(event, ctx) {
       const observed = call(ctx.view, event.data.callId);
       if (observed?.kind !== "tool" || observed.state !== "completed") return;
+      if (observed.name === "bash" && isBackgroundBashOutput(observed.output)) return;
 
       const resolved = resolveRepositoriesConfig(extension.config.repositories);
       const state = repoState.get();
       const action = classifySettledCall(observed, state, resolved.syncAfter);
       const turnId = ctx.turn?.id ?? null;
-
-      if (
-        action.kind === "reconcile" &&
-        observed.name === "bash" &&
-        isBackgroundBashOutput(observed.output)
-      ) {
-        const job = extractBackgroundBashJob(observed.output, action.extraPaths);
-        if (job !== null) {
-          repoState.update((latest) => ({
-            ...latest,
-            pendingReconcile: {
-              jobs: upsertPendingBackgroundJob(latest.pendingReconcile?.jobs ?? [], job),
-            },
-          }));
-        }
-        return;
-      }
-
       const needsTurnSync = turnId !== null && state.syncedTurnId !== turnId;
-      const pendingJobs = state.pendingReconcile?.jobs ?? [];
-      const hasPending = pendingJobs.length > 0;
 
-      if (!needsTurnSync && !hasPending) {
+      if (!needsTurnSync) {
         if (action.kind === "none") return;
         if (
           action.kind === "file" &&
@@ -92,7 +67,7 @@ export default defineHook({
         }
       }
 
-      let sandbox: RuntimeSandboxSession | null = null;
+      let sandbox: RuntimeSandboxSession | null;
       try {
         sandbox = await ctx.getSandbox({ create: false });
       } catch {
@@ -108,15 +83,10 @@ export default defineHook({
         ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
       };
 
-      if (needsTurnSync || hasPending || action.kind === "reconcile") {
-        const extraPaths = mergeExtraPaths(
-          collectPendingExtraPaths(state.pendingReconcile),
-          action.kind === "reconcile" ? action.extraPaths : [],
-        );
+      if (needsTurnSync || action.kind === "reconcile") {
         await reconcileWorkspace(sandbox, resolved, ruleCtx, {
           turnId: needsTurnSync ? turnId : undefined,
-          extraPaths,
-          pendingJobs,
+          extraPaths: action.kind === "reconcile" ? action.extraPaths : [],
         });
       }
 

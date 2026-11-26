@@ -1,7 +1,6 @@
 import { defineExtension } from "eve/extension";
 import type { HookContext } from "eve/hooks";
 import type { RuntimeSandboxSession, SandboxSession } from "eve/sandbox";
-import type { SkillDefinition } from "eve/skills";
 import type { ToolDefinition } from "eve/tools";
 import { z } from "zod";
 
@@ -85,22 +84,15 @@ export interface RepositoryRuleContext {
 }
 
 /**
- * Dynamic instructions and skills contributed when a {@link RepositoryRule} enters a repository.
+ * Dynamic instructions contributed when a {@link RepositoryRule} enters a repository.
  */
 export interface RepositoryContribution {
   /** Additional user-role instructions injected for this repository in a dedicated `<repository_rules>` block. */
   readonly instructions?: string | readonly string[];
-  /**
-   * Dynamic skills registered while this repository is active in the session.
-   * Skills are exposed under the `code__<name>` extension namespace; keys must match
-   * `/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,57}$/` and must not start with `eve__` (invalid keys are skipped with a warning).
-   * When multiple repositories contribute the same skill name, the first entered repository wins.
-   */
-  readonly skills?: Readonly<Record<string, SkillDefinition>>;
 }
 
 /**
- * Declarative rule that matches discovered repositories and attaches extra files, instructions, or skills on entry.
+ * Declarative rule that matches discovered repositories and attaches extra files or instructions on entry.
  */
 export interface RepositoryRule {
   /**

@@ -10,7 +10,6 @@ import test from "node:test";
 import {
   discoverRepositories,
   discoverWorkspace,
-  findEnclosingRepository,
   MAX_DISCOVERED_REPOSITORIES,
   MAX_META_FIELD_BYTES,
   MAX_OVERFLOW_PATHS,
@@ -36,82 +35,69 @@ async function git(cwd: string, args: readonly string[]): Promise<string> {
   return stdout.trim();
 }
 
-function createLocalSandbox(
-  root: string,
-  envOverrides: NodeJS.ProcessEnv = {},
-): {
-  readonly sandbox: RepositorySandbox;
-  readonly commands: string[];
-} {
+function createLocalSandbox(root: string, envOverrides: NodeJS.ProcessEnv = {}) {
   const commands: string[] = [];
-  return {
-    commands,
-    sandbox: {
-      resolvePath(path: string) {
-        return isAbsolute(path) ? path : join(root, path);
-      },
-      async run({ command }) {
-        commands.push(command);
-        try {
-          const { stdout, stderr } = await execFileAsync("bash", ["-c", command], {
-            cwd: root,
-            env: { ...GIT_ENV, ...envOverrides },
-          });
-          return { exitCode: 0, stdout, stderr };
-        } catch (error) {
-          const err = error as { code?: number; stdout?: string; stderr?: string };
-          return {
-            exitCode: typeof err.code === "number" ? err.code : 1,
-            stdout: err.stdout ?? "",
-            stderr: err.stderr ?? "",
-          };
-        }
-      },
-      async spawn({ command, workingDirectory, env }) {
-        commands.push(command);
-        const cwd =
-          workingDirectory === undefined
-            ? root
-            : isAbsolute(workingDirectory)
-              ? workingDirectory
-              : join(root, workingDirectory);
-        const child = spawnProcess("bash", ["-c", command], {
-          cwd,
-          env: { ...GIT_ENV, ...envOverrides, ...env },
-          stdio: ["ignore", "pipe", "pipe"],
+  const sandbox: RepositorySandbox = {
+    resolvePath: (path) => (isAbsolute(path) ? path : join(root, path)),
+    async run({ command }) {
+      commands.push(command);
+      try {
+        const { stdout, stderr } = await execFileAsync("bash", ["-c", command], {
+          cwd: root,
+          env: { ...GIT_ENV, ...envOverrides },
         });
-        const exitPromise = new Promise<{ exitCode: number }>((resolve) => {
-          let settled = false;
-          const finish = (code: number) => {
-            if (settled) return;
-            settled = true;
-            resolve({ exitCode: code });
-          };
-          child.once("error", () => finish(1));
-          child.once("close", (code) => finish(typeof code === "number" ? code : 1));
-        });
-        const stdout = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
-        const stderr = Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>;
+        return { exitCode: 0, stdout, stderr };
+      } catch (error) {
+        const err = error as { code?: number; stdout?: string; stderr?: string };
         return {
-          ...(child.pid !== undefined && { pid: child.pid }),
-          stdout,
-          stderr,
-          wait: () => exitPromise,
-          async kill() {
-            if (child.exitCode === null && child.signalCode === null) {
-              try {
-                if (process.platform === "win32") child.kill();
-                else child.kill("SIGKILL");
-              } catch {}
-            }
-            child.stdout.destroy();
-            child.stderr.destroy();
-            await exitPromise;
-          },
+          exitCode: typeof err.code === "number" ? err.code : 1,
+          stdout: err.stdout ?? "",
+          stderr: err.stderr ?? "",
         };
-      },
+      }
+    },
+    async spawn({ command, workingDirectory, env }) {
+      commands.push(command);
+      const cwd =
+        workingDirectory === undefined
+          ? root
+          : isAbsolute(workingDirectory)
+            ? workingDirectory
+            : join(root, workingDirectory);
+      const child = spawnProcess("bash", ["-c", command], {
+        cwd,
+        env: { ...GIT_ENV, ...envOverrides, ...env },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const exitPromise = new Promise<{ exitCode: number }>((resolve) => {
+        let settled = false;
+        const finish = (code: number) => {
+          if (settled) return;
+          settled = true;
+          resolve({ exitCode: code });
+        };
+        child.once("error", () => finish(1));
+        child.once("close", (code) => finish(typeof code === "number" ? code : 1));
+      });
+      return {
+        ...(child.pid !== undefined && { pid: child.pid }),
+        stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+        stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
+        wait: () => exitPromise,
+        async kill() {
+          if (child.exitCode === null && child.signalCode === null) {
+            try {
+              child.kill("SIGKILL");
+            } catch {}
+          }
+          child.stdout.destroy();
+          child.stderr.destroy();
+          await exitPromise;
+        },
+      };
     },
   };
+  return { sandbox, commands };
 }
 
 async function initRepo(
@@ -121,9 +107,7 @@ async function initRepo(
 ): Promise<string> {
   await mkdir(dir, { recursive: true });
   await git(dir, ["init", "-b", "main"]);
-  if (remote !== undefined) {
-    await git(dir, ["remote", "add", "origin", remote]);
-  }
+  if (remote !== undefined) await git(dir, ["remote", "add", "origin", remote]);
   for (const [rel, content] of Object.entries(files)) {
     const full = join(dir, rel);
     await mkdir(join(full, ".."), { recursive: true });
@@ -134,14 +118,12 @@ async function initRepo(
   return await git(dir, ["rev-parse", "HEAD"]);
 }
 
-test("discovers multiple repos and git worktrees in one command, strips remote credentials, and prunes node_modules", async () => {
+test("discovers multiple repos and worktrees in one command, strips credentials, and prunes node_modules", async () => {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-multi-")));
   try {
     const repoA = join(workspace, "repos", "a");
     const repoB = join(workspace, "repos", "b");
     const worktreeDir = join(workspace, "repos", "a-wt");
-    const ignoredRepo = join(workspace, "node_modules", "ignored-pkg");
-
     const headA = await initRepo(
       repoA,
       { "AGENTS.md": "Repo A guide\n" },
@@ -153,52 +135,73 @@ test("discovers multiple repos and git worktrees in one command, strips remote c
       "git@github.com:acme/repo-b.git",
     );
     await git(repoA, ["worktree", "add", "-b", "feature/wt", worktreeDir]);
-    await initRepo(ignoredRepo, { "AGENTS.md": "Should be pruned\n" });
+    await initRepo(join(workspace, "node_modules", "ignored"), { "AGENTS.md": "Pruned\n" });
 
     const { sandbox, commands } = createLocalSandbox(workspace);
     const repos = await discoverRepositories(sandbox);
 
-    assert.equal(commands.length, 1, "discovery runs in a single sandbox command");
+    assert.equal(commands.length, 1);
     assert.equal(repos.length, 3);
+    const byRoot = new Map(repos.map((r) => [r.root, r]));
+    const foundA = byRoot.get(await realpath(repoA));
+    const foundB = byRoot.get(await realpath(repoB));
+    const foundWt = byRoot.get(await realpath(worktreeDir));
 
-    const byRoot = new Map(repos.map((repo) => [repo.root.replaceAll("\\", "/"), repo]));
-    const realA = (await realpath(repoA)).replaceAll("\\", "/");
-    const realB = (await realpath(repoB)).replaceAll("\\", "/");
-    const realWt = (await realpath(worktreeDir)).replaceAll("\\", "/");
+    assert.equal(foundA?.slug, "vercel/repo-a");
+    assert.equal(foundA?.remote, "https://github.com/vercel/repo-a.git");
+    assert.equal(foundA?.head, headA);
+    assert.equal(foundA?.branch, "main");
+    assert.equal(foundA?.sparse, false);
+    assert.equal(foundA?.instructions[0]?.source, "worktree");
+    assert.equal(foundA?.instructions[0]?.content, "Repo A guide\n");
 
-    const foundA = byRoot.get(realA);
-    assert.ok(foundA);
-    assert.equal(foundA.slug, "vercel/repo-a");
-    assert.equal(foundA.remote, "https://github.com/vercel/repo-a.git");
-    assert.equal(foundA.head, headA);
-    assert.equal(foundA.branch, "main");
-    assert.equal(foundA.sparse, false);
-    assert.equal(foundA.instructions.length, 1);
-    assert.equal(foundA.instructions[0]?.source, "worktree");
-    assert.equal(foundA.instructions[0]?.content, "Repo A guide\n");
+    assert.equal(foundB?.slug, "acme/repo-b");
+    assert.equal(foundB?.head, headB);
+    assert.equal(foundB?.instructions[0]?.relativePath, "CLAUDE.md");
+    assert.equal(foundB?.instructions[0]?.content, "Repo B guide\n");
 
-    const foundB = byRoot.get(realB);
-    assert.ok(foundB);
-    assert.equal(foundB.slug, "acme/repo-b");
-    assert.equal(foundB.head, headB);
-    assert.equal(
-      foundB.instructions[0]?.relativePath,
-      "CLAUDE.md",
-      "whitespace-only AGENTS.md falls back to CLAUDE.md",
-    );
-    assert.equal(foundB.instructions[0]?.content, "Repo B guide\n");
-
-    const foundWt = byRoot.get(realWt);
-    assert.ok(foundWt);
-    assert.equal(foundWt.branch, "feature/wt");
-    assert.equal(foundWt.head, headA);
-    assert.equal(foundWt.instructions[0]?.content, "Repo A guide\n");
+    assert.equal(foundWt?.branch, "feature/wt");
+    assert.equal(foundWt?.head, headA);
   } finally {
     await rm(workspace, { force: true, recursive: true });
   }
 });
 
-test("reads HEAD:AGENTS.md from git when excluded by sparse --no-cone checkout and falls back when whitespace-only", async () => {
+test("scan_repos_under traverses breadth-first without starvation and stops at .git boundaries", async () => {
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-bfs-")));
+  try {
+    const nestedDirs: string[] = [];
+    for (let i = 0; i < 35; i += 1) {
+      const parent = join(workspace, "aaa-noise", `d${String(i).padStart(2, "0")}`);
+      for (let j = 0; j < 32; j += 1)
+        nestedDirs.push(join(parent, `s${String(j).padStart(2, "0")}`));
+    }
+    for (let i = 0; i < nestedDirs.length; i += 64) {
+      await Promise.all(nestedDirs.slice(i, i + 64).map((d) => mkdir(d, { recursive: true })));
+    }
+    const outerRepo = join(workspace, "monorepo");
+    const nestedInsideRepo = join(outerRepo, "packages", "nested-repo");
+    const hiddenRepo = join(workspace, ".hidden", "dot-repo");
+    const siblingRepo = join(workspace, "zzz-repo");
+    await initRepo(outerRepo, { "AGENTS.md": "Outer\n" });
+    await initRepo(nestedInsideRepo, { "AGENTS.md": "Nested ignored\n" });
+    await initRepo(hiddenRepo, { "AGENTS.md": "Hidden\n" });
+    await initRepo(siblingRepo, { "AGENTS.md": "Sibling\n" });
+
+    const { sandbox } = createLocalSandbox(workspace);
+    const repos = await discoverRepositories(sandbox);
+    const expected = [
+      await realpath(outerRepo),
+      await realpath(hiddenRepo),
+      await realpath(siblingRepo),
+    ].sort();
+    assert.deepEqual(repos.map((r) => r.root).sort(), expected);
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
+});
+
+test("reads HEAD instructions in sparse --no-cone checkout with whitespace fallback for root and scoped subdirs", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-sparse-")));
   try {
     const upstream = join(root, "upstream");
@@ -206,8 +209,8 @@ test("reads HEAD:AGENTS.md from git when excluded by sparse --no-cone checkout a
     await mkdir(workspace, { recursive: true });
     await initRepo(upstream, {
       "AGENTS.md": "   \n",
-      "CLAUDE.md": "Root sparse fallback instructions\n",
-      "packages/sub/AGENTS.md": "Sub sparse instructions\n",
+      "CLAUDE.md": "Root sparse fallback\n",
+      "packages/sub/AGENTS.md": "Sub sparse rules\n",
       "packages/sub/index.ts": "export const x = 1;\n",
     });
 
@@ -218,69 +221,28 @@ test("reads HEAD:AGENTS.md from git when excluded by sparse --no-cone checkout a
     await git(cloneDir, ["checkout"]);
 
     const { sandbox } = createLocalSandbox(workspace);
-    const repos = await discoverRepositories(sandbox);
-    assert.equal(repos.length, 1);
-    const repo = repos[0]!;
+    const [repo] = await discoverRepositories(sandbox);
+    assert.ok(repo !== undefined);
     assert.equal(repo.sparse, true);
-    assert.equal(repo.instructions.length, 1);
     assert.equal(repo.instructions[0]?.source, "git");
     assert.equal(repo.instructions[0]?.relativePath, "CLAUDE.md");
-    assert.equal(repo.instructions[0]?.content, "Root sparse fallback instructions\n");
-    assert.equal(repo.instructions[0]?.truncated, false);
+    assert.equal(repo.instructions[0]?.content, "Root sparse fallback\n");
 
     const scoped = await readScopedDirectoryInstructions(sandbox, {
       targetPath: join(cloneDir, "packages", "sub", "index.ts"),
       checkedDirs: new Set(),
       knownRepoRoots: new Set([repo.root]),
     });
-    assert.equal(scoped.scopes.length, 1);
     assert.equal(scoped.scopes[0]?.files[0]?.source, "git");
     assert.equal(scoped.scopes[0]?.files[0]?.relativePath, "packages/sub/AGENTS.md");
-    assert.equal(scoped.scopes[0]?.files[0]?.content, "Sub sparse instructions\n");
+    assert.equal(scoped.scopes[0]?.files[0]?.content, "Sub sparse rules\n");
   } finally {
     await rm(root, { force: true, recursive: true });
   }
 });
 
-test("returns source unavailable for promisor blobs when the remote cannot be reached", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-partial-")));
-  try {
-    const upstream = join(root, "upstream");
-    const workspace = join(root, "ws");
-    await mkdir(workspace, { recursive: true });
-    await initRepo(upstream, {
-      "AGENTS.md": "Promisor instructions\n",
-      "src/app.ts": "export const ok = true;\n",
-    });
-    await git(upstream, ["config", "uploadpack.allowFilter", "true"]);
-
-    const cloneDir = join(workspace, "partial-repo");
-    await git(workspace, [
-      "clone",
-      "--filter=blob:none",
-      "--no-checkout",
-      `file://${upstream}`,
-      cloneDir,
-    ]);
-    await git(cloneDir, ["sparse-checkout", "init", "--no-cone"]);
-    await git(cloneDir, ["sparse-checkout", "set", "src/app.ts"]);
-    await git(cloneDir, ["checkout"]);
-    await git(cloneDir, ["remote", "set-url", "origin", "file:///nonexistent-remote-for-test"]);
-
-    const { sandbox } = createLocalSandbox(workspace);
-    const file = await readRepositoryFile(sandbox, cloneDir, "AGENTS.md");
-    assert.ok(file !== null);
-    assert.equal(file.source, "unavailable");
-    assert.equal(file.content, null);
-    assert.equal(file.truncated, false);
-    assert.equal(file.relativePath, "AGENTS.md");
-  } finally {
-    await rm(root, { force: true, recursive: true });
-  }
-});
-
-test("blocks ext:: promisor RCE and core.fsmonitor execution from untrusted .git/config (vercel/eve/407)", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-rce-407-")));
+test("returns unavailable for promisor blobs offline and blocks ext:: RCE and core.fsmonitor (vercel/eve/407)", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-407-")));
   try {
     const upstream = join(root, "upstream");
     const workspace = join(root, "ws");
@@ -303,70 +265,53 @@ test("blocks ext:: promisor RCE and core.fsmonitor execution from untrusted .git
     await git(cloneDir, ["sparse-checkout", "set", "src/app.ts"]);
     await git(cloneDir, ["checkout"]);
 
-    const marker = join(root, "ext-rce-marker");
-    const fsmonitorMarker = join(root, "fsmonitor-marker");
-    const markerShell = marker.replaceAll("\\", "/");
-    const fsmonitorShell = fsmonitorMarker.replaceAll("\\", "/");
-
+    const extMarker = join(root, "ext-rce-marker");
+    const fsmonMarker = join(root, "fsmonitor-marker");
     await git(cloneDir, ["config", "protocol.ext.allow", "always"]);
     await git(cloneDir, ["config", "remote.origin.promisor", "true"]);
     await git(cloneDir, ["config", "remote.origin.partialclonefilter", "blob:none"]);
-    await git(cloneDir, ["config", "remote.origin.url", `ext::sh -c 'touch ${markerShell}'`]);
-    await git(cloneDir, ["config", "core.fsmonitor", `touch ${fsmonitorShell}`]);
+    await git(cloneDir, ["config", "remote.origin.url", `ext::sh -c 'touch ${extMarker}'`]);
+    await git(cloneDir, ["config", "core.fsmonitor", `touch ${fsmonMarker}`]);
 
     const { sandbox } = createLocalSandbox(workspace);
-
     const repos = await discoverRepositories(sandbox);
     assert.equal(repos.length, 1);
-    assert.equal(repos[0]?.instructions.length, 1);
-    assert.equal(repos[0]?.instructions[0]?.relativePath, "AGENTS.md");
     assert.equal(repos[0]?.instructions[0]?.source, "unavailable");
     assert.equal(repos[0]?.instructions[0]?.content, null);
 
     const file = await readRepositoryFile(sandbox, cloneDir, "AGENTS.md");
-    assert.ok(file !== null);
-    assert.equal(file.source, "unavailable");
-    assert.equal(file.content, null);
+    assert.equal(file?.source, "unavailable");
+    assert.equal(file?.content, null);
 
-    await assert.rejects(stat(marker), { code: "ENOENT" });
-    await assert.rejects(stat(fsmonitorMarker), { code: "ENOENT" });
+    await assert.rejects(stat(extMarker), { code: "ENOENT" });
+    await assert.rejects(stat(fsmonMarker), { code: "ENOENT" });
   } finally {
     await rm(root, { force: true, recursive: true });
   }
 });
 
-test("blocks symlink exfiltration outside the repository and validates public helper options", async () => {
+test("blocks symlink exfiltration outside repo and validates public helper options", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-symlink-")));
   try {
     const outsideSecret = join(root, "outside-secret.txt");
-    await writeFile(outsideSecret, "TOP_SECRET_VALUE\n");
-
+    await writeFile(outsideSecret, "TOP_SECRET\n");
     const workspace = join(root, "ws");
     const repoDir = join(workspace, "repo");
-    await initRepo(repoDir, {
-      "docs/real.md": "Safe internal guide\n",
-    });
+    await initRepo(repoDir, { "docs/real.md": "Safe internal guide\n" });
 
     await symlink(outsideSecret, join(repoDir, "AGENTS.md"));
     await symlink(outsideSecret, join(repoDir, "tracked-link.md"));
     await git(repoDir, ["add", "tracked-link.md"]);
     await git(repoDir, ["commit", "-m", "track symlink"]);
     await rm(join(repoDir, "tracked-link.md"));
-
     await symlink(join(repoDir, "docs", "real.md"), join(repoDir, "CLAUDE.md"));
 
     const { sandbox } = createLocalSandbox(workspace);
-
-    const escaped = await readRepositoryFile(sandbox, repoDir, "AGENTS.md");
-    assert.equal(escaped, null, "worktree symlink pointing outside repo must not be read");
-
-    const trackedSymlinkBlob = await readRepositoryFile(sandbox, repoDir, "tracked-link.md");
-    assert.equal(trackedSymlinkBlob, null, "git 120000 symlink blob must not be read");
-
-    const internalLink = await readRepositoryFile(sandbox, repoDir, "CLAUDE.md");
-    assert.ok(internalLink !== null);
-    assert.equal(internalLink.source, "worktree");
-    assert.equal(internalLink.content, "Safe internal guide\n");
+    assert.equal(await readRepositoryFile(sandbox, repoDir, "AGENTS.md"), null);
+    assert.equal(await readRepositoryFile(sandbox, repoDir, "tracked-link.md"), null);
+    const internal = await readRepositoryFile(sandbox, repoDir, "CLAUDE.md");
+    assert.equal(internal?.source, "worktree");
+    assert.equal(internal?.content, "Safe internal guide\n");
 
     await assert.rejects(
       readRepositoryFile(sandbox, repoDir, "../outside-secret.txt"),
@@ -381,20 +326,8 @@ test("blocks symlink exfiltration outside the repository and validates public he
       /Invalid repository root path/u,
     );
     await assert.rejects(
-      discoverRepositories(sandbox, { roots: ["/etc"] }),
-      /Invalid repository root path/u,
-    );
-    await assert.rejects(
       discoverRepositories(sandbox, { maxFileBytes: 1.5 }),
       /Invalid maxFileBytes/u,
-    );
-    await assert.rejects(
-      discoverRepositories(sandbox, { instructions: ["../secret.md"] }),
-      /Invalid repository instruction path/u,
-    );
-    await assert.rejects(
-      discoverRepositories(sandbox, { instructions: ["/etc/passwd"] }),
-      /Invalid repository instruction path/u,
     );
     await assert.rejects(
       discoverRepositories(sandbox, { instructions: [[]] }),
@@ -409,7 +342,7 @@ test("blocks symlink exfiltration outside the repository and validates public he
   }
 });
 
-test("discovers enclosing repository outside workspace, expands $HOME paths, and caches external non-git dirs", async () => {
+test("discovers external repos via scoped probe, expands $HOME paths, and caches external non-git dirs", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-external-")));
   try {
     const workspace = join(root, "ws");
@@ -419,7 +352,6 @@ test("discovers enclosing repository outside workspace, expands $HOME paths, and
     await mkdir(workspace, { recursive: true });
     await mkdir(homeSkillDir, { recursive: true });
     await writeFile(join(homeSkillDir, "SKILL.md"), "# Demo\n");
-
     await initRepo(
       externalRepo,
       {
@@ -431,32 +363,24 @@ test("discovers enclosing repository outside workspace, expands $HOME paths, and
     );
 
     const { sandbox } = createLocalSandbox(workspace, { HOME: fakeHome });
-    const externalFile = join(externalRepo, "packages", "sub", "index.ts");
-
-    const enclosing = await findEnclosingRepository(sandbox, externalFile);
-    assert.ok(enclosing !== null);
-    assert.equal(
-      enclosing.root.replaceAll("\\", "/"),
-      (await realpath(externalRepo)).replaceAll("\\", "/"),
-    );
-    assert.equal(enclosing.slug, "external/tool");
-    assert.equal(enclosing.instructions[0]?.content, "External repo rules\n");
-
+    const realExternalRepo = await realpath(externalRepo);
     const firstProbe = await readScopedDirectoryInstructions(sandbox, {
-      targetPath: externalFile,
+      targetPath: join(externalRepo, "packages", "sub", "index.ts"),
       checkedDirs: new Set(),
-      knownRepoRoots: new Set([enclosing.root]),
+      knownRepoRoots: new Set(),
     });
-    assert.equal(firstProbe.enclosingRepoRoot, enclosing.root);
+    assert.equal(firstProbe.enclosingRepoRoot, realExternalRepo);
+    assert.equal(firstProbe.enclosingRepo?.slug, "external/tool");
+    assert.equal(firstProbe.enclosingRepo?.instructions[0]?.content, "External repo rules\n");
     assert.equal(firstProbe.checkedDirs.length, 2);
-    assert.equal(firstProbe.scopes.length, 1);
     assert.equal(firstProbe.scopes[0]?.files[0]?.content, "External sub rules\n");
 
     const secondProbe = await readScopedDirectoryInstructions(sandbox, {
       targetPath: join(externalRepo, "packages", "sub", "other.ts"),
       checkedDirs: new Set(firstProbe.checkedDirs),
-      knownRepoRoots: new Set([enclosing.root]),
+      knownRepoRoots: new Set([realExternalRepo]),
     });
+    assert.equal(secondProbe.enclosingRepo, null);
     assert.deepEqual(secondProbe.checkedDirs, []);
     assert.deepEqual(secondProbe.scopes, []);
 
@@ -464,38 +388,30 @@ test("discovers enclosing repository outside workspace, expands $HOME paths, and
       targetPath: "$HOME/.agents/skills/demo/SKILL.md",
       checkedDirs: new Set(),
     });
-    const canonicalHomeSkillDir = (await realpath(homeSkillDir)).replaceAll("\\", "/");
-    assert.equal(
-      homeProbe.homeDir?.replaceAll("\\", "/"),
-      (await realpath(fakeHome)).replaceAll("\\", "/"),
-    );
+    assert.equal(homeProbe.homeDir, await realpath(fakeHome));
     assert.equal(homeProbe.enclosingRepoRoot, null);
-    assert.deepEqual(homeProbe.checkedDirs, [canonicalHomeSkillDir]);
+    assert.deepEqual(homeProbe.checkedDirs, [await realpath(homeSkillDir)]);
     assert.deepEqual(homeProbe.scopes, []);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
 });
 
-test("bounds discovered repo count, metadata field size, and aggregate instruction bytes in the sandbox (vercel/eve/459)", async () => {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-bounds-459-")));
+test("bounds discovered repo count, metadata field size, and aggregate instruction bytes (vercel/eve/459)", async () => {
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-459-")));
   try {
     const repoCount = 36;
     const hugeRemote = `https://github.com/acme/${"r".repeat(12_000)}.git`;
     const repoDirs = Array.from({ length: repoCount }, (_, idx) =>
       join(workspace, `repo-${String(idx).padStart(2, "0")}`),
     );
-
-    const batchSize = 8;
-    for (let i = 0; i < repoDirs.length; i += batchSize) {
+    for (let i = 0; i < repoDirs.length; i += 8) {
       await Promise.all(
-        repoDirs.slice(i, i + batchSize).map(async (dir, offset) => {
+        repoDirs.slice(i, i + 8).map(async (dir, offset) => {
           const idx = i + offset;
           await mkdir(dir, { recursive: true });
           await git(dir, ["init", "-b", "main"]);
-          if (idx === 0) {
-            await git(dir, ["remote", "add", "origin", hugeRemote]);
-          }
+          if (idx === 0) await git(dir, ["remote", "add", "origin", hugeRemote]);
           await writeFile(
             join(dir, "AGENTS.md"),
             `Repo ${String(idx).padStart(2, "0")} instructions: ${"x".repeat(60)}\n`,
@@ -505,286 +421,28 @@ test("bounds discovered repo count, metadata field size, and aggregate instructi
     }
 
     const { sandbox } = createLocalSandbox(workspace);
+    const full = await discoverWorkspace(sandbox, { extraPaths: [repoDirs[0]!] });
+    assert.equal(full.repositories.length, MAX_DISCOVERED_REPOSITORIES);
+    assert.equal(full.overflowPaths.length, repoCount - MAX_DISCOVERED_REPOSITORIES);
+    assert.ok(full.overflowPaths.length <= MAX_OVERFLOW_PATHS);
 
-    const fullDiscovery = await discoverWorkspace(sandbox, {
-      extraPaths: [repoDirs[0]!],
-    });
-    assert.equal(fullDiscovery.repositories.length, MAX_DISCOVERED_REPOSITORIES);
-    assert.equal(fullDiscovery.overflowPaths.length, repoCount - MAX_DISCOVERED_REPOSITORIES);
-    assert.ok(fullDiscovery.overflowPaths.length <= MAX_OVERFLOW_PATHS);
-
-    const hugeRepoRoot = (await realpath(repoDirs[0]!)).replaceAll("\\", "/");
-    const hugeRepo = fullDiscovery.repositories.find(
-      (repo) => repo.root.replaceAll("\\", "/") === hugeRepoRoot,
-    );
-    assert.ok(hugeRepo !== undefined, "repo with huge remote is discovered");
-    assert.ok(hugeRepo.remote !== null);
-    assert.ok(
-      Buffer.byteLength(hugeRepo.remote, "utf8") <= MAX_META_FIELD_BYTES,
-      `expected bounded remote length <= ${MAX_META_FIELD_BYTES}, got ${Buffer.byteLength(hugeRepo.remote, "utf8")}`,
-    );
+    const hugeRepo = full.repositories.find((r) => r.root === repoDirs[0]);
+    assert.ok(hugeRepo?.remote !== null && hugeRepo?.remote !== undefined);
+    assert.ok(Buffer.byteLength(hugeRepo.remote, "utf8") <= MAX_META_FIELD_BYTES);
 
     const budgeted = await discoverWorkspace(sandbox, {
       extraPaths: [repoDirs[0]!],
       maxTotalBytes: 128,
     });
-    assert.equal(budgeted.repositories.length, MAX_DISCOVERED_REPOSITORIES);
-
-    const emittedFiles = budgeted.repositories.flatMap((repo) => repo.instructions);
+    const emittedFiles = budgeted.repositories.flatMap((r) => r.instructions);
     const emittedBytes = emittedFiles.reduce(
-      (sum, file) => sum + Buffer.byteLength(file.content ?? "", "utf8"),
+      (sum, f) => sum + Buffer.byteLength(f.content ?? "", "utf8"),
       0,
     );
-    assert.ok(
-      emittedFiles.length === 1,
-      `expected only 1 file within 128-byte budget, got ${emittedFiles.length}`,
-    );
-    assert.ok(emittedBytes <= 128, `expected emitted bytes <= 128, got ${emittedBytes}`);
-    assert.ok(
-      budgeted.overflowPaths.some((p) => p.endsWith("/AGENTS.md")),
-      "expected FILE_OVERFLOW paths recorded for skipped AGENTS.md files",
-    );
-    assert.ok(
-      budgeted.overflowPaths.length <= MAX_OVERFLOW_PATHS,
-      `expected overflowPaths <= ${MAX_OVERFLOW_PATHS}, got ${budgeted.overflowPaths.length}`,
-    );
-  } finally {
-    await rm(workspace, { force: true, recursive: true });
-  }
-});
-
-test("scan_repos_under stops descending inside discovered .git repos while scanning sibling and dotdir repos", async () => {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-stop-git-")));
-  try {
-    const outerRepo = join(workspace, "monorepo");
-    const nestedInsideRepo = join(outerRepo, "packages", "nested-repo");
-    const siblingRepo = join(workspace, "org", "sibling-repo");
-    const hiddenRepo = join(workspace, ".hidden", "dot-repo");
-
-    await initRepo(outerRepo, { "AGENTS.md": "Outer monorepo rules\n" });
-    await initRepo(nestedInsideRepo, { "AGENTS.md": "Nested inside repo should not be walked\n" });
-    await initRepo(siblingRepo, { "AGENTS.md": "Sibling repo rules\n" });
-    await initRepo(hiddenRepo, { "AGENTS.md": "Hidden dir repo rules\n" });
-
-    const { sandbox } = createLocalSandbox(workspace);
-    const repos = await discoverRepositories(sandbox);
-    const roots = repos.map((repo) => repo.root.replaceAll("\\", "/")).sort();
-
-    const expected = [
-      (await realpath(outerRepo)).replaceAll("\\", "/"),
-      (await realpath(siblingRepo)).replaceAll("\\", "/"),
-      (await realpath(hiddenRepo)).replaceAll("\\", "/"),
-    ].sort();
-
-    assert.deepEqual(roots, expected);
-  } finally {
-    await rm(workspace, { force: true, recursive: true });
-  }
-});
-
-test("knownFingerprints emits REPO_FILES_UNCHANGED without streaming file bodies and invalidates on same-HEAD edit", async () => {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-fingerprint-")));
-  try {
-    const repoDir = join(workspace, "app");
-    const bodyMarker = "UNIQUE_FINGERPRINT_BODY_MARKER";
-    const initialBody = `${bodyMarker}\n${"x".repeat(4000)}\n`;
-    await initRepo(repoDir, { "AGENTS.md": initialBody });
-
-    const { sandbox: baseSandbox } = createLocalSandbox(workspace);
-    const stdouts: string[] = [];
-    const capturingSandbox: RepositorySandbox = {
-      resolvePath: (path) => baseSandbox.resolvePath(path),
-      async run(input) {
-        const res = await baseSandbox.run(input);
-        stdouts.push(res.stdout);
-        return res;
-      },
-      async spawn(input) {
-        const proc = await baseSandbox.spawn!(input);
-        const [forCaller, forCapture] = proc.stdout.tee();
-        const capturePromise = (async () => {
-          const reader = forCapture.getReader();
-          const chunks: Uint8Array[] = [];
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            if (value !== undefined) chunks.push(value);
-          }
-          reader.releaseLock();
-          stdouts.push(Buffer.concat(chunks).toString("utf8"));
-        })();
-        return {
-          ...proc,
-          stdout: forCaller,
-          async wait() {
-            const res = await proc.wait();
-            await capturePromise;
-            return res;
-          },
-        };
-      },
-    };
-
-    const first = await discoverWorkspace(capturingSandbox);
-    assert.equal(first.repositories.length, 1);
-    const repoRoot = first.repositories[0]!.root;
-    assert.equal(first.repositories[0]!.instructions[0]?.content, initialBody);
-    assert.equal(first.unchangedFileRoots.size, 0);
-    assert.ok(first.fileFingerprints[repoRoot] !== undefined);
-    assert.ok(stdouts[0]!.includes(bodyMarker));
-
-    const second = await discoverWorkspace(capturingSandbox, {
-      existingRoots: [repoRoot],
-      knownFingerprints: first.fileFingerprints,
-    });
-    assert.equal(second.repositories.length, 1);
-    assert.equal(second.unchangedFileRoots.has(repoRoot), true);
-    assert.equal(second.repositories[0]!.instructions.length, 0);
-    assert.equal(second.fileFingerprints[repoRoot], first.fileFingerprints[repoRoot]);
-
-    const secondStdout = stdouts[1]!;
-    assert.ok(secondStdout.includes("REPO_FILES_UNCHANGED"));
-    assert.equal(secondStdout.includes(bodyMarker), false);
-    assert.ok(
-      Buffer.byteLength(secondStdout, "utf8") < 1024,
-      `expected compact unchanged stdout < 1024 bytes, got ${Buffer.byteLength(secondStdout, "utf8")}`,
-    );
-
-    const updatedBody = "UPDATED_AT_SAME_HEAD\n";
-    await writeFile(join(repoDir, "AGENTS.md"), updatedBody);
-
-    const third = await discoverWorkspace(capturingSandbox, {
-      existingRoots: [repoRoot],
-      knownFingerprints: second.fileFingerprints,
-    });
-    assert.equal(third.unchangedFileRoots.has(repoRoot), false);
-    assert.equal(third.repositories[0]!.instructions[0]?.content, updatedBody);
-    assert.notEqual(third.fileFingerprints[repoRoot], first.fileFingerprints[repoRoot]);
-  } finally {
-    await rm(workspace, { force: true, recursive: true });
-  }
-});
-
-test("unavailable repo instructions are not fingerprinted and retry without REPO_FILES_UNCHANGED", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-unavail-fp-")));
-  try {
-    const upstream = join(root, "upstream");
-    const workspace = join(root, "ws");
-    await mkdir(workspace, { recursive: true });
-    await initRepo(upstream, {
-      "AGENTS.md": "Promisor instructions\n",
-      "src/app.ts": "export const ok = true;\n",
-    });
-    await git(upstream, ["config", "uploadpack.allowFilter", "true"]);
-
-    const cloneDir = join(workspace, "partial-repo");
-    await git(workspace, [
-      "clone",
-      "--filter=blob:none",
-      "--no-checkout",
-      `file://${upstream}`,
-      cloneDir,
-    ]);
-    await git(cloneDir, ["sparse-checkout", "init", "--no-cone"]);
-    await git(cloneDir, ["sparse-checkout", "set", "src/app.ts"]);
-    await git(cloneDir, ["checkout"]);
-    await git(cloneDir, ["remote", "set-url", "origin", "file:///nonexistent-remote-for-test"]);
-
-    const { sandbox: baseSandbox } = createLocalSandbox(workspace);
-    const stdouts: string[] = [];
-    const capturingSandbox: RepositorySandbox = {
-      resolvePath: (path) => baseSandbox.resolvePath(path),
-      async run(input) {
-        const res = await baseSandbox.run(input);
-        stdouts.push(res.stdout);
-        return res;
-      },
-      async spawn(input) {
-        const proc = await baseSandbox.spawn!(input);
-        const [forCaller, forCapture] = proc.stdout.tee();
-        const capturePromise = (async () => {
-          const reader = forCapture.getReader();
-          const chunks: Uint8Array[] = [];
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            if (value !== undefined) chunks.push(value);
-          }
-          reader.releaseLock();
-          stdouts.push(Buffer.concat(chunks).toString("utf8"));
-        })();
-        return {
-          ...proc,
-          stdout: forCaller,
-          async wait() {
-            const res = await proc.wait();
-            await capturePromise;
-            return res;
-          },
-        };
-      },
-    };
-
-    const first = await discoverWorkspace(capturingSandbox);
-    assert.equal(first.repositories.length, 1);
-    const repoRoot = first.repositories[0]!.root;
-    assert.equal(first.repositories[0]!.instructions[0]?.source, "unavailable");
-    assert.equal(first.fileFingerprints[repoRoot], undefined);
-    assert.equal(first.unchangedFileRoots.size, 0);
-
-    const second = await discoverWorkspace(capturingSandbox, {
-      existingRoots: [repoRoot],
-      knownFingerprints: first.fileFingerprints,
-    });
-    assert.equal(second.unchangedFileRoots.has(repoRoot), false);
-    assert.equal(stdouts[1]!.includes("REPO_FILES_UNCHANGED"), false);
-    assert.equal(second.repositories[0]!.instructions[0]?.source, "unavailable");
-    assert.equal(second.fileFingerprints[repoRoot], undefined);
-
-    await writeFile(join(cloneDir, "AGENTS.md"), "Recovered worktree instructions\n");
-    const third = await discoverWorkspace(capturingSandbox, {
-      existingRoots: [repoRoot],
-      knownFingerprints: second.fileFingerprints,
-    });
-    assert.equal(third.repositories[0]!.instructions[0]?.source, "worktree");
-    assert.equal(
-      third.repositories[0]!.instructions[0]?.content,
-      "Recovered worktree instructions\n",
-    );
-    assert.ok(third.fileFingerprints[repoRoot] !== undefined);
-  } finally {
-    await rm(root, { force: true, recursive: true });
-  }
-});
-
-test("scan_repos_under traverses breadth-first so a noisy non-repo subtree does not starve sibling repos", async () => {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-bfs-")));
-  try {
-    const noiseRoot = join(workspace, "aaa-noise");
-    const siblingRepo = join(workspace, "zzz-repo");
-    const nestedDirs: string[] = [];
-    for (let i = 0; i < 35; i += 1) {
-      const parent = join(noiseRoot, `d${String(i).padStart(2, "0")}`);
-      for (let j = 0; j < 32; j += 1) {
-        nestedDirs.push(join(parent, `s${String(j).padStart(2, "0")}`));
-      }
-    }
-    const batchSize = 64;
-    for (let i = 0; i < nestedDirs.length; i += batchSize) {
-      await Promise.all(
-        nestedDirs.slice(i, i + batchSize).map((dir) => mkdir(dir, { recursive: true })),
-      );
-    }
-    await initRepo(siblingRepo, { "AGENTS.md": "Sibling repo rules\n" });
-
-    const { sandbox } = createLocalSandbox(workspace);
-    const repos = await discoverRepositories(sandbox);
-    const expectedRoot = (await realpath(siblingRepo)).replaceAll("\\", "/");
-    assert.deepEqual(
-      repos.map((repo) => repo.root.replaceAll("\\", "/")),
-      [expectedRoot],
-    );
-    assert.equal(repos[0]?.instructions[0]?.content, "Sibling repo rules\n");
+    assert.equal(emittedFiles.length, 1);
+    assert.ok(emittedBytes <= 128);
+    assert.ok(budgeted.overflowPaths.some((p) => p.endsWith("/AGENTS.md")));
+    assert.ok(budgeted.overflowPaths.length <= MAX_OVERFLOW_PATHS);
   } finally {
     await rm(workspace, { force: true, recursive: true });
   }

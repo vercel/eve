@@ -10,13 +10,6 @@ export interface ProjectInstructionsFile {
   readonly content: string;
 }
 
-export function formatProjectInstructions(file: ProjectInstructionsFile): string {
-  return [
-    "Project-specific instructions and guidelines:",
-    `<project_instructions path="${escapeXmlAttr(file.path)}">\n${neutralizeInstructionContent(file.content)}\n</project_instructions>`,
-  ].join("\n\n");
-}
-
 export function escapeXmlAttr(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -32,6 +25,13 @@ export function neutralizeInstructionContent(content: string): string {
   );
 }
 
+export function formatProjectInstructions(file: ProjectInstructionsFile): string {
+  return [
+    "Project-specific instructions and guidelines:",
+    `<project_instructions path="${escapeXmlAttr(file.path)}">\n${neutralizeInstructionContent(file.content)}\n</project_instructions>`,
+  ].join("\n\n");
+}
+
 function hashInstructionKey(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 16);
 }
@@ -44,25 +44,10 @@ export function scopedInstructionKey(dir: string): string {
   return `scope:${hashInstructionKey(dir)}`;
 }
 
-function formatRepositoryFile(
-  repoLabel: string,
-  repoRoot: string,
-  file: RepositoryInstructionFile,
-): string {
-  const repoAttr = escapeXmlAttr(repoLabel);
-  const pathAttr = escapeXmlAttr(file.path);
-  if (file.source === "unavailable") {
-    return [
-      `<repository_instructions repo="${repoAttr}" path="${pathAttr}" source="unavailable">`,
-      `${file.relativePath} exists at HEAD in ${repoLabel} (${repoRoot}) but was excluded by a sparse or partial checkout and could not be fetched automatically. Check out ${file.relativePath} or read it from the remote repository before modifying code in this repository.`,
-      `</repository_instructions>`,
-    ].join("\n");
-  }
-  return [
-    `<repository_instructions repo="${repoAttr}" path="${pathAttr}" source="${file.source}">`,
-    neutralizeInstructionContent(file.content ?? ""),
-    `</repository_instructions>`,
-  ].join("\n");
+function unavailableGuidance(relativePath: string, location: string, targetArea: string): string {
+  return neutralizeInstructionContent(
+    `${relativePath} exists at HEAD in ${location} but was excluded by a sparse or partial checkout and could not be fetched automatically. Check out ${relativePath} or read it from the remote repository before modifying code in ${targetArea}.`,
+  );
 }
 
 export function formatRepositoryInstructions(
@@ -74,16 +59,10 @@ export function formatRepositoryInstructions(
   const repoAttr = escapeXmlAttr(repoLabel);
   const blocks: string[] = [];
 
-  const authorNotes = extraInstructions
-    .map((note) => note.trim())
-    .filter((note) => note.length > 0);
+  const authorNotes = extraInstructions.map((n) => n.trim()).filter(Boolean);
   if (authorNotes.length > 0) {
     blocks.push(
-      [
-        `<repository_rules repo="${repoAttr}">`,
-        neutralizeInstructionContent(authorNotes.join("\n\n")),
-        `</repository_rules>`,
-      ].join("\n"),
+      `<repository_rules repo="${repoAttr}">\n${neutralizeInstructionContent(authorNotes.join("\n\n"))}\n</repository_rules>`,
     );
   }
 
@@ -91,43 +70,32 @@ export function formatRepositoryInstructions(
   for (const file of [...repo.instructions, ...extraFiles]) {
     if (seenPaths.has(file.relativePath)) continue;
     seenPaths.add(file.relativePath);
-    blocks.push(formatRepositoryFile(repoLabel, repo.root, file));
+    const body =
+      file.source === "unavailable"
+        ? unavailableGuidance(file.relativePath, `${repoLabel} (${repo.root})`, "this repository")
+        : neutralizeInstructionContent(file.content ?? "");
+    blocks.push(
+      `<repository_instructions repo="${repoAttr}" path="${escapeXmlAttr(file.path)}" source="${file.source}">\n${body}\n</repository_instructions>`,
+    );
   }
 
-  if (blocks.length === 0) return null;
-  return blocks.join("\n\n");
+  return blocks.length === 0 ? null : blocks.join("\n\n");
 }
 
 export function formatScopedInstructions(scope: RecordedScope): string | null {
   if (scope.files.length === 0) return null;
   const repoLabel = scope.repoSlug ?? scope.repoRoot;
   const repoAttr = repoLabel === null ? "" : ` repo="${escapeXmlAttr(repoLabel)}"`;
-  const blocks: string[] = [];
-
-  for (const file of scope.files) {
-    const pathAttr = escapeXmlAttr(file.path);
-    if (file.source === "unavailable") {
-      const location =
-        repoLabel === null ? scope.dir : `${repoLabel} (${scope.repoRoot ?? scope.dir})`;
-      blocks.push(
-        [
-          `<scoped_instructions${repoAttr} path="${pathAttr}" source="unavailable">`,
-          `${file.relativePath} exists at HEAD in ${location} but was excluded by a sparse or partial checkout and could not be fetched automatically. Check out ${file.relativePath} or read it from the remote repository before modifying code in ${scope.dir}.`,
-          `</scoped_instructions>`,
-        ].join("\n"),
-      );
-    } else {
-      blocks.push(
-        [
-          `<scoped_instructions${repoAttr} path="${pathAttr}">`,
-          neutralizeInstructionContent(file.content ?? ""),
-          `</scoped_instructions>`,
-        ].join("\n"),
-      );
-    }
-  }
-
-  return blocks.join("\n\n");
+  const location = repoLabel === null ? scope.dir : `${repoLabel} (${scope.repoRoot ?? scope.dir})`;
+  return scope.files
+    .map((file) => {
+      const pathAttr = escapeXmlAttr(file.path);
+      if (file.source === "unavailable") {
+        return `<scoped_instructions${repoAttr} path="${pathAttr}" source="unavailable">\n${unavailableGuidance(file.relativePath, location, scope.dir)}\n</scoped_instructions>`;
+      }
+      return `<scoped_instructions${repoAttr} path="${pathAttr}">\n${neutralizeInstructionContent(file.content ?? "")}\n</scoped_instructions>`;
+    })
+    .join("\n\n");
 }
 
 function formatWorkspaceInstructions(files: readonly RepositoryInstructionFile[]): string | null {
@@ -136,10 +104,6 @@ function formatWorkspaceInstructions(files: readonly RepositoryInstructionFile[]
       file.source !== "unavailable" && file.content !== null && file.content.trim().length > 0,
   );
   if (readable.length === 0) return null;
-  if (readable.length === 1) {
-    const first = readable[0]!;
-    return formatProjectInstructions({ path: first.path, content: first.content });
-  }
   return [
     "Project-specific instructions and guidelines:",
     ...readable.map(
@@ -149,26 +113,24 @@ function formatWorkspaceInstructions(files: readonly RepositoryInstructionFile[]
   ].join("\n\n");
 }
 
-interface CandidateInstructionEntry {
-  readonly key: string;
-  readonly content: string;
-  readonly paths: readonly string[];
-}
-
 export function buildKeyedInstructions(
   state: Pick<RepositorySessionState, "workspaceInstruction" | "byRoot" | "scopes"> & {
     readonly overflowPaths?: readonly string[];
   },
   maxTotalBytes: number = DEFAULT_MAX_TOTAL_BYTES,
 ): Readonly<Record<string, InstructionsDefinition>> | null {
-  const candidates: CandidateInstructionEntry[] = [];
+  const candidates: {
+    readonly key: string;
+    readonly content: string;
+    readonly paths: readonly string[];
+  }[] = [];
 
   const workspaceContent = formatWorkspaceInstructions(state.workspaceInstruction);
   if (workspaceContent !== null) {
     candidates.push({
       key: "workspace",
       content: workspaceContent,
-      paths: state.workspaceInstruction.map((file) => file.path),
+      paths: state.workspaceInstruction.map((f) => f.path),
     });
   }
 
@@ -176,10 +138,7 @@ export function buildKeyedInstructions(
     const content = formatRepositoryInstructions(repo, repo.ruleFiles, repo.ruleInstructions);
     if (content !== null) {
       const paths = [
-        ...new Set([
-          ...repo.instructions.map((file) => file.path),
-          ...repo.ruleFiles.map((file) => file.path),
-        ]),
+        ...new Set([...repo.instructions.map((f) => f.path), ...repo.ruleFiles.map((f) => f.path)]),
       ];
       candidates.push({
         key: repositoryInstructionKey(repo.root),
@@ -195,7 +154,7 @@ export function buildKeyedInstructions(
       candidates.push({
         key: scopedInstructionKey(scope.dir),
         content,
-        paths: scope.files.map((file) => file.path),
+        paths: scope.files.map((f) => f.path),
       });
     }
   }
@@ -206,9 +165,9 @@ export function buildKeyedInstructions(
   const result: Record<string, InstructionsDefinition> = {};
   const overflowPaths: string[] = [];
   const pushOverflow = (p: string) => {
-    if (p.length === 0 || overflowPaths.includes(p)) return;
-    if (overflowPaths.length >= MAX_OVERFLOW_PATHS) return;
-    overflowPaths.push(p);
+    if (p.length > 0 && !overflowPaths.includes(p) && overflowPaths.length < MAX_OVERFLOW_PATHS) {
+      overflowPaths.push(p);
+    }
   };
   let usedBytes = 0;
 
@@ -218,20 +177,15 @@ export function buildKeyedInstructions(
       result[candidate.key] = defineInstructions({ content: candidate.content, role: "user" });
       usedBytes += entryBytes;
     } else {
-      for (const p of candidate.paths) {
-        pushOverflow(p);
-      }
+      for (const p of candidate.paths) pushOverflow(p);
     }
   }
 
-  for (const p of preOverflow) {
-    pushOverflow(p);
-  }
+  for (const p of preOverflow) pushOverflow(p);
 
   if (overflowPaths.length > 0) {
-    const lines = overflowPaths.map((p) => `- ${p}`).join("\n");
     result.overflow = defineInstructions({
-      content: `Additional repository or scoped instruction files exceeded the automatic instruction byte budget (${maxTotalBytes} bytes). Use \`read_file\` to read them when working in those areas:\n${lines}`,
+      content: `Additional repository or scoped instruction files exceeded the automatic instruction byte budget (${maxTotalBytes} bytes). Use \`read_file\` to read them when working in those areas:\n${overflowPaths.map((p) => `- ${p}`).join("\n")}`,
       role: "user",
     });
   }
