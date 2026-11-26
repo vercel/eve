@@ -22,7 +22,6 @@
         "@eve/board",
         "@eve/self-improvement",
         "@eve/recall",
-        "@eve/video",
         "eve-code",
         "@eve/agent-desktop",
         "@eve/agent-browser",
