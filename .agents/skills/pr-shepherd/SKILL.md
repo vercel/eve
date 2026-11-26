@@ -65,10 +65,13 @@ finding.
     and invariant violations.
   - Skip: style nits and scope creep.
 - **Simplification**: apply the triage bar in
-  [`pr-simplify`](../pr-simplify/SKILL.md#triage)—apply verified dead-code
-  removals, canonical path unifications, and simpler internal designs that
-  preserve all outcomes; skip style nits, leaky abstractions, and unrelated
-  refactors; ask the user before changing public APIs or semver boundaries.
+  [`pr-simplify`](../pr-simplify/SKILL.md#triage)—this is a line-reduction
+  pass, so production simplifications must reduce production LOC; apply
+  verified dead-code removals, canonical path unifications, simpler internal
+  designs that preserve all outcomes, and removal or consolidation of low-value
+  tests; skip changes that grow production LOC, style nits, leaky abstractions,
+  and unrelated refactors; ask the user before changing public APIs or semver
+  boundaries.
 
 Mention notable skipped items from either pass in the final report.
 
@@ -267,7 +270,8 @@ Give the user the PR URL and a short account of the work:
 
 - Correctness findings you fixed, and notable ones you skipped and why.
 - Simplifications you applied (design simplifications, unified paths, removed
-  dead code), and notable ones you skipped or deferred and why.
+  dead code, and pruned low-value tests, with net production vs test LOC), and
+  notable ones you skipped or deferred and why.
 - Comments you addressed, declined, or deferred, plus threads still open.
 - CI status on the head SHA, flaky reruns with job names, and real failures
   you fixed.

@@ -45,9 +45,10 @@ accompany a PR.
 Use the [`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md)
 skill when drafting or updating one.
 
-When the user asks to simplify a PR or branch with fresh eyes—replacing
-bolted-on complexity with a simpler upfront design, unifying duplicate
-machinery, and removing dead code paths—use the
+When the user asks to simplify a PR or branch with fresh eyes—a line-reduction
+pass that cuts production LOC by replacing bolted-on complexity with a simpler
+upfront design, unifying duplicate machinery, removing dead code paths, and
+pruning low-value tests—use the
 [`pr-simplify`](./.agents/skills/pr-simplify/SKILL.md) skill.
 
 When the user explicitly asks to shepherd, land, or merge a PR, or to get one
