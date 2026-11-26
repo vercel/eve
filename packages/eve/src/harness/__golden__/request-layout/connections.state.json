@@ -128,12 +128,13 @@
           ]
         },
         "eve.catalog": {
-          "digest": "KrH36F1Zk9OV4Q_e0rW8Vz",
+          "digest": "qJ6zQjJGLHCRqWpxH8O_Aq",
           "since": 1,
           "value": {
             "connections": true,
             "searchableSkills": false,
             "skills": false,
+            "subscriptions": false,
             "tools": true
           }
         },

@@ -1,15 +1,21 @@
 import { isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { Announcement } from "#harness/announcements.js";
 import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { SUBSCRIBE_TOOL } from "#runtime/subscriptions/tools.js";
 
 import { compareCodeUnits } from "./rank.js";
+import { subscriptionSources } from "./subscription-tools.js";
 import type { Callable } from "./step-catalog.js";
 
-type Listed = Pick<Callable, "connections" | "deferred" | "entries" | "skills">;
+type Listed = Pick<
+  Callable,
+  "channels" | "connections" | "deferred" | "entries" | "skills" | "subagent"
+>;
 
 const ANNOUNCEMENT_KEY = "catalog";
 const MAX_LISTED_NAMESPACES = 20;
 const MAX_LISTED_CONNECTIONS = 20;
+const MAX_LISTED_SUBSCRIPTIONS = 20;
 
 type Kind = "tools" | "agents" | "skills";
 
@@ -27,6 +33,7 @@ interface CatalogListing {
   readonly connections: Capped<ListedConnection>;
   readonly kinds: readonly Kind[];
   readonly namespaces: Capped<string>;
+  readonly subscriptions?: Capped<string>;
 }
 
 export function catalogAnnouncements(catalog: Listed): Readonly<Record<string, Announcement>> {
@@ -68,15 +75,29 @@ function listCatalog(catalog: Listed): CatalogListing {
   const connections = catalog.connections
     .map(({ connectionName, description }) => ({ description, name: connectionName }))
     .sort((a, b) => compareCodeUnits(a.name, b.name));
+  const sources = subscriptionSources(catalog);
+  const subscribable = [
+    ...sources.channels.map(({ channelName }) => channelName),
+    ...sources.connections.map(({ connectionName }) => connectionName),
+  ].sort(compareCodeUnits);
   return {
     connections: capped(connections, MAX_LISTED_CONNECTIONS),
     kinds,
     namespaces: { ...namespaces, items: [...namespaces.items].sort(compareCodeUnits) },
+    subscriptions:
+      subscribable.length > 0 ? capped(subscribable, MAX_LISTED_SUBSCRIPTIONS) : undefined,
   };
 }
 
 const EMPTY_LISTING = JSON.stringify(
-  listCatalog({ connections: [], deferred: new Map(), entries: new Map(), skills: new Map() }),
+  listCatalog({
+    channels: [],
+    connections: [],
+    deferred: new Map(),
+    entries: new Map(),
+    skills: new Map(),
+    subagent: false,
+  }),
 );
 
 function namespaceCounts(catalog: Listed): ReadonlyMap<string, number> {
@@ -135,9 +156,16 @@ function renderCatalogAnnouncement(
 }
 
 function renderListing(
-  { connections, kinds, namespaces }: CatalogListing,
+  { connections, kinds, namespaces, subscriptions }: CatalogListing,
   programTool: string | undefined,
 ): string {
+  const subscribable =
+    subscriptions === undefined || subscriptions.items.length === 0
+      ? []
+      : [
+          `Subscribable sources: ${[...subscriptions.items, ...(subscriptions.more ? ["and more"] : [])].join(", ")}. Find their events with ${SEARCH_TOOL_NAME} ("subscriptions__<source>__") before calling ${SUBSCRIBE_TOOL}.`,
+        ];
+  if (kinds.length === 0 && connections.items.length === 0) return subscribable.join("\n");
   const subject =
     kinds.length === 0 ? "Your connections have more tools" : `You have more ${joinWords(kinds)}`;
   const several =
@@ -164,7 +192,7 @@ function renderListing(
       ...(connections.more ? ["- and more"] : []),
     );
   }
-  return lines.join("\n");
+  return [...lines, ...subscribable].join("\n");
 }
 
 function joinWords(words: readonly string[]): string {
@@ -180,7 +208,11 @@ function formatConnection(entry: ListedConnection): string {
 }
 
 function isEmpty(listing: CatalogListing): boolean {
-  return listing.kinds.length === 0 && listing.connections.items.length === 0;
+  return (
+    listing.kinds.length === 0 &&
+    listing.connections.items.length === 0 &&
+    (listing.subscriptions?.items ?? []).length === 0
+  );
 }
 
 function parseListing(value: string | undefined): CatalogListing | undefined {

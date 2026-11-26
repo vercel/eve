@@ -1,10 +1,12 @@
+import { createHash } from "node:crypto";
 import { installedDurableHost } from "#execution/hosts.js";
+import { passesToolFilter } from "#runtime/connections/tool-filter.js";
 import { createMcpTraceFetch } from "#runtime/connections/mcp-tracing.js";
 import { createMcpTracing } from "#tracing/eve/mcp.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
 import { principalOf } from "#execution/session/principal.js";
 import { defineJsonSchema, toInputSchema } from "#tools/schema.js";
-import { createHash } from "node:crypto";
+import { connectionSubscriptionId } from "#runtime/subscriptions/keys.js";
 import type {
   Experimental_MCPEventDefinition as EventDefinition,
   Experimental_MCPEvents as MCPEvents,
@@ -13,35 +15,59 @@ import { contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
 import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition, ResolvedConnectionEvents } from "#runtime/types.js";
-import type {
-  ConnectionToolExecuteOptions,
-  ConnectionToolMetadata,
-} from "#shared/connection-types.js";
+import type { ChannelEventDefinition } from "#shared/channel-subscriptions.js";
+import type { ConnectionToolExecuteOptions } from "#shared/connection-types.js";
 import type { ManagedEventSubscribeInput } from "#shared/connection-events.js";
-import { parseJsonObject } from "#shared/json.js";
+import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { closestNames } from "#execution/catalog/rank.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import { holdCallerIdentity } from "#runtime/connections/identity-hold.js";
-import { connectionEventDestination } from "#runtime/subscriptions/path.js";
 import {
-  sameEventOwner,
-  type EventBinding,
-  type EventOwner,
+  heldByCaller,
+  type ConnectionBinding,
+  type ConnectionSubscriptionSource,
+  type SubscriptionBinding,
 } from "#runtime/subscriptions/state.js";
 import type { ManagedEventSubscription } from "#shared/connection-events.js";
 
-const GET = "events_get_subscription";
-const STOP = "events_unsubscribe";
-const PREFIX = "events_subscribe_";
-const MIN_TTL_MS = 120_000;
-const MAX_TTL_MS = 31_536_000_000;
+export const EVENT_STOP_ACTION = "events_unsubscribe";
+export const EVENT_SUBSCRIBE_ACTION = "events_subscribe";
+const SUBSCRIBE_PREFIX = "events_subscribe_";
+
+export function eventFilterNames(eventName: string): string[] {
+  return [
+    `${SUBSCRIBE_PREFIX}${eventName}`,
+    `${SUBSCRIBE_PREFIX}${createHash("sha256").update(eventName).digest("hex").slice(0, 24)}`,
+  ];
+}
+
+export function toolFilterMayOfferEvents(filter: ResolvedConnectionDefinition["tools"]): boolean {
+  return (
+    filter === undefined ||
+    !("allow" in filter) ||
+    filter.allow.some((name) => name.startsWith(SUBSCRIBE_PREFIX))
+  );
+}
+export const MIN_TTL_MS = 120_000;
+export const MAX_TTL_MS = 31_536_000_000;
 type EventCatalog = Pick<MCPEvents, "list">;
 const SUBSCRIBE_INPUT_SCHEMA = defineJsonSchema<
-  Pick<ManagedEventSubscribeInput, "arguments" | "ttlMs">
->(parseJsonObject(subscribeInputSchema()));
-
-export function isEventAction(name: string): boolean {
-  return name === GET || name === STOP || name.startsWith(PREFIX);
-}
+  Pick<ManagedEventSubscribeInput, "arguments" | "ttlMs"> & { event: string }
+>({
+  type: "object",
+  additionalProperties: false,
+  required: ["event", "arguments", "ttlMs"],
+  properties: {
+    event: { type: "string" },
+    arguments: { type: "object" },
+    ttlMs: {
+      type: ["integer", "null"],
+      minimum: MIN_TTL_MS,
+      maximum: MAX_TTL_MS,
+    },
+  },
+});
 
 export class ConnectionEventActions {
   private readonly connection: ResolvedConnectionDefinition;
@@ -67,17 +93,17 @@ export class ConnectionEventActions {
       throw new Error(
         "Experimental event subscriptions currently require a root-agent connection.",
       );
-    if (options?.hold !== false) holdCallerIdentity(this.connection.connectionName, ctx);
     const { authorization, backend, connector } = this.events;
     const principal = resolveConnectionPrincipal(
       this.connection.connectionName,
       authorization,
       ctx,
     );
+    if (options?.hold !== false) holdCallerIdentity(this.connection.connectionName, ctx);
     const sessionId = ctx.require(SessionIdKey);
     const owner = principalKey(principal);
     const executionPrincipal = principalOf(ctx.get(AuthKey));
-    const caller: EventOwner = {
+    const caller: Caller = {
       connectionName: this.connection.connectionName,
       instanceId: this.connection.instanceId,
       connector,
@@ -145,7 +171,13 @@ export class ConnectionEventActions {
       );
       discovered += page.events.length;
       if (discovered > 1000) throw new Error("MCP event catalog exceeds the 1000-event limit.");
-      result.push(...page.events.filter((event) => event.delivery.includes("webhook")));
+      result.push(
+        ...page.events.filter(
+          (event) =>
+            event.delivery.includes("webhook") &&
+            passesToolFilter(eventFilterNames(event.name), this.connection.tools),
+        ),
+      );
       cursor = page.nextCursor ?? undefined;
       if (cursor === undefined) return result;
       if (seen.has(cursor)) throw new Error("MCP event catalog returned a repeated cursor.");
@@ -154,29 +186,16 @@ export class ConnectionEventActions {
     throw new Error("MCP event catalog exceeds the 20-page limit.");
   }
 
-  async metadata(): Promise<ConnectionToolMetadata[]> {
+  async getEvents(): Promise<ChannelEventDefinition[]> {
     return this.withClient(
-      async (events) => {
-        const catalog = await this.catalog(events);
-        return [
-          ...catalog.map((event) => ({
-            name: actionName(event.name),
-            description: `Watch ${event.name}. ${event.description ?? ""} Events reach this connection's authored callback for ttlMs milliseconds or until stopped. Set ttlMs to null to watch indefinitely. Watching the same event with the same arguments again returns the existing watch.`,
-            inputSchema: subscribeInputSchema(event.inputSchema),
-          })),
-          ...managementMetadata(),
-        ];
-      },
+      async (events) =>
+        (await this.catalog(events)).map((event) => ({
+          name: event.name,
+          description: event.description ?? "",
+          inputSchema: defineJsonSchema(objectSchema(event.inputSchema)),
+        })),
       { hold: false },
     );
-  }
-
-  recoveryMetadata(): ConnectionToolMetadata[] {
-    this.scope({ hold: false });
-    return managementMetadata().map((tool) => ({
-      ...tool,
-      description: `MCP discovery is unavailable. ${tool.description}`,
-    }));
   }
 
   async execute(
@@ -185,154 +204,125 @@ export class ConnectionEventActions {
     options: ConnectionToolExecuteOptions,
   ): Promise<unknown> {
     const args = parseJsonObject(input);
-    const { ctx, principal, backend, sessionId, owner, executionPrincipal, caller } = this.scope();
-    const owners = installedDurableHost()?.connectionEvents;
+    const { ctx, sessionId, owner, executionPrincipal, caller } = this.scope();
+    const owners = installedDurableHost()?.subscriptions;
     if (owners === undefined)
-      throw new Error(
-        "This host keeps no connection event subscriptions: watch events from a deployed agent.",
-      );
-    if (name === GET || name === STOP) {
+      throw new Error("Subscriptions are not supported on this host. Run from a deployed agent.");
+    if (name === EVENT_STOP_ACTION) {
       if (typeof args.id !== "string") throw new Error("id must be a subscription id.");
       const bindingId = args.id;
       const handler = await owners.find(bindingId);
-      if (handler === undefined || !sameEventOwner(handler.owner, caller))
+      if (
+        handler === undefined ||
+        !heldBy(handler.binding, caller, sessionId) ||
+        !(await owners.retire(bindingId))
+      )
         throw new Error("Unknown subscription for this caller and account.");
-      if (name === STOP) {
-        if (!(await owners.retire(bindingId)))
-          throw new Error("Unknown subscription for this caller and account.");
-        return { id: bindingId, status: "stopping" as const };
-      }
-      if (handler.subscription === undefined) return pendingResult(handler.owner);
-      const subscriptionId = handler.subscription.id;
-      const events = await backend.createAdapter({
-        principal,
-        connection: { url: this.connection.url },
-        destination: { path: connectionEventDestination(this.connection.connectionName) },
-      });
-      const subscription = await withConnectionEventSpan(
-        {
-          ctx,
-          connectionName: this.connection.connectionName,
-          bindingId,
-          subscriptionId,
-          operation: "get",
-        },
-        () => events.getSubscription({ id: subscriptionId, options: { timeout: 30_000 } }),
-      );
-      return subscriptionResult(bindingId, subscription);
+      return { id: bindingId, status: "stopping" as const };
     }
+    if (name !== EVENT_SUBSCRIBE_ACTION) throw new Error(`Unknown event action "${name}".`);
     return this.withClient(async (events) => {
-      const definition = (await this.catalog(events)).find(
-        (event) => actionName(event.name) === name,
-      );
-      if (definition === undefined)
-        throw new Error("Unknown event subscription action for this account.");
       const inputResult = await SUBSCRIBE_INPUT_SCHEMA["~standard"].validate(args);
       if (inputResult.issues !== undefined)
         throw new Error(
           `Invalid subscription input: ${inputResult.issues.map(({ message }) => message).join("; ")}`,
         );
-      const { arguments: inputArguments, ttlMs } = inputResult.value;
-      const schema =
-        typeof definition.inputSchema === "boolean"
-          ? { allOf: [definition.inputSchema] }
-          : definition.inputSchema;
-      const valid = await toInputSchema(schema)["~standard"].validate(
+      const { event: eventName, arguments: inputArguments, ttlMs } = inputResult.value;
+      const catalog = await this.catalog(events);
+      const definition = catalog.find((event) => event.name === eventName);
+      if (definition === undefined)
+        throw new Error(
+          unknownEventMessage(
+            this.connection.connectionName,
+            eventName,
+            catalog.map((event) => ({ name: event.name, description: event.description ?? "" })),
+          ),
+        );
+      const valid = await toInputSchema(objectSchema(definition.inputSchema))["~standard"].validate(
         parseJsonObject(inputArguments),
       );
       if (valid.issues !== undefined)
         throw new Error("Event arguments do not match the authorized catalog schema.");
       const eventArguments = parseJsonObject(valid.value);
-      const id = createHash("sha256")
-        .update(
-          canonicalJson([
-            sessionId,
-            this.connection.instanceId,
-            this.connection.connectionName,
-            owner,
-            executionPrincipal,
-            definition.name,
-            eventArguments,
-          ]),
-        )
-        .digest("hex");
-      const binding: EventBinding = {
-        ...caller,
-        id,
+      const id = connectionSubscriptionId({
         sessionId,
+        instanceId: this.connection.instanceId,
+        connectionName: this.connection.connectionName,
+        owner,
+        executionPrincipal,
+        event: definition.name,
+        arguments: eventArguments,
+      });
+      const binding: ConnectionBinding = {
+        id,
+        source: {
+          kind: "connection",
+          name: caller.connectionName,
+          instanceId: caller.instanceId,
+          connector: caller.connector,
+          principalKey: caller.principalKey,
+          request: {
+            name: definition.name,
+            arguments: structuredClone(eventArguments) as ManagedEventSubscribeInput["arguments"],
+            ttlMs,
+            context: { eve: { version: 1, sessionId, bindingId: id } },
+          },
+        },
+        sessionId,
+        executionPrincipal,
         auth: structuredClone(ctx.get(AuthKey) ?? null),
         traceSeed: ctx.get(SessionTraceSeedKey),
-        request: {
-          name: definition.name,
-          arguments: structuredClone(eventArguments) as ManagedEventSubscribeInput["arguments"],
-          ttlMs,
-          context: { eve: { version: 1, sessionId, bindingId: id } },
-        },
       };
-      const subscription = await owners.start(
-        binding,
-        requireCompiledBundle(ctx),
-        options.abortSignal,
-      );
-      return subscription === undefined
+      const opened = await owners.start(binding, requireCompiledBundle(ctx), options.abortSignal);
+      return opened?.upstream === undefined
         ? pendingResult(binding)
-        : subscriptionResult(id, subscription);
+        : subscriptionResult(id, opened.upstream);
     });
   }
 }
 
-function subscribeInputSchema(
-  argumentsSchema: EventDefinition["inputSchema"] = { type: "object" },
-) {
-  return {
-    type: "object",
-    additionalProperties: false,
-    required: ["arguments", "ttlMs"],
-    properties: {
-      arguments: argumentsSchema,
-      ttlMs: {
-        type: ["integer", "null"],
-        minimum: MIN_TTL_MS,
-        maximum: MAX_TTL_MS,
-        description: `How long to watch, in milliseconds (${MIN_TTL_MS} to ${MAX_TTL_MS}), or null until stopped`,
-      },
-    },
-  };
+function objectSchema(schema: EventDefinition["inputSchema"] | undefined): JsonObject {
+  if (schema === undefined) return { type: "object" };
+  return typeof schema === "boolean" ? { allOf: [schema] } : parseJsonObject(schema);
+}
+
+function unknownEventMessage(
+  connectionName: string,
+  event: string,
+  events: readonly { readonly name: string; readonly description: string }[],
+): string {
+  const closest = closestNames(event, events);
+  return `Connection "${connectionName}" emits no event named "${event}".${
+    closest.length > 0 ? ` Closest events: ${closest.join(", ")}.` : ""
+  } Find its events with ${SEARCH_TOOL_NAME}({ query: "subscriptions__${connectionName}__" }).`;
 }
 
 function subscriptionResult(bindingId: string, subscription: ManagedEventSubscription) {
   return { ...subscription, id: bindingId, subscriptionId: subscription.id };
 }
 
-function pendingResult(binding: EventBinding) {
-  const { name, arguments: eventArguments } = binding.request;
+function pendingResult(binding: ConnectionBinding) {
+  const { name, arguments: eventArguments } = binding.source.request;
   return { id: binding.id, name, arguments: eventArguments, status: "pending" as const };
 }
 
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(value, (_key, entry: unknown) =>
-    entry !== null && typeof entry === "object" && !Array.isArray(entry)
-      ? Object.fromEntries(Object.entries(entry).sort(([left], [right]) => (left < right ? -1 : 1)))
-      : entry,
+type Caller = Pick<ConnectionSubscriptionSource, "instanceId" | "connector" | "principalKey"> & {
+  readonly connectionName: string;
+  readonly executionPrincipal: string;
+};
+
+function heldBy(
+  binding: SubscriptionBinding,
+  caller: Caller,
+  sessionId: string,
+): binding is ConnectionBinding {
+  const { source } = binding;
+  return (
+    source.kind === "connection" &&
+    source.name === caller.connectionName &&
+    source.instanceId === caller.instanceId &&
+    source.connector === caller.connector &&
+    source.principalKey === caller.principalKey &&
+    heldByCaller(binding, { executionPrincipal: caller.executionPrincipal, sessionId })
   );
-}
-
-function actionName(eventName: string): string {
-  return `${PREFIX}${createHash("sha256").update(eventName).digest("hex").slice(0, 24)}`;
-}
-
-function managementMetadata(): ConnectionToolMetadata[] {
-  return [GET, STOP].map((name) => ({
-    name,
-    description:
-      name === GET
-        ? "Get one of this caller's subscriptions, by the id its subscribe call returned, with Connect's current status."
-        : "Stop one of this caller's subscriptions, by the id its subscribe call returned. The watch then cancels upstream and ends; get reports it until it has.",
-    inputSchema: {
-      type: "object",
-      properties: { id: { type: "string" } },
-      required: ["id"],
-      additionalProperties: false,
-    },
-  }));
 }

@@ -19,7 +19,7 @@ import {
   defineInteractiveAuthorization,
 } from "#shared/connection-types.js";
 import type { JsonObject } from "#shared/json.js";
-import { toInputSchema } from "#tools/schema.js";
+import { defineJsonSchema, toInputSchema } from "#tools/schema.js";
 
 const OBJECT_SCHEMA: JsonObject = { type: "object", additionalProperties: false };
 
@@ -97,6 +97,7 @@ export interface CatalogSkillSource {
 export function catalogBundle(
   input: {
     readonly approval?: ApprovalPolicy;
+    readonly channels?: readonly unknown[];
     readonly connections?: readonly ResolvedConnectionDefinition[];
     readonly dynamicSubagents?: readonly string[];
     readonly skills?: readonly CatalogSkillSource[];
@@ -114,6 +115,7 @@ export function catalogBundle(
     moduleMap: undefined as never,
     nodeId: undefined,
     resolvedAgent: {
+      channels: input.channels ?? [],
       config: { approval: input.approval, name: "test-agent" },
       connections: input.connections ?? [],
       definitions: [],
@@ -140,6 +142,8 @@ export type ConnectionListing = "listed" | "sign-in" | Error;
 export interface FakeConnection {
   readonly calls: { readonly input: unknown; readonly tool: string }[];
   readonly client: ConnectionClient;
+  readonly eventCalls: { readonly input: unknown; readonly name: string }[];
+  readonly eventListCalls: number[];
   readonly definition: ResolvedConnectionDefinition;
   listing: ConnectionListing;
   readonly signIns: string[];
@@ -148,6 +152,7 @@ export interface FakeConnection {
 export function fakeConnection(input: {
   readonly approval?: ResolvedConnectionDefinition["approval"];
   readonly description?: string;
+  readonly events?: readonly string[];
   readonly listing?: ConnectionListing;
   readonly name: string;
   readonly rejectsToken?: boolean;
@@ -156,7 +161,14 @@ export function fakeConnection(input: {
   readonly tools: readonly ConnectionToolMetadata[];
 }): FakeConnection {
   const calls: FakeConnection["calls"] = [];
+  const eventCalls: FakeConnection["eventCalls"] = [];
+  const eventListCalls: number[] = [];
   const signIns: string[] = [];
+  const eventDefinitions = (input.events ?? []).map((event) => ({
+    description: `Watch ${event}.`,
+    inputSchema: defineJsonSchema({ type: "object" }),
+    name: event,
+  }));
   const definition: ResolvedConnectionDefinition = {
     approval: input.approval,
     connectionName: input.name,
@@ -167,12 +179,30 @@ export function fakeConnection(input: {
     sourceKind: "module",
     toolCall: input.toolCall,
     url: `https://${input.name}.example.com/mcp`,
+    ...(input.events !== undefined && { experimental_events: {} as never }),
   };
   const connection: FakeConnection = {
     calls,
+    eventCalls,
+    eventListCalls,
     client: {
       close: async () => {},
       connect: async () => {},
+      ...(input.events !== undefined && {
+        eventActions: {
+          execute: async (name: string, args: unknown) => {
+            eventCalls.push({ input: args, name });
+            return { id: "subscription-1", status: "active" };
+          },
+          getEvents: async () => {
+            eventListCalls.push(eventListCalls.length + 1);
+            if (connection.listing === "sign-in") {
+              throw new ConnectionAuthorizationRequiredError(input.name);
+            }
+            return eventDefinitions;
+          },
+        },
+      }),
       executeTool: async (tool, args) => {
         calls.push({ input: args, tool });
         return { content: [{ type: "text", text: JSON.stringify({ tool, args }) }] };
@@ -238,6 +268,7 @@ export function connectionTool(
 export async function catalogContext(
   input: {
     readonly approval?: ApprovalPolicy;
+    readonly channels?: readonly unknown[];
     readonly connections?: readonly FakeConnection[];
     readonly dynamicSubagents?: readonly string[];
     readonly session?: { readonly rootSessionId?: string };
@@ -260,6 +291,7 @@ export async function catalogContext(
     fromCompiledBundle(
       catalogBundle({
         approval: input.approval,
+        channels: input.channels,
         connections: input.connections?.map((connection) => connection.definition),
         dynamicSubagents: input.dynamicSubagents,
         skills: input.skills,

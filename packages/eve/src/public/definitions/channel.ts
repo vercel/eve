@@ -294,6 +294,15 @@ export function defineChannel<
 ): Channel<TState, TReceiveTarget, TMetadata> {
   const adapter = buildAdapter(definition);
   const cors = normalizeChannelCors(definition.cors);
+  const subscriptions = definition.experimental?.subscriptions;
+  if (
+    subscriptions !== undefined &&
+    typeof subscriptions.catalog !== "function" &&
+    !Array.isArray(subscriptions.catalog)
+  )
+    throw new Error(
+      "experimental.subscriptions requires `catalog`, a list of the events the channel emits or a function that returns it.",
+    );
 
   const compiled: CompiledChannel<TState, TReceiveTarget, TMetadata> = {
     __kind: CHANNEL_SENTINEL,
@@ -302,6 +311,9 @@ export function defineChannel<
     cors,
     receive: definition.receive,
     turnPolicy: definition.turnPolicy,
+    onEvent: definition.experimental?.subscriptions?.onEvent,
+    onSubscribe: definition.experimental?.subscriptions?.onSubscribe,
+    catalog: definition.experimental?.subscriptions?.catalog,
   };
 
   return compiled;

@@ -57,22 +57,37 @@ describe("executeBashOnSandbox with a real shell", () => {
     });
   });
 
-  it("names a file with the full output of a truncated stream", async () => {
+  it("names a file with the full output of a truncated stream without a second sandbox call", async () => {
     const { sandbox } = await createHostSandbox();
+    const runSpy = vi.spyOn(sandbox, "run");
 
     const large = await executeBashOnSandbox(sandbox, { command: "seq 1 5000" });
+    const huge = await executeBashOnSandbox(sandbox, {
+      command:
+        "yes '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' | head -n 9000",
+    });
     const small = await executeBashOnSandbox(sandbox, { command: "echo small" });
 
+    expect(runSpy).not.toHaveBeenCalled();
     if (large.status !== "completed") throw new Error(`expected completed: ${large.status}`);
-    const path = /^\[stdout truncated: showing last \d+ of \d+ lines; full output: (\S+)\]\n/u.exec(
-      large.stdout,
-    )?.[1];
-    expect(path).toBeDefined();
+    if (huge.status !== "completed") throw new Error(`expected completed: ${huge.status}`);
+    const largePath =
+      /^\[stdout truncated: showing last \d+ of 5000 lines; full output: (\S+)\]\n/u.exec(
+        large.stdout,
+      )?.[1];
+    const hugePath =
+      /^\[stdout truncated: showing last \d+ of 9000 lines; full output: (\S+)\]\n/u.exec(
+        huge.stdout,
+      )?.[1];
+    expect(largePath).toBeDefined();
+    expect(hugePath).toBeDefined();
     try {
-      expect(readFileSync(path!, "utf8").split("\n")).toHaveLength(5001);
+      expect(readFileSync(largePath!, "utf8").split("\n")).toHaveLength(5001);
       expect(large.stdout.endsWith("4999\n5000\n")).toBe(true);
+      expect(huge.stderr).toBe("");
     } finally {
-      await rm(join(path!, ".."), { force: true, recursive: true });
+      await rm(join(largePath!, ".."), { force: true, recursive: true });
+      await rm(join(hugePath!, ".."), { force: true, recursive: true });
     }
     expect(small).toMatchObject({ exitCode: 0, truncated: false });
     expect(small.stdout).not.toContain("full output");

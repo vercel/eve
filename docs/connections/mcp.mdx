@@ -318,9 +318,9 @@ experimental: {
       );
     },
     async onTerminated({ origin, auth, error, attachSession }) {
-      // The upstream subscription ended. The watch ends when this returns.
+      // The upstream subscription ended. The subscription closes when this returns.
       await attachSession(origin.sessionId).send(
-        `The Bird watch ended: ${error.message}`,
+        `The Bird subscription ended: ${error.message}`,
         { auth },
       );
     },
@@ -330,26 +330,26 @@ experimental: {
 
 ### What the model can call
 
-`eve__search` lists three kinds of actions for the connection:
+The model finds a connection's events with `eve__search`, for example `{ "query": "subscriptions__<connection name>__" }`, which returns each event's name, description, and the shape of its `input`. eve calls the server's `events/list` only when a search covers the connection or a subscribe runs, not on other turns. It subscribes with `eve__subscribe` and ends the subscription with `eve__subscription_stop`, the same tools as channel subscriptions. For a connection, `eve__subscribe` takes `{ source: "<connection name>", event, input, ttlMs }`, where `event` is an event name from the server's catalog and `input` holds the event's arguments. Passing an unsupported event name returns the closest names the server supports.
 
-| Action                    | Input                  | Result                                  |
-| ------------------------- | ---------------------- | --------------------------------------- |
-| `events_subscribe_<hash>` | `{ arguments, ttlMs }` | `{ id, status, expiresAt, ... }`        |
-| `events_get_subscription` | `{ id }`               | The subscription, or unknown once ended |
-| `events_unsubscribe`      | `{ id }`               | `{ id, status: "stopping" }`            |
+| Tool                     | Input                                             | Result                                                                     |
+| ------------------------ | ------------------------------------------------- | -------------------------------------------------------------------------- |
+| `eve__search`            | `{ query: "subscriptions__<connection name>__" }` | The connection's events, each with `event`, `description`, and `signature` |
+| `eve__subscribe`         | `{ source, event, input, ttlMs }`                 | `{ id, status, expiresAt, ... }`                                           |
+| `eve__subscription_stop` | `{ id }`                                          | `{ id, status: "stopping" }`                                               |
 
-Each event the server offers gets one subscribe action, whose description names the event. `ttlMs` is required: an integer from `120000` (2 minutes) to `31536000000` (365 days), or `null` to watch until stopped. `expiresAt` is the resulting deadline, or `null`.
+`eve__subscribe` runs through the connection's event action, so the connection's sign-in, approval policy, and event catalog check still apply. `ttlMs` is required: an integer from `120000` (2 minutes) to `31536000000` (365 days), or `null` until stopped. `expiresAt` is the resulting deadline, or `null`.
 
-- **Pending.** If Connect has not confirmed in time, subscribe returns the `id` with `status: "pending"`. Call get with that `id` later.
-- **Repeats.** Subscribing again to the same event with the same arguments from the same session returns the existing watch. Another session gets its own watch.
-- **Stopping.** Get and stop accept the `id` from any of the creator's sessions. Until Connect confirms the unsubscribe, get still reports the watch and stop can be called again.
-- **Lifetime.** A watch outlives the session that created it. It ends on stop, at `expiresAt`, or when the upstream subscription terminates.
+- **Pending.** If Connect has not confirmed in time, `eve__subscribe` returns the `id` with `status: "pending"`. Events still arrive once Connect confirms.
+- **Repeats.** Subscribing again to the same event with the same arguments from the same session returns the existing subscription. Another session gets its own subscription.
+- **Stopping.** `eve__subscription_stop` accepts the `id` from any of the creator's sessions and runs through the connection's approval policy, like `eve__subscribe`. A subscription made without authentication can be stopped only by the session that created it. Until Connect confirms the unsubscribe, `eve__subscription_stop` can be called again.
+- **Lifetime.** A subscription ends when it is stopped, at `expiresAt`, when the upstream subscription terminates, or when the session that created it ends, whether that session finishes, is ended, expires, or fails. Other sessions of the creator can stop it before then.
 
-`tools.allow` and `tools.block` apply to these actions, so an allow list must name the exact `events_subscribe_<hash>` names from `eve__search`. `toolCall.providedArguments` doesn't apply to them.
+Event subscriptions are not tools of the connection, so `toolCall.providedArguments` does not apply to them. `tools.allow` and `tools.block` do: an event is offered and can be subscribed to only if its name, `events_subscribe_<event name>`, or the hashed name `events_subscribe_<24 hex characters>` that earlier versions generated, passes the filter, so an allow list that names other tools offers no events and the connection is left out of `eve__search` and `eve__subscribe` entirely. Use the connection's `approval` to control who can subscribe.
 
 ### Receiver
 
-eve serves `POST /eve/v1/hooks/:connectionName`, under any configured agent or public prefix. It accepts only requests that carry Connect's token, and only for a watch that is still active. It answers `410` once the watch has ended. The callback's `auth` always comes from the saved watch, never from the event body.
+eve serves `POST /eve/v1/hooks/:connectionName`, under any configured agent or public prefix. It accepts only requests that carry Connect's token for an active subscription, and answers `410` once the subscription has ended. The callback's `auth` always comes from the saved subscription, never from the event body.
 
 ## Troubleshooting
 

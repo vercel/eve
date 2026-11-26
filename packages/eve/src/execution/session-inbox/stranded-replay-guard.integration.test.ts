@@ -4,9 +4,10 @@ import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { World } from "#compiled/@workflow/world/index.js";
 import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
 import {
-  CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME,
-  CONNECTION_EVENT_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
+  SUBSCRIPTION_DELIVERY_WORKFLOW_NAME,
+  SUBSCRIPTION_KEY_WORKFLOW_NAME,
+  SUBSCRIPTION_WORKFLOW_NAME,
   TURN_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
   WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
@@ -26,7 +27,8 @@ const queueOf = (workflow: string) => `${QUEUE_PREFIX}workflow//${packageName}//
 const SESSION_QUEUE = queueOf(WORKFLOW_ENTRY_NAME);
 const TOOL_QUEUE = queueOf(WORKFLOW_TOOL_RUN_WORKFLOW_NAME);
 const LEGACY_SESSION_QUEUE = queueOf(TURN_WORKFLOW_NAME);
-const CONNECTION_EVENT_QUEUE = queueOf(CONNECTION_EVENT_WORKFLOW_NAME);
+const SUBSCRIPTION_QUEUE = queueOf(SUBSCRIPTION_WORKFLOW_NAME);
+const SUBSCRIPTION_KEY_QUEUE = queueOf(SUBSCRIPTION_KEY_WORKFLOW_NAME);
 
 async function parkRun(
   token: string,
@@ -95,7 +97,8 @@ describe("guardStrandedSessionReplay", () => {
     { kind: "subagent", eveVersion: undefined, queue: SESSION_QUEUE },
     { kind: "workflow tool", eveVersion: "0.0.1", queue: TOOL_QUEUE },
     { kind: "workflow tool", eveVersion: undefined, queue: TOOL_QUEUE },
-    { kind: "connection event owner", eveVersion: "0.0.1", queue: CONNECTION_EVENT_QUEUE },
+    { kind: "subscription owner", eveVersion: "0.0.1", queue: SUBSCRIPTION_QUEUE },
+    { kind: "subscription key owner", eveVersion: "0.0.1", queue: SUBSCRIPTION_KEY_QUEUE },
   ])("retires a $kind from eve $eveVersion without replay", async ({ kind, eveVersion, queue }) => {
     captureLogRecords();
     const token = `replay-guard:retire:${kind}:${eveVersion}`;
@@ -187,9 +190,9 @@ describe("guardStrandedSessionReplay", () => {
       queue: queueOf(SESSION_TIMEOUT_WORKFLOW_NAME),
     },
     {
-      case: "an older connection event delivery run",
+      case: "an older subscription delivery run",
       eveVersion: "0.0.1",
-      queue: queueOf(CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME),
+      queue: queueOf(SUBSCRIPTION_DELIVERY_WORKFLOW_NAME),
     },
     {
       case: "an older run of a workflow eve does not ship",

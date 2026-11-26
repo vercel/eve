@@ -15,6 +15,7 @@ import type {
   SandboxWriteFilesOptions,
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
+import { getConnectionFastPaths, withSessionFastPaths } from "#execution/sandbox/internal-shell.js";
 import { bufferToStream, streamToBuffer } from "./stream-utils.js";
 
 /**
@@ -68,9 +69,18 @@ export function createConnectionSession<Extensions extends object>(
     }
     return process;
   }
+  const fastPaths = getConnectionFastPaths(connection);
   const session: SandboxSession = {
     resolvePath: resolveSandboxPath,
     async run(options: SandboxRunOptions) {
+      if (fastPaths?.runLogin !== undefined) {
+        return await fastPaths.runLogin({
+          command: options.command,
+          env: options.env ?? {},
+          signal: options.signal,
+          workingDirectory: resolveSandboxPath(options.workingDirectory ?? "."),
+        });
+      }
       const process = await spawn(options);
       const [stdout, stderr, { exitCode }] = await Promise.all([
         collectStreamToString(process.stdout),
@@ -129,7 +139,31 @@ export function createConnectionSession<Extensions extends object>(
       `Sandbox connection extensions cannot replace the session members eve provides: ${collisions.join(", ")}. Rename them.`,
     );
   }
-  return { ...extensions, ...session } as SandboxSession & Extensions;
+  const combined = { ...extensions, ...session } as SandboxSession & Extensions;
+  if (fastPaths?.runFast !== undefined || fastPaths?.spawnBounded !== undefined) {
+    const { runFast, spawnBounded } = fastPaths;
+    withSessionFastPaths(combined, {
+      ...(runFast !== undefined && {
+        runFast: async (options) =>
+          await runFast({
+            command: options.command,
+            env: options.env ?? {},
+            signal: options.signal,
+            workingDirectory: resolveSandboxPath(options.workingDirectory ?? "."),
+          }),
+      }),
+      ...(spawnBounded !== undefined && {
+        spawnBounded: async (options) =>
+          await spawnBounded({
+            command: options.command,
+            env: options.env ?? {},
+            signal: options.signal,
+            workingDirectory: resolveSandboxPath(options.workingDirectory ?? "."),
+          }),
+      }),
+    });
+  }
+  return combined;
 }
 
 async function collectStreamToString(stream: ReadableStream<Uint8Array>): Promise<string> {

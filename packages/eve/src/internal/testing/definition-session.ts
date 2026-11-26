@@ -95,6 +95,7 @@ export function definitionSession(
       modelMetadata: async () => MODEL_METADATA,
       nodeId: "root",
       resolvedAgent: {
+        channels: [],
         definitions: [
           ...(input.instructions ?? []).map((source) => resolver("instructions", source)),
           ...(input.tools ?? []).map((source) => resolver("tool", source)),
