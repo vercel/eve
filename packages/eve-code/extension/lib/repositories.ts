@@ -65,6 +65,7 @@ export interface WorkspaceDiscoveryResult {
   readonly finishedJobDirs: readonly string[];
   readonly overflowPaths: readonly string[];
   readonly unchangedFileRoots: ReadonlySet<string>;
+  readonly unchangedRuleFileRoots: ReadonlySet<string>;
   readonly fileFingerprints: Readonly<Record<string, string>>;
 }
 
@@ -836,6 +837,7 @@ interface ParsedProtocolOutput {
   readonly finishedJobDirs: readonly string[];
   readonly overflowPaths: readonly string[];
   readonly unchangedFileRoots: ReadonlySet<string>;
+  readonly unchangedRuleFileRoots: ReadonlySet<string>;
   readonly fileFingerprints: Readonly<Record<string, string>>;
 }
 
@@ -877,6 +879,7 @@ function parseProtocolOutput(
   const overflowPaths: string[] = [];
   const seenOverflow = new Set<string>();
   const unchangedFileRoots = new Set<string>();
+  const unchangedRuleFileRoots = new Set<string>();
   const fileFingerprints: Record<string, string> = {};
 
   const pushOverflow = (opath: string) => {
@@ -956,6 +959,12 @@ function parseProtocolOutput(
     if (rest.startsWith("REPO_FILES_UNCHANGED ")) {
       const root = rest.slice("REPO_FILES_UNCHANGED ".length);
       if (root.length > 0) unchangedFileRoots.add(root);
+      continue;
+    }
+
+    if (rest.startsWith("REPO_RULE_FILES_UNCHANGED ")) {
+      const root = rest.slice("REPO_RULE_FILES_UNCHANGED ".length);
+      if (root.length > 0) unchangedRuleFileRoots.add(root);
       continue;
     }
 
@@ -1090,6 +1099,7 @@ function parseProtocolOutput(
     finishedJobDirs,
     overflowPaths,
     unchangedFileRoots,
+    unchangedRuleFileRoots,
     fileFingerprints,
   };
 }
@@ -1120,6 +1130,15 @@ export async function discoverWorkspace(
     readonly extraPaths?: readonly string[];
     readonly existingRoots?: readonly string[];
     readonly knownFingerprints?: Readonly<Record<string, string>>;
+    readonly knownRuleProbes?: Readonly<
+      Record<
+        string,
+        {
+          readonly specs: readonly RepositoryInstructionSpec[];
+          readonly fingerprint: string;
+        }
+      >
+    >;
     readonly pendingJobs?: readonly {
       readonly outputDirectory: string;
       readonly pid?: number;
@@ -1137,6 +1156,15 @@ export async function discoverWorkspace(
   const knownFingerprintEntries = Object.entries(knownFingerprints).filter(
     ([root, fp]) => root.length > 0 && fp.length > 0,
   );
+  const knownRuleProbeEntries = Object.entries(options.knownRuleProbes ?? {})
+    .map(([root, probe]) => ({
+      root,
+      specs: normalizeSpecs(probe.specs),
+      fingerprint: probe.fingerprint,
+    }))
+    .filter(
+      (entry) => entry.root.length > 0 && entry.specs.length > 0 && entry.fingerprint.length > 0,
+    );
   const pendingJobs = options.pendingJobs ?? [];
 
   const boundary = createBoundary();
@@ -1166,6 +1194,26 @@ export async function discoverWorkspace(
             ([root, fp]) => `    ${shellQuote(root)}) _known_fp=${shellQuote(fp)} ;;`,
           ),
           `    *) _known_fp="" ;;`,
+          `  esac`,
+          `}`,
+        ]
+      : [];
+
+  const knownRuleProbeLines =
+    knownRuleProbeEntries.length > 0
+      ? [
+          `probe_known_rule_files() {`,
+          `  case "$1" in`,
+          ...knownRuleProbeEntries.flatMap((entry) => [
+            `    ${shellQuote(entry.root)})`,
+            `      _PROBE_FP=""`,
+            `      _PROBE_BYTES=0`,
+            probeSpecsForRepoShell("$_repo_real", entry.specs, "$_repo_git_fallback"),
+            `      if [ "\${_PROBE_FP:-empty}" = ${shellQuote(entry.fingerprint)} ]; then`,
+            `        printf '%s REPO_RULE_FILES_UNCHANGED %s\\n' "$B" "$_r_out"`,
+            `      fi`,
+            `      ;;`,
+          ]),
           `  esac`,
           `}`,
         ]
@@ -1235,6 +1283,7 @@ export async function discoverWorkspace(
   const script = [
     shellHelpers(boundary, maxFileBytes, maxTotalBytes),
     ...knownFpLines,
+    ...knownRuleProbeLines,
     `WS=$(canon_path ${shellQuote(workspacePath)} 2>/dev/null || printf '%s' ${shellQuote(workspacePath)})`,
     `printf '%s WORKSPACE %s\\n' "$B" "$WS"`,
     `if [ -n "\${HOME:-}" ] && [ -d "$HOME" ]; then _hr=$(canon_path "$HOME" 2>/dev/null || printf '%s' "$HOME"); printf '%s HOME %s\\n' "$B" "$_hr"; fi`,
@@ -1265,6 +1314,7 @@ export async function discoverWorkspace(
     `    REPO_COUNT=$((REPO_COUNT + 1))`,
     `    emit_repo_meta "$_repo_real"`,
     ...repoFilesBlock,
+    ...(knownRuleProbeEntries.length > 0 ? [`    probe_known_rule_files "$_r_out"`] : []),
     `  done <<${candDelimiter}`,
     `$_cand_list`,
     `${candDelimiter}`,
@@ -1316,6 +1366,7 @@ export async function discoverWorkspace(
     finishedJobDirs: parsed.finishedJobDirs,
     overflowPaths: parsed.overflowPaths,
     unchangedFileRoots: parsed.unchangedFileRoots,
+    unchangedRuleFileRoots: parsed.unchangedRuleFileRoots,
     fileFingerprints,
   };
 }
@@ -1379,23 +1430,56 @@ export async function readRepositorySpecFiles(
   sandbox: RepositorySandbox,
   repoRoot: string,
   specs: readonly RepositoryInstructionSpec[],
-  options: ReadRepositoryFileOptions & { readonly maxTotalBytes?: number } = {},
+  options: ReadRepositoryFileOptions & {
+    readonly maxTotalBytes?: number;
+    readonly sparse?: boolean;
+  } = {},
 ): Promise<{
   readonly files: readonly RepositoryInstructionFile[];
   readonly overflowPaths: readonly string[];
+  readonly fingerprint?: string;
 }> {
   const normalized = normalizeSpecs(specs);
-  if (normalized.length === 0) return { files: [], overflowPaths: [] };
+  if (normalized.length === 0) return { files: [], overflowPaths: [], fingerprint: "empty" };
   const maxFileBytes = validateMaxFileBytes(options.maxFileBytes);
   const maxTotalBytes = validateMaxTotalBytes(options.maxTotalBytes);
   const boundary = createBoundary();
   const resolvedRoot = sandbox.resolvePath(repoRoot);
 
+  const allowGitLines =
+    options.sparse === true
+      ? [`_rule_git_fallback=1`]
+      : [
+          `_rule_git_fallback=0`,
+          `_has_wt_entry=0`,
+          `if [ "$_repo_real" = "/" ]; then _rpfx=""; else _rpfx="$_repo_real"; fi`,
+          `for _e in "$_rpfx"/* "$_rpfx"/.[!.]* "$_rpfx"/..?*; do`,
+          `  [ -e "$_e" ] || [ -L "$_e" ] || continue`,
+          `  [ "\${_e##*/}" = ".git" ] && continue`,
+          `  _has_wt_entry=1`,
+          `  break`,
+          `done`,
+          `if [ "$_has_wt_entry" = "0" ]; then _rule_git_fallback=1; fi`,
+        ];
+
   const script = [
     shellHelpers(boundary, maxFileBytes, maxTotalBytes),
     `_repo_real=$(canon_path ${shellQuote(resolvedRoot)} 2>/dev/null || true)`,
     `[ -n "$_repo_real" ] || exit 0`,
-    emitSpecsForRepoShell("$_repo_real", '"repo:$_repo_real"', normalized),
+    `_r_out=$(printf '%s' "$_repo_real" | tr -d '\\r\\n' | head -c "$MAX_META")`,
+    ...allowGitLines,
+    `_REPO_FP=""`,
+    `_REPO_FP_OK=1`,
+    emitSpecsForRepoShell(
+      "$_repo_real",
+      '"repo:$_repo_real"',
+      normalized,
+      undefined,
+      "$_rule_git_fallback",
+    ),
+    `if [ "$_REPO_FP_OK" = "1" ]; then`,
+    `  printf '%s REPO_FINGERPRINT %s\\t%s\\n' "$B" "$_r_out" "\${_REPO_FP:-empty}"`,
+    `fi`,
     `exit 0`,
   ].join("\n");
 
@@ -1408,9 +1492,11 @@ export async function readRepositorySpecFiles(
     throw new Error(`Could not read repository instruction files: ${commandFailureDetail(result)}`);
   }
   const parsed = parseProtocolOutput(result.stdout, boundary, maxFileBytes);
+  const fingerprint = Object.values(parsed.fileFingerprints)[0];
   return {
     files: parsed.files.map((entry) => entry.file),
     overflowPaths: parsed.overflowPaths,
+    ...(fingerprint !== undefined && { fingerprint }),
   };
 }
 

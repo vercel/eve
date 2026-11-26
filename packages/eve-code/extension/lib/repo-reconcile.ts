@@ -797,11 +797,13 @@ async function readMatchingRuleFiles(
 ): Promise<{
   readonly files: readonly RepositoryInstructionFile[];
   readonly overflowPaths: readonly string[];
+  readonly fingerprint?: string;
 }> {
-  if (specs.length === 0) return { files: [], overflowPaths: [] };
+  if (specs.length === 0) return { files: [], overflowPaths: [], fingerprint: "empty" };
   const loaded = await readRepositorySpecFiles(sandbox, repo.root, specs, {
     maxFileBytes: resolved.maxFileBytes,
     maxTotalBytes: resolved.maxTotalBytes,
+    sparse: repo.sparse,
   });
   const defaultPaths = new Set(repo.instructions.map((file) => file.relativePath));
   const seen = new Set<string>();
@@ -811,7 +813,15 @@ async function readMatchingRuleFiles(
     seen.add(file.relativePath);
     unique.push(file);
   }
-  return { files: unique, overflowPaths: loaded.overflowPaths };
+  const cacheableFingerprint =
+    loaded.overflowPaths.length === 0 && !unique.some((file) => file.source === "unavailable")
+      ? loaded.fingerprint
+      : undefined;
+  return {
+    files: unique,
+    overflowPaths: loaded.overflowPaths,
+    ...(cacheableFingerprint !== undefined && { fingerprint: cacheableFingerprint }),
+  };
 }
 
 function errorMessage(error: unknown): string {
@@ -850,12 +860,14 @@ export async function onboardRepository(
   const ruleFileSpecs = collectMatchingRuleFileSpecs(repo, resolved);
   let ruleFiles: readonly RepositoryInstructionFile[] = [];
   let ruleOverflowPaths: readonly string[] = [];
+  let ruleFileFingerprint: string | undefined;
   let ruleFilesLoaded = ruleFileSpecs.length === 0;
   if (ruleFileSpecs.length > 0) {
     try {
       const matched = await readMatchingRuleFiles(sandbox, repo, ruleFileSpecs, resolved);
       ruleFiles = matched.files;
       ruleOverflowPaths = matched.overflowPaths;
+      ruleFileFingerprint = matched.fingerprint;
       ruleFilesLoaded = true;
     } catch {}
   }
@@ -940,6 +952,7 @@ export async function onboardRepository(
       ...(fileFingerprint !== undefined && { fileFingerprint }),
       ruleFiles,
       ...(ruleFilesLoaded && { ruleFileSpecs }),
+      ...(ruleFilesLoaded && ruleFileFingerprint !== undefined && { ruleFileFingerprint }),
       ...(ruleOverflowPaths.length > 0 && { ruleOverflowPaths }),
       ruleInstructions,
       ruleSkills,
@@ -963,12 +976,28 @@ export async function reconcileWorkspace(
   const rawWorkspaceRoot = sandbox.resolvePath(".");
   const snapshot = repoState.get();
   const knownFingerprints: Record<string, string> = {};
+  const knownRuleProbes: Record<
+    string,
+    { readonly specs: readonly RepositoryInstructionSpec[]; readonly fingerprint: string }
+  > = {};
   for (const [root, recorded] of Object.entries(snapshot.byRoot)) {
     if (
       recorded.fileFingerprint !== undefined &&
       !recorded.instructions.some((file) => file.source === "unavailable")
     ) {
       knownFingerprints[root] = recorded.fileFingerprint;
+    }
+    if (
+      recorded.ruleFileSpecs !== undefined &&
+      recorded.ruleFileSpecs.length > 0 &&
+      recorded.ruleFileFingerprint !== undefined &&
+      (recorded.ruleOverflowPaths?.length ?? 0) === 0 &&
+      !recorded.ruleFiles.some((file) => file.source === "unavailable")
+    ) {
+      knownRuleProbes[root] = {
+        specs: recorded.ruleFileSpecs,
+        fingerprint: recorded.ruleFileFingerprint,
+      };
     }
   }
 
@@ -983,6 +1012,7 @@ export async function reconcileWorkspace(
       extraPaths: options.extraPaths,
       existingRoots: Object.keys(snapshot.byRoot),
       knownFingerprints,
+      knownRuleProbes,
       pendingJobs: options.pendingJobs,
     });
   } catch {
@@ -1046,18 +1076,22 @@ export async function reconcileWorkspace(
       matchingRuleFileSpecs,
     );
     const unchangedDefaultInstructions = filesUnchanged;
+    const ruleFilesUnchanged = discovery.unchangedRuleFileRoots.has(repo.root);
     let ruleFiles: readonly RepositoryInstructionFile[] =
       matchingRuleFileSpecs.length > 0 ? existing.ruleFiles : [];
     let ruleOverflowPaths: readonly string[] =
       matchingRuleFileSpecs.length > 0 ? (existing.ruleOverflowPaths ?? []) : [];
     let nextRuleFileSpecs: readonly RepositoryInstructionSpec[] | undefined =
       matchingRuleFileSpecs.length === 0 ? matchingRuleFileSpecs : existing.ruleFileSpecs;
+    let nextRuleFileFingerprint: string | undefined =
+      matchingRuleFileSpecs.length === 0 ? undefined : existing.ruleFileFingerprint;
 
     if (matchingRuleFileSpecs.length > 0) {
       const shouldRefreshRuleFiles =
         repoMetaChanged ||
         !unchangedDefaultInstructions ||
         ruleFileSpecsChanged ||
+        !ruleFilesUnchanged ||
         existing.ruleFileSpecs === undefined ||
         (existing.ruleOverflowPaths?.length ?? 0) > 0 ||
         existing.ruleFiles.some((file) => file.source === "unavailable");
@@ -1072,8 +1106,10 @@ export async function reconcileWorkspace(
           ruleFiles = matched.files;
           ruleOverflowPaths = matched.overflowPaths;
           nextRuleFileSpecs = matchingRuleFileSpecs;
+          nextRuleFileFingerprint = matched.fingerprint;
         } catch {
           nextRuleFileSpecs = undefined;
+          nextRuleFileFingerprint = undefined;
         }
       }
       extraOverflowPaths.push(...ruleOverflowPaths);
@@ -1083,6 +1119,7 @@ export async function reconcileWorkspace(
       repoMetaChanged ||
       existing.fileFingerprint !== nextFileFingerprint ||
       !areInstructionSpecsEqual(existing.ruleFileSpecs, nextRuleFileSpecs) ||
+      existing.ruleFileFingerprint !== nextRuleFileFingerprint ||
       (!filesUnchanged && JSON.stringify(existing.instructions) !== JSON.stringify(instructions)) ||
       JSON.stringify(existing.ruleFiles) !== JSON.stringify(ruleFiles) ||
       JSON.stringify(existing.ruleOverflowPaths ?? []) !== JSON.stringify(ruleOverflowPaths);
@@ -1095,6 +1132,7 @@ export async function reconcileWorkspace(
       const {
         fileFingerprint: _prevFileFingerprint,
         ruleFileSpecs: _prevRuleFileSpecs,
+        ruleFileFingerprint: _prevRuleFileFingerprint,
         ruleOverflowPaths: _prevRuleOverflowPaths,
         ...restExisting
       } = existing;
@@ -1109,6 +1147,9 @@ export async function reconcileWorkspace(
         ...(nextFileFingerprint !== undefined && { fileFingerprint: nextFileFingerprint }),
         ruleFiles,
         ...(nextRuleFileSpecs !== undefined && { ruleFileSpecs: nextRuleFileSpecs }),
+        ...(nextRuleFileFingerprint !== undefined && {
+          ruleFileFingerprint: nextRuleFileFingerprint,
+        }),
         ...(ruleOverflowPaths.length > 0 && { ruleOverflowPaths }),
       };
       upsertedRepos[repo.root] = nextRecorded;
@@ -1373,12 +1414,14 @@ export async function discoverWorkspaceReadOnly(
     const ruleFileSpecs = collectMatchingRuleFileSpecs(repo, resolved);
     let ruleFiles: readonly RepositoryInstructionFile[] = [];
     let ruleOverflowPaths: readonly string[] = [];
+    let ruleFileFingerprint: string | undefined;
     let ruleFilesLoaded = ruleFileSpecs.length === 0;
     if (ruleFileSpecs.length > 0) {
       try {
         const matched = await readMatchingRuleFiles(sandbox, repo, ruleFileSpecs, resolved);
         ruleFiles = matched.files;
         ruleOverflowPaths = matched.overflowPaths;
+        ruleFileFingerprint = matched.fingerprint;
         ruleFilesLoaded = true;
         extraOverflow.push(...matched.overflowPaths);
       } catch {}
@@ -1395,6 +1438,7 @@ export async function discoverWorkspaceReadOnly(
       ...(fileFingerprint !== undefined && { fileFingerprint }),
       ruleFiles,
       ...(ruleFilesLoaded && { ruleFileSpecs }),
+      ...(ruleFilesLoaded && ruleFileFingerprint !== undefined && { ruleFileFingerprint }),
       ...(ruleOverflowPaths.length > 0 && { ruleOverflowPaths }),
       ruleInstructions: [],
       ruleSkills: {},

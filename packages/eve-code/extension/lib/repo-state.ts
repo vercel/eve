@@ -36,6 +36,7 @@ export interface RecordedRepository {
   readonly fileFingerprint?: string;
   readonly ruleFiles: readonly RepositoryInstructionFile[];
   readonly ruleFileSpecs?: readonly RepositoryInstructionSpec[];
+  readonly ruleFileFingerprint?: string;
   readonly ruleOverflowPaths?: readonly string[];
   readonly ruleInstructions: readonly string[];
   readonly ruleSkills: Readonly<Record<string, SerializedSkillDefinition>>;

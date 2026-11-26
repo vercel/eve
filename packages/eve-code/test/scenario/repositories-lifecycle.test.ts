@@ -1136,7 +1136,7 @@ test("skips redundant readMatchingRuleFiles on unchanged turns and skips reconci
       repositories: {
         rules: [
           {
-            files: ["CONTRIBUTING.md"],
+            files: ["CONTRIBUTING.md", "EXTRA.md"],
           },
         ],
       },
@@ -1190,11 +1190,28 @@ test("skips redundant readMatchingRuleFiles on unchanged turns and skips reconci
       "unchanged turn_2 with rule.files must make only 1 sandbox call and skip readMatchingRuleFiles",
     );
 
+    await writeFile(join(appDir, "CONTRIBUTING.md"), "Updated contributing rules.\n");
+    await writeFile(join(appDir, "EXTRA.md"), "Newly added rule file.\n");
+    await session.startTurn("turn_3");
+    const call3 = await session.nextModelCall();
+    const turn3Combined = call3.newUserInstructions.join("\n");
+    assert.match(turn3Combined, /Updated contributing rules\./u);
+    assert.match(turn3Combined, /Newly added rule file\./u);
+
+    const commandsBeforeTurn4 = sandbox.commands.length;
+    await session.startTurn("turn_4");
+    assert.equal(
+      sandbox.commands.length - commandsBeforeTurn4,
+      1,
+      "unchanged turn_4 after rule.files update must skip readMatchingRuleFiles again",
+    );
+
     session.compactHistory();
     const afterCompaction = await session.nextModelCall();
     const combined = afterCompaction.newUserInstructions.join("\n");
     assert.match(combined, /App root rules\./u);
-    assert.match(combined, /Contributing rules\./u);
+    assert.match(combined, /Updated contributing rules\./u);
+    assert.match(combined, /Newly added rule file\./u);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
