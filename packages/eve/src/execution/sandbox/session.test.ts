@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { withRuntimeSandboxLifecycle } from "#context/build-callback-context.js";
+import { bindSandboxAbortSignal } from "#execution/sandbox/abort-bound-session.js";
+import {
+  runInternalCommand,
+  spawnBoundedCommand,
+  withConnectionFastPaths,
+} from "#execution/sandbox/internal-shell.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
 import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import type { SandboxConnection } from "#sandbox/provider.js";
@@ -169,5 +176,52 @@ describe("createConnectionSession", () => {
   ])("rejects the line range %j", async (range, message) => {
     const session = createConnectionSession(memoryConnection().connection);
     await expect(session.readTextFile({ path: "f.txt", ...range })).rejects.toThrow(message);
+  });
+
+  it("forwards connection fast paths across runtime lifecycle and abort wrappers", async () => {
+    const { connection } = memoryConnection();
+    const runFast = vi.fn(async () => ({ exitCode: 0, stderr: "", stdout: "fast\n" }));
+    const runLogin = vi.fn(async () => ({ exitCode: 0, stderr: "", stdout: "login\n" }));
+    const spawnBounded = vi.fn(async () => syntheticProcess({ stdout: "bounded\n" }));
+    withConnectionFastPaths(connection, { runFast, runLogin, spawnBounded });
+    const controller = new AbortController();
+    const session = bindSandboxAbortSignal(
+      withRuntimeSandboxLifecycle(
+        createConnectionSession(connection),
+        async () => {},
+        async () => {},
+      ),
+      controller.signal,
+    );
+
+    await expect(session.run({ command: "echo login", workingDirectory: "src" })).resolves.toEqual({
+      exitCode: 0,
+      stderr: "",
+      stdout: "login\n",
+    });
+    await expect(
+      runInternalCommand(session, { command: "test -e a", workingDirectory: "src" }),
+    ).resolves.toEqual({ exitCode: 0, stderr: "", stdout: "fast\n" });
+    const bounded = await spawnBoundedCommand(session, { command: "ls", workingDirectory: "src" });
+    await expect(bounded.wait()).resolves.toEqual({ exitCode: 0 });
+    expect(connection.spawn).not.toHaveBeenCalled();
+    expect(runLogin).toHaveBeenCalledWith({
+      command: "echo login",
+      env: {},
+      signal: expect.any(AbortSignal),
+      workingDirectory: "/workspace/src",
+    });
+    expect(runFast).toHaveBeenCalledWith({
+      command: "test -e a",
+      env: {},
+      signal: expect.any(AbortSignal),
+      workingDirectory: "/workspace/src",
+    });
+    expect(spawnBounded).toHaveBeenCalledWith({
+      command: "ls",
+      env: {},
+      signal: expect.any(AbortSignal),
+      workingDirectory: "/workspace/src",
+    });
   });
 });
