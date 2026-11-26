@@ -4,6 +4,8 @@ import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema, prepareJsonSchema } from "#tools/schema.js";
 
+import { prepareFilePathAlias } from "./file-path-alias.js";
+
 /** Input to the provided `write_file` tool: the file path and its full new content. */
 export interface WriteFileToolInput {
   content: string;
@@ -92,4 +94,3 @@ function isWriteFileResult(output: unknown): output is WriteFileToolOutput {
 
 export default writeFile;
 import { frameworkTool } from "./framework-tool.js";
-import { prepareFilePathAlias } from "./file-path-alias.js";

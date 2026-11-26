@@ -26,11 +26,35 @@ describe("read_file and write_file path alias", () => {
       path: "b.ts",
     });
     expect("issues" in read && read.issues !== undefined).toBe(true);
+    const readInvalid = await READ_FILE_INPUT_SCHEMA["~standard"].validate({
+      filePath: null,
+      path: "b.ts",
+    });
+    expect("issues" in readInvalid && readInvalid.issues !== undefined).toBe(true);
     const write = await WRITE_FILE_INPUT_SCHEMA["~standard"].validate({
       content: "x",
       filePath: "a.ts",
       path: "b.ts",
     });
     expect("issues" in write && write.issues !== undefined).toBe(true);
+    const writeInvalid = await WRITE_FILE_INPUT_SCHEMA["~standard"].validate({
+      content: "x",
+      filePath: 123,
+      path: "b.ts",
+    });
+    expect("issues" in writeInvalid && writeInvalid.issues !== undefined).toBe(true);
+  });
+
+  it("omits path from the advertised JSON schemas", () => {
+    const readSchema = READ_FILE_INPUT_SCHEMA["~standard"].jsonSchema.input({
+      target: "draft-2020-12",
+    });
+    const writeSchema = WRITE_FILE_INPUT_SCHEMA["~standard"].jsonSchema.input({
+      target: "draft-2020-12",
+    });
+    expect(readSchema.properties).toHaveProperty("filePath");
+    expect(readSchema.properties).not.toHaveProperty("path");
+    expect(writeSchema.properties).toHaveProperty("filePath");
+    expect(writeSchema.properties).not.toHaveProperty("path");
   });
 });

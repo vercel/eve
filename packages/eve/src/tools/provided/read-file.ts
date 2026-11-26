@@ -9,6 +9,8 @@ import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import { toolOutput, toolOutputPart } from "#tools/model-output.js";
 import { defineJsonSchema, prepareJsonSchema } from "#tools/schema.js";
 
+import { prepareFilePathAlias } from "./file-path-alias.js";
+
 /** Input to the provided `read_file` tool: the file to read and an optional line range. */
 export interface ReadFileToolInput {
   filePath: string;
@@ -169,4 +171,3 @@ function formatReadFileModelOutput(output: ReadFileToolOutput): string {
 
 export default readFile;
 import { frameworkTool } from "./framework-tool.js";
-import { prepareFilePathAlias } from "./file-path-alias.js";

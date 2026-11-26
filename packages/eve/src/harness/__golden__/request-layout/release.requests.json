@@ -2,7 +2,7 @@
   {
     "prompt": [
       {
-        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nAvailable skills\nLoad the minimal matching skills with eve__skill({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.\nFiles live under `$HOME/.agents/skills/<skill>/` (fallback `skills/<skill>/` when `$HOME` is unavailable); resolve sibling references relative to that `SKILL.md`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.",
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nAvailable skills\nLoad the minimal matching skills with eve__skill({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.\nFiles live under `$HOME/.agents/skills/<skill>/` (fallback `skills/<skill>/` when `$HOME` is unavailable); resolve sibling references relative to that `SKILL.md`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills; omitted static skills stay available.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.",
         "role": "system"
       },
       {
@@ -50,7 +50,7 @@
   {
     "prompt": [
       {
-        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nAvailable skills\nLoad the minimal matching skills with eve__skill({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.\nFiles live under `$HOME/.agents/skills/<skill>/` (fallback `skills/<skill>/` when `$HOME` is unavailable); resolve sibling references relative to that `SKILL.md`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.",
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nAvailable skills\nLoad the minimal matching skills with eve__skill({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.\nFiles live under `$HOME/.agents/skills/<skill>/` (fallback `skills/<skill>/` when `$HOME` is unavailable); resolve sibling references relative to that `SKILL.md`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills; omitted static skills stay available.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.",
         "role": "system"
       },
       {
@@ -125,7 +125,7 @@
   {
     "prompt": [
       {
-        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nAvailable skills\nLoad the minimal matching skills with eve__skill({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.\nFiles live under `$HOME/.agents/skills/<skill>/` (fallback `skills/<skill>/` when `$HOME` is unavailable); resolve sibling references relative to that `SKILL.md`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.",
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nAvailable skills\nLoad the minimal matching skills with eve__skill({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.\nFiles live under `$HOME/.agents/skills/<skill>/` (fallback `skills/<skill>/` when `$HOME` is unavailable); resolve sibling references relative to that `SKILL.md`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills; omitted static skills stay available.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.",
         "role": "system"
       },
       {
@@ -218,7 +218,7 @@
   {
     "prompt": [
       {
-        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nAvailable skills\nLoad the minimal matching skills with eve__skill({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.\nFiles live under `$HOME/.agents/skills/<skill>/` (fallback `skills/<skill>/` when `$HOME` is unavailable); resolve sibling references relative to that `SKILL.md`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.",
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nAvailable skills\nLoad the minimal matching skills with eve__skill({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.\nFiles live under `$HOME/.agents/skills/<skill>/` (fallback `skills/<skill>/` when `$HOME` is unavailable); resolve sibling references relative to that `SKILL.md`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills; omitted static skills stay available.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.",
         "role": "system"
       },
       {
@@ -354,7 +354,7 @@
   {
     "prompt": [
       {
-        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nAvailable skills\nLoad the minimal matching skills with eve__skill({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.\nFiles live under `$HOME/.agents/skills/<skill>/` (fallback `skills/<skill>/` when `$HOME` is unavailable); resolve sibling references relative to that `SKILL.md`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.",
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nAvailable skills\nLoad the minimal matching skills with eve__skill({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.\nFiles live under `$HOME/.agents/skills/<skill>/` (fallback `skills/<skill>/` when `$HOME` is unavailable); resolve sibling references relative to that `SKILL.md`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills; omitted static skills stay available.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.",
         "role": "system"
       },
       {
@@ -526,7 +526,7 @@
   {
     "prompt": [
       {
-        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nAvailable skills\nLoad the minimal matching skills with eve__skill({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.\nFiles live under `$HOME/.agents/skills/<skill>/` (fallback `skills/<skill>/` when `$HOME` is unavailable); resolve sibling references relative to that `SKILL.md`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.",
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nAvailable skills\nLoad the minimal matching skills with eve__skill({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.\nFiles live under `$HOME/.agents/skills/<skill>/` (fallback `skills/<skill>/` when `$HOME` is unavailable); resolve sibling references relative to that `SKILL.md`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills; omitted static skills stay available.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.",
         "role": "system"
       },
       {

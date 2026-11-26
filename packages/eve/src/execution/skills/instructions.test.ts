@@ -46,6 +46,7 @@ describe("formatAvailableSkillsSection", () => {
     expect(result).toContain("`$HOME/.agents/skills/<skill>/`");
     expect(result).toContain("`skills/<skill>/` when `$HOME` is unavailable");
     expect(result).toContain("resolve sibling references relative to that `SKILL.md`");
+    expect(result).toContain("omitted static skills stay available");
     expect(result).toContain(
       "- test-skill: A test skill (path: $HOME/.agents/skills/test-skill/SKILL.md)",
     );

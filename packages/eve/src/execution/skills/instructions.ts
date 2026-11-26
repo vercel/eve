@@ -26,7 +26,7 @@ export function formatAvailableSkillsSection(
   const lines = [
     "Available skills",
     `Load the minimal matching skills with ${SKILL_TOOL_NAME}({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.`,
-    `Files live under \`${MODEL_SKILL_ROOT}/<skill>/\` (fallback \`skills/<skill>/\` when \`$HOME\` is unavailable); resolve sibling references relative to that \`SKILL.md\`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills.`,
+    `Files live under \`${MODEL_SKILL_ROOT}/<skill>/\` (fallback \`skills/<skill>/\` when \`$HOME\` is unavailable); resolve sibling references relative to that \`SKILL.md\`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills; omitted static skills stay available.`,
     ...skills.map(formatAvailableSkillLine),
   ];
 
