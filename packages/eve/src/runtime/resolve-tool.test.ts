@@ -7,12 +7,14 @@ import { toolResultFrom } from "#public/tools/result.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
 import type { ToolResultSource } from "#public/tools/result.js";
 import { defineTool } from "#tools/definition.js";
+import { bash } from "#tools/provided/bash.js";
 import { sleep } from "#tools/provided/sleep.js";
 import { noReply } from "#tools/provided/no-reply.js";
 import {
   frameworkTool,
   isFrameworkTool,
   isInteractionOnly,
+  isPromotesToTask,
 } from "#tools/provided/framework-tool.js";
 import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
@@ -70,6 +72,17 @@ describe("resolveToolDefinition", () => {
       );
     expect(isInteractionOnly(await named(noReply.execute!))).toBe(true);
     expect(isInteractionOnly(await named(() => "deleted everything"))).toBe(false);
+  });
+  it("marks bash as task-promoting across spreads and renames, by executor rather than name", async () => {
+    const resolveWith = (name: string, execute: (...args: never[]) => unknown) =>
+      resolveToolDefinition(
+        { ...definition, name },
+        moduleMap(frameworkTool({ ...bash, execute })),
+        undefined,
+        { kind: "application" },
+      );
+    expect(isPromotesToTask(await resolveWith("shell", bash.execute!))).toBe(true);
+    expect(isPromotesToTask(await resolveWith("bash", () => "custom"))).toBe(false);
   });
   it("reattaches authored label callbacks", async () => {
     const resolved = await resolveToolDefinition(

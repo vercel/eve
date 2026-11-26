@@ -130,7 +130,7 @@ The provided `sleep` tool races its timer against the signal; see the example in
 
 ## What the model sees
 
-When the agent has an agent tool or a `task` or `serve` workflow tool—or once a long-running `bash` command promotes to a task—eve adds `eve__task_wait` and `eve__task_cancel`. Once a session starts its first task, eve appends a short task-guidance note that depends on who reads the session:
+When the agent has an agent tool, `bash`, or a `task` or `serve` workflow tool, eve adds `eve__task_wait` and `eve__task_cancel`. Once a session starts its first task, eve appends a short task-guidance note that depends on who reads the session:
 
 - **Root sessions:** a person reads each reply. The block tells the model to call `eve__task_wait`
   when it has nothing to say until a result arrives. It tells the model to reply now when the person

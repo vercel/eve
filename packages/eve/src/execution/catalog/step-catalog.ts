@@ -207,7 +207,9 @@ export function sessionOffersTasks(input: {
   return (
     (compiledBundleOf(input.ctx)?.subagentRegistry.dynamicResolvers.length ?? 0) > 0 ||
     input.tools.some(
-      (definition) => isVisible(definition, input.session) && startsTasks(definition),
+      (definition) =>
+        isVisible(definition, input.session) &&
+        (startsTasks(definition) || definition.promotesToTask === true),
     )
   );
 }

@@ -10,7 +10,7 @@ import type { ResolvedDynamicDefinition } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
 import type { InternalToolDefinition, ToolDefinition } from "#tools/definition.js";
 import { isBrandedToolEntry, type DynamicToolEntry } from "#tools/dynamic.js";
-import { isFrameworkTool } from "#tools/provided/framework-tool.js";
+import { isFrameworkTool, isPromotesToTask } from "#tools/provided/framework-tool.js";
 import {
   serializeInputSchema,
   serializeOutputSchema,
@@ -228,6 +228,7 @@ function liveTool(
   }
   return {
     ...common,
+    ...(isPromotesToTask(entry.execute) && { promotesToTask: true }),
     execute: createToolExecuteWithAuth({
       execute: (input, context) => entry.execute(input as never, context),
       scope: name,

@@ -11,6 +11,8 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { agent } from "#public/tools/agent.js";
+import { bash } from "#tools/provided/bash.js";
+import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import { nativeCatalog } from "#internal/testing/catalog-fixtures.js";
 
 const tool = (description = "Search issues.") =>
@@ -201,5 +203,21 @@ describe("dynamic tools", () => {
     expect(logs.records.map(({ message }) => message)).toContain(
       'Tool "search" from "tool::second" collides with the one from "tool::first"; the first keeps it.',
     );
+  });
+
+  it("offers task control tools when a dynamic tool returns bash", async () => {
+    const { ctx } = definitionSession({
+      tools: [{ evaluate: () => ({ shell: defineTool({ ...bash }) }), slug: "shell" }],
+    });
+    await beforeModelCall(ctx);
+    const catalog = await nativeCatalog({
+      agentTools: new Map(),
+      ctx,
+      endsTurn: false,
+      session: { rootSessionId: "root-session" },
+    });
+
+    expect(catalog.advertised.has(TASK_WAIT_TOOL_NAME)).toBe(true);
+    expect(catalog.advertised.has(TASK_CANCEL_TOOL_NAME)).toBe(true);
   });
 });
