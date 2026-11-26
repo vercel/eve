@@ -1,13 +1,15 @@
 # eve package artifacts
 
-The `eve-pkg` Vercel project builds and publishes eve tarballs to private Vercel Blob using deployment OIDC. Its production domain, `pkg.eve.dev`, serves both `main` and same-repository pull-request packages.
+The `eve-pkg` Vercel project builds and publishes tarballs for every public package in `packages/` (each one `changeset publish` releases to npm) to private Vercel Blob using deployment OIDC. Its production domain, `pkg.eve.dev`, serves both `main` and same-repository pull-request packages.
+
+Each package is named like its `npm pack` tarball, without the version: `eve` is `eve.tgz`, `@eve/recall` is `eve-recall.tgz`, and `@vercel/agent-runs` is `vercel-agent-runs.tgz`.
 
 ```text
-/main/eve.tgz
+/main/<package>.tgz
 /main/latest.json
-/pr/<number>/eve.tgz
+/pr/<number>/<package>.tgz
 /pr/<number>/latest.json
-/<full-sha>/eve.tgz
+/<full-sha>/<package>.tgz
 ```
 
 Initialize an agent from the current `main` build with:
@@ -22,20 +24,26 @@ A same-repository pull-request build is available after its **Vercel – eve-pkg
 npm exec --yes --package=https://pkg.eve.dev/pr/123/eve.tgz -- eve init my-agent
 ```
 
-Both moving routes redirect to an immutable `/<sha>/eve.tgz` artifact. The packaged CLI also stamps that immutable URL into generated projects.
+Install an extension next to the eve build from the same ref so its `eve` peer dependency resolves to that build:
+
+```bash
+npm install https://pkg.eve.dev/pr/123/eve.tgz https://pkg.eve.dev/pr/123/eve-recall.tgz
+```
+
+Moving routes redirect to immutable `/<sha>/<package>.tgz` artifacts. The packaged CLI also stamps the immutable eve URL into generated projects. `latest.json` lists every package of a ref under `packages`, and keeps eve's `version`, `tarball`, and `sha256` at the top level.
 
 ## Publishing
 
-Vercel deploys `main` to Production and same-repository pull requests to Preview. The build derives the source SHA and PR number from Vercel system environment variables, packages eve, verifies that the source still represents the current branch or pull-request head, and writes the following objects:
+Vercel deploys `main` to Production and same-repository pull requests to Preview. The build derives the source SHA and PR number from Vercel system environment variables, builds and packs every package in `packages/` whose `package.json` is not `private`, verifies that the source still represents the current branch or pull-request head, and writes the following objects:
 
 ```text
-packages/<sha>/eve.tgz
+packages/<sha>/<package>.tgz
 packages/<sha>/manifest.json
 packages/refs/main.json
 packages/refs/pr/<number>.json
 ```
 
-SHA objects are immutable. Main and PR pointer objects are mutable and short-cached.
+SHA objects are immutable. Main and PR pointer objects are mutable, short-cached, and updated once per build, so all packages of a ref always come from the same commit.
 
 The build requires `VERCEL_OIDC_TOKEN` and `BLOB_STORE_ID` and passes them explicitly to the Blob SDK. It does not accept or use a static Blob write token.
 

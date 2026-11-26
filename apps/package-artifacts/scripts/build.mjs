@@ -1,66 +1,101 @@
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { BlobPreconditionFailedError, get, put } from "@vercel/blob";
+import { BlobNotFoundError, BlobPreconditionFailedError, get, head, put } from "@vercel/blob";
 
 import { resolveDeploymentTarget, vercelOidcCredentials } from "../lib/deployment-target.mjs";
 import {
   packageArtifactPath,
   packageDependencyUrl,
+  packageManifest,
   packageManifestPath,
   packagePointerPath,
-  preparePackageJson,
+  packageVersion,
+  publishablePackages,
 } from "../lib/package.mjs";
 import { packPackage } from "../lib/pack.mjs";
 import { assertCurrentPublicationTarget } from "../lib/publication-current.mjs";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(appRoot, "../..");
-const packageRoot = join(repoRoot, "packages/eve");
-const packageJsonPath = join(packageRoot, "package.json");
-const artifactDirectory = join(appRoot, ".artifacts");
+const packagesRoot = join(repoRoot, "packages");
+const evePackageJsonPath = join(packagesRoot, "eve", "package.json");
 const target = await resolveDeploymentTarget(process.env);
 
 if (target === undefined) {
   await writeLandingPage();
 } else {
-  await publishPackage(target);
+  await publishPackages(target);
 }
 
-async function publishPackage({ sourceSha, ref, origin }) {
+async function publishPackages({ sourceSha, ref, origin }) {
   const credentials = vercelOidcCredentials(process.env);
-  const originalPackageJson = await readFile(packageJsonPath, "utf8");
-  const preparedPackageJson = preparePackageJson(JSON.parse(originalPackageJson), sourceSha, "git");
-  const dependencyUrl = packageDependencyUrl(origin, sourceSha);
+  const packages = (await readPublishablePackages()).map((pkg) => ({
+    ...pkg,
+    version: packageVersion(pkg.version, sourceSha, "git"),
+    tarball: packageDependencyUrl(origin, sourceSha, pkg.slug),
+  }));
+  const eve = packages.find(({ name }) => name === "eve");
+  const originalEvePackageJson = await readFile(evePackageJsonPath, "utf8");
+  const env = { ...process.env, EVE_PACKAGE_DEPENDENCY_URL: eve.tarball };
 
   try {
-    await rm(artifactDirectory, { force: true, recursive: true });
-    await writeFile(packageJsonPath, `${JSON.stringify(preparedPackageJson, null, 2)}\n`);
-    const tarball = await packPackage(packageRoot, preparedPackageJson.version, {
-      ...process.env,
-      EVE_PACKAGE_DEPENDENCY_URL: dependencyUrl,
-    });
-    const sha256 = createHash("sha256").update(tarball).digest("hex");
-    const manifest = {
-      sourceSha,
-      version: preparedPackageJson.version,
-      tarball: dependencyUrl,
-      sha256,
-    };
+    await writeFile(
+      evePackageJsonPath,
+      `${JSON.stringify({ ...JSON.parse(originalEvePackageJson), version: eve.version }, null, 2)}\n`,
+    );
+    await run("pnpm", ["build"], env);
+
+    const artifacts = [];
+    for (const pkg of packages) {
+      const bytes = await packPackage(pkg.root, pkg.version, env);
+      artifacts.push({ ...pkg, bytes, sha256: createHash("sha256").update(bytes).digest("hex") });
+    }
+    const manifest = packageManifest(sourceSha, artifacts);
 
     await assertTargetIsCurrent(ref, sourceSha);
-    await putImmutableArtifact(packageArtifactPath(sourceSha), tarball, sha256, credentials);
+    for (const { slug, bytes, sha256 } of artifacts) {
+      await putImmutableArtifact(packageArtifactPath(sourceSha, slug), bytes, sha256, credentials);
+    }
     await putImmutableManifest(packageManifestPath(sourceSha), manifest, credentials);
     await updatePointer(packagePointerPath(ref), manifest, ref, sourceSha, credentials);
 
     await writeLandingPage();
     process.stdout.write(`${JSON.stringify(manifest)}\n`);
   } finally {
-    await writeFile(packageJsonPath, originalPackageJson);
-    await rm(artifactDirectory, { force: true, recursive: true });
+    await writeFile(evePackageJsonPath, originalEvePackageJson);
   }
+}
+
+async function readPublishablePackages() {
+  const entries = await readdir(packagesRoot, { withFileTypes: true });
+  const packageJsons = [];
+  for (const entry of entries.filter((entry) => entry.isDirectory())) {
+    const root = join(packagesRoot, entry.name);
+    try {
+      packageJsons.push({
+        ...JSON.parse(await readFile(join(root, "package.json"), "utf8")),
+        root,
+      });
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  return publishablePackages(packageJsons);
+}
+
+function run(command, args, env) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, { cwd: repoRoot, env, stdio: "inherit" });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) resolvePromise();
+      else reject(new Error(`${command} ${args.join(" ")} exited with code ${code}.`));
+    });
+  });
 }
 
 async function assertTargetIsCurrent(ref, sourceSha) {
@@ -74,13 +109,13 @@ async function assertTargetIsCurrent(ref, sourceSha) {
 
 async function updatePointer(pathname, manifest, ref, sourceSha, credentials) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const existing = await get(pathname, {
-      ...credentials,
-      access: "private",
-      useCache: false,
-    });
-    const etag = existing?.blob.etag;
-    await existing?.stream.cancel();
+    const etag = await head(pathname, credentials).then(
+      (blob) => blob.etag,
+      (error) => {
+        if (error instanceof BlobNotFoundError) return undefined;
+        throw error;
+      },
+    );
     await assertTargetIsCurrent(ref, sourceSha);
 
     try {
@@ -136,7 +171,7 @@ async function putImmutableManifest(pathname, value, credentials) {
       useCache: false,
     });
     if (published === null) throw new Error("Published package manifest could not be read.");
-    if (JSON.parse(await new Response(published.stream).text()).sha256 !== value.sha256) {
+    if ((await new Response(published.stream).text()) !== JSON.stringify(value)) {
       throw new Error(
         `Commit ${process.env.VERCEL_GIT_COMMIT_SHA} was already published with different package contents.`,
       );
