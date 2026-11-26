@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import type { WorkflowTaskToolDefinition } from "eve/tools";
 
 import type extensionType from "../../extension/extension.ts";
+import type * as slackType from "../../extension/lib/slack.ts";
 import type * as storageType from "../../extension/lib/storage/index.ts";
 import type * as vercelType from "../../extension/lib/storage/vercel-blob.ts";
 import type * as T from "../../extension/lib/types.ts";
@@ -31,13 +32,14 @@ const distTools = await imp<{
 }>("../../dist/tools/index.mjs");
 const distStorage = await imp<typeof storageType>("../../dist/extension/lib/storage/index.mjs");
 const distVercel = await imp<typeof vercelType>("../../dist/extension/lib/storage/vercel-blob.mjs");
+const distSlack = await imp<typeof slackType>("../../dist/extension/lib/slack.mjs");
 
 afterEach(() => {
   distIndex.video({});
 });
 
 describe("@eve/video built package and consumer eve build", () => {
-  test("ships manifest, instructions, NOTICE, 4 dist entries, and validates mount config", async () => {
+  test("ships manifest, instructions, NOTICE, 5 dist entries, and validates mount config", async () => {
     const manifest = JSON.parse(await rf("dist/extension/_manifest.json")) as Record<
       string,
       unknown
@@ -55,6 +57,8 @@ describe("@eve/video built package and consumer eve build", () => {
     assert.equal(typeof distTools.generate.task, "function");
     assert.equal(typeof distStorage.localDisk, "function");
     assert.equal(typeof distVercel.vercelBlob, "function");
+    assert.equal(typeof distSlack.slackVideoRenderer, "function");
+    assert.equal(typeof distSlack.slackVideoRenderer().events?.["call.settled"], "function");
     assert.throws(() => distVercel.vercelBlob({ prefix: "   " }), TypeError);
 
     const badConfigs: readonly [Record<string, unknown>, RegExp][] = [

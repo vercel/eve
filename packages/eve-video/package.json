@@ -43,6 +43,10 @@
       "types": "./dist/extension/lib/storage/vercel-blob.d.ts",
       "default": "./dist/extension/lib/storage/vercel-blob.mjs"
     },
+    "./slack": {
+      "types": "./dist/extension/lib/slack.d.ts",
+      "default": "./dist/extension/lib/slack.mjs"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {

@@ -198,6 +198,23 @@ When you pass an approval policy such as `always()`, `@eve/video` formats an app
 
 Because `generate` is a `defineWorkflowTool`, configure `approval`, `defaults`, `limits`, `poll`, and `webhook` directly on `video(...)` rather than spreading `generate` into `defineTool()`. To remove `<mount>__generate`, export `disableTool()` in `agent/extensions/video/tools/generate.ts` (see [Override a contribution](/docs/extensions#override-a-contribution)).
 
+## Play videos inline in Slack
+
+Slack does not render a bare `.mp4` link as an inline player. Add `slackVideoRenderer()` from `@eve/video/slack` to your Slack channel's `renderers` so completed videos upload directly to the thread via `files.uploadV2`:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+import { slackVideoRenderer } from "@eve/video/slack";
+
+export default slackChannel({
+  renderers: [slackVideoRenderer()],
+});
+```
+
+- Uses automatic storage selection by default; pass `{ storage }` when `agent/extensions/video.ts` uses a custom `VideoStorage` adapter.
+- Uploads right after the agent's text reply (`timing: "after-reply"`, default) and flushes on `turn.settled` / `session.ended` if no text reply posts; pass `timing: "immediate"` to upload as soon as `video__generate` finishes.
+- Pass `{ mount }` (default `"video"`) or `{ toolName }` when mounted at a different path, `{ maxBytes }` to adjust the 100 MiB upload cap, and `{ onError }` to log upload failures without interrupting replies.
+
 ## Configuration reference
 
 ### Extension options (`@eve/video`)

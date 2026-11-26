@@ -27,6 +27,7 @@ Mounting as `video.ts` adds `video__generate` as a background workflow task and 
 - `@eve/video/tools`: `generate` workflow tool definition (reads `extension.config` lazily and falls back to defaults without a mount).
 - `@eve/video/storage`: `localDisk()`, `inMemory()`, and `VideoStorage` types.
 - `@eve/video/vercel`: `vercelBlob()` storage adapter and `VercelBlobVideoStorageOptions`.
+- `@eve/video/slack`: `slackVideoRenderer()` for uploading completed videos inline in Slack threads.
 
 See [Video Generation](https://eve.dev/docs/extensions/video) ([`docs/extensions/video.md`](../../docs/extensions/video.md)) for configuration, webhooks, video editing and extension, storage auto-selection, approval policies, and limits.
 

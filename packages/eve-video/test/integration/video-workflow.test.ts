@@ -2,12 +2,14 @@ import assert, { deepEqual as deq, equal as eq } from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { afterEach, describe, test } from "node:test";
 
+import { emptySessionView, foldEvents, type JsonValue } from "eve/events";
 import { always, type ApprovalConfiguration } from "eve/tools/approval";
 import { FatalError, type WorkflowWebhookRequest } from "eve/workflow";
 
 import extension from "../../extension/extension.ts";
 import { createIdempotencyKey, isTransientProviderError } from "../../extension/lib/engine.ts";
 import { downloadVideoBytes } from "../../extension/lib/media.ts";
+import { slackVideoRenderer } from "../../extension/lib/slack.ts";
 import { inMemory } from "../../extension/lib/storage/in-memory.ts";
 import type { VideoStorage } from "../../extension/lib/storage/types.ts";
 import * as T from "../../extension/lib/tools.ts";
@@ -812,5 +814,150 @@ describe("workflow steps and runVideoWorkflowTask state machine", () => {
     chkErr.push({ id: "d1", valid: true });
     await failStep(() => chkP, /provider rejected/);
     deq([chkErr.disposed(), chkErr.cleaned], [1, [["inputs/ce.png"]]]);
+  });
+});
+
+describe("slackVideoRenderer", () => {
+  test("uploads completed videos after reply, deduplicates replays, handles immediate/custom mount, and guards limits/errors", async () => {
+    assert.throws(() => slackVideoRenderer({ maxBytes: 0 }), RangeError);
+    const storage = inMemory();
+    await putFile(storage, "videos/2026-11-26/clip.mp4", H.MP4_BYTES, "video/mp4");
+    await putFile(storage, "videos/2026-11-26/big.mp4", new Uint8Array(64).fill(1), "video/mp4");
+
+    const buildView = (
+      callId: string,
+      name: string,
+      outcome: "completed" | "failed",
+      output?: JsonValue,
+    ) => {
+      const base = {
+        sessionId: "s1",
+        timestamp: "2026-11-26T00:00:00.000Z",
+        meta: { position: { line: 0, index: 0 }, at: "2026-11-26T00:00:00.000Z" },
+      };
+      const req = {
+        ...base,
+        type: "call.requested" as const,
+        position: { seq: 1 },
+        data: { callId, capability: { kind: "tool" as const, name }, owner: { turnId: "t1" } },
+      };
+      const settled = {
+        ...base,
+        meta: { position: { line: 0, index: 1 }, at: "2026-11-26T00:00:00.000Z" },
+        type: "call.settled" as const,
+        position: { seq: 2 },
+        data: {
+          callId,
+          outcome,
+          ...(output !== undefined && { output }),
+        },
+      };
+      return { view: foldEvents(emptySessionView(), [req, settled]), settled };
+    };
+
+    const mkSlackCtx = (
+      view: ReturnType<typeof emptySessionView>,
+      state: Record<string, unknown>,
+      onUpload: (files: readonly { data: unknown; filename: string }[]) => Promise<void>,
+    ) => {
+      const ctx: object = {
+        view,
+        channel: { state, slack: { uploadFiles: onUpload } },
+      };
+      return ctx as Parameters<
+        NonNullable<NonNullable<ReturnType<typeof slackVideoRenderer>["events"]>["call.settled"]>
+      >[1];
+    };
+
+    const order: string[] = [];
+    const uploaded: { filename: string; bytes: number }[] = [];
+    const state: Record<string, unknown> = {};
+    const renderer = slackVideoRenderer({ storage });
+    const ev = renderer.events!;
+    const out1 = {
+      status: "completed",
+      model: "bytedance/seedance-2.5-flash",
+      videos: [
+        {
+          storageKey: "videos/2026-11-26/clip.mp4",
+          mediaType: "video/mp4",
+          bytes: H.MP4_BYTES.byteLength,
+        },
+      ],
+    };
+    const { view: v1, settled: s1 } = buildView("c1", "video__generate", "completed", out1);
+    const ctx1 = mkSlackCtx(v1, state, async (files) => {
+      order.push("upload");
+      for (const f of files)
+        uploaded.push({ filename: f.filename, bytes: (f.data as Uint8Array).byteLength });
+    });
+
+    await ev["call.settled"]!(s1, ctx1, async () => void order.push("settled:next"));
+    eq(uploaded.length, 0);
+    const replyFact = {
+      sessionId: "s1",
+      timestamp: "2026-11-26T00:00:01.000Z",
+      type: "content.completed" as const,
+      position: { seq: 3 },
+      data: { kind: "text" as const, phase: "reply" as const, partId: "p1", value: "Here it is" },
+    };
+    await ev["content.completed"]!(replyFact, ctx1, async () => void order.push("reply:next"));
+    deq(order, ["settled:next", "reply:next", "upload"]);
+    deq(uploaded, [{ filename: "clip.mp4", bytes: H.MP4_BYTES.byteLength }]);
+
+    await ev["call.settled"]!(s1, ctx1, async () => undefined);
+    await ev["content.completed"]!(replyFact, ctx1, async () => undefined);
+    eq(uploaded.length, 1);
+
+    const turnState: Record<string, unknown> = {};
+    const turnUploads: string[] = [];
+    const { view: v2, settled: s2 } = buildView("c2", "video__generate", "completed", out1);
+    const ctx2 = mkSlackCtx(v2, turnState, async (files) => {
+      for (const f of files) turnUploads.push(f.filename);
+    });
+    await ev["call.settled"]!(s2, ctx2, async () => undefined);
+    eq(turnUploads.length, 0);
+    const turnFact = {
+      sessionId: "s1",
+      timestamp: "2026-11-26T00:00:02.000Z",
+      type: "turn.settled" as const,
+      position: { seq: 4 },
+      data: { turnId: "t1", outcome: "completed" as const },
+    };
+    await ev["turn.settled"]!(turnFact, ctx2, async () => undefined);
+    deq(turnUploads, ["clip.mp4"]);
+
+    const errs: string[] = [];
+    const immUploads: string[] = [];
+    const imm = slackVideoRenderer({
+      storage,
+      mount: "clip",
+      timing: "immediate",
+      maxBytes: 32,
+      onError: (e, c) => void errs.push(`${c.callId}:${c.storageKey}:${String(e)}`),
+    });
+    const { view: v3, settled: s3 } = buildView("c3", "clip__generate", "completed", {
+      videos: [
+        { storageKey: "videos/2026-11-26/big.mp4", mediaType: "video/mp4", bytes: 64 },
+        { storageKey: "videos/2026-11-26/clip.mp4", mediaType: "video/mp4" },
+      ],
+    });
+    const ctx3 = mkSlackCtx(v3, {}, async (files) => {
+      for (const f of files) immUploads.push(f.filename);
+      throw new Error("missing_scope");
+    });
+    await imm.events!["call.settled"]!(s3, ctx3, async () => undefined);
+    deq(immUploads, ["clip.mp4"]);
+    eq(errs.length, 1);
+    assert.match(errs[0], /c3:videos\/2026-11-26\/clip\.mp4:Error: missing_scope/);
+
+    const { view: vSkip, settled: sSkip } = buildView("c4", "video__generate", "failed");
+    const skipUploads: string[] = [];
+    await imm.events!["call.settled"]!(
+      sSkip,
+      mkSlackCtx(vSkip, {}, async (files) => void skipUploads.push(files[0].filename)),
+      async () => undefined,
+    );
+    eq(skipUploads.length, 0);
   });
 });
