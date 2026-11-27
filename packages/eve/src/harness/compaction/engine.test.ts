@@ -1324,10 +1324,10 @@ describe("compactMessages: summarization fallback", () => {
       user("do the thing"),
       assistant("Running the tool."),
     ]);
-    const threshold = Math.floor(verbatimSize) - 50;
-    expect(strippedSize).toBeLessThan(threshold);
-    expect(verbatimSize).toBeGreaterThan(threshold);
-    expect(estimateTokens(tail)).toBeLessThanOrEqual(threshold / 2);
+    const outputBudget = verbatimSize - 50;
+    expect(strippedSize).toBeLessThan(outputBudget);
+    expect(verbatimSize).toBeGreaterThan(outputBudget);
+    const threshold = outputBudget + ENVELOPE_TOKENS;
 
     const { result, summarizer } = await compact(messages, {
       recentWindowSize: 3,
@@ -1690,16 +1690,31 @@ describe("compactMessages: fixed kept-tail budget", () => {
     expect(JSON.stringify(result.at(-1))).toContain("file in this message was omitted");
   });
 
-  it("fills the room it has with the clipped summary", async () => {
-    const threshold = 10_000;
-    const result = await compactHistory(
-      [user("old notes ".repeat(5_000)), assistant("ok"), user("go on")],
-      { recentWindowSize: 1, threshold },
-      summarizeWith("s".repeat(200_000)),
+  it("clips a long summary so another tool step does not immediately trigger compaction", async () => {
+    const fixedTokens = 37_000;
+    const trigger = 39_600;
+    const toolStep = (callId: string) => toolExchange({ callId, payloadChars: 1_400 });
+    const config = {
+      fixedPromptTokens: fixedTokens,
+      recentWindowSize: 10,
+      target: 1,
+      threshold: trigger - fixedTokens,
+    };
+    const { messages: result } = await compactMessages(
+      [user("old notes ".repeat(2_000)), user("go on"), ...toolStep("call-1")],
+      config,
+      summarizeWith("Checkpoint. " + "word ".repeat(4_000)),
     );
 
-    expect(estimateTokens(result)).toBeLessThanOrEqual(threshold);
-    expect(estimateTokens(result)).toBeGreaterThan(threshold * 0.95);
+    expect(result[1]?.content).toContain("Checkpoint.");
+    expect(result[1]?.content).toContain("chars omitted");
+    expect(
+      shouldCompact(
+        [...result, ...toolStep("call-2")],
+        { ...config, threshold: trigger },
+        fixedTokens,
+      ),
+    ).toBe(false);
   });
 
   it("drops the tail before it clips the summary", async () => {
@@ -1712,7 +1727,7 @@ describe("compactMessages: fixed kept-tail budget", () => {
 
     const result = await compactHistory(
       history,
-      { recentWindowSize: 2, threshold: 900 },
+      { recentWindowSize: 2, threshold: 900 + ENVELOPE_TOKENS },
       summarizeWith(summary),
     );
 
@@ -1761,6 +1776,41 @@ describe("compactMessages: fixed kept-tail budget", () => {
         summarizer,
       ),
     ).rejects.toThrow(/leave only ~60 tokens/);
+    expect(summarizer).not.toHaveBeenCalled();
+  });
+
+  it("rejects the tight budget before summarizing when the next screenshot would not fit", async () => {
+    const screenshot = toolFileMessage({
+      data: pngBytes(1920, 1080, 100).toString("base64"),
+      type: "data",
+    });
+    const call: ModelMessage = {
+      content: [{ input: {}, toolCallId: "call-image", toolName: "render", type: "tool-call" }],
+      role: "assistant",
+    };
+    const summarize = summarizeWith("The chart is ready.");
+
+    await expect(
+      compactMessages(
+        [user("Inspect the chart."), call, screenshot],
+        { fixedPromptTokens: 37_000, recentWindowSize: 10, target: 1, threshold: 2_600 },
+        summarize,
+      ),
+    ).rejects.toThrow(/too few to compact/);
+    expect(summarize).not.toHaveBeenCalled();
+  });
+
+  it("does not resummarize a checkpoint that has no room to shrink", async () => {
+    const summarizer = summarizeWith("The same task is still in progress.");
+    const history = [...checkpointHead(""), user("Continue the task.")];
+    const config = {
+      lastKnownInputTokens: THRESHOLD,
+      lastKnownPromptMessageCount: history.length,
+      recentWindowSize: 1,
+      threshold: THRESHOLD,
+    };
+
+    await expect(compactHistory(history, config, summarizer)).rejects.toThrow(/too few to compact/);
     expect(summarizer).not.toHaveBeenCalled();
   });
 
