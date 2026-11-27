@@ -129,7 +129,7 @@ pnpm --filter @eve-internal/benchmarks code-bench \
 
 1. **Phase 1 — Local Docker vertical slice (`eve-code` + `oracle`):** Add `apps/benchmarks/code/eve-code-app/` (stock `HostSandbox`) and the minimal local Docker runner with bounded named-file readback. Verify `oracle` passes 100% of `swe-lean` and `eve-code` runs cleanly end-to-end.
 2. **Phase 2 — Vercel Sandbox fan-out, peer adapters, and `deepswe-lean`:** Add snapshot-native peer installation (`pi`, `opencode`, `fx`, `codex`, `claude-code`), `separateVerifier` support, bounded Vercel Sandbox worker pool, and `report.json` compatibility tests against `.github/scripts/eve-code-docs-snapshot.mjs`.
-3. **Phase 3 — CI cutover:** Switch `.github/workflows/eve-code-benchmark.yml` from `vercel-labs/eve-bench` to `apps/benchmarks/code/`, validate both `anthropic` and `openai` (`openai/gpt-6.2-sol`) legs on `swe-lean` and `deepswe-lean`, and retire `EVE_BENCH_SSH_KEY`.
+3. **Phase 3 — CI cutover:** Switch `.github/workflows/eve-code-benchmark.yml` from `vercel-labs/eve-bench` to `apps/benchmarks/code/`, validate both `anthropic` and `openai` (`openai/gpt-6.2-sol`) legs on `swe-lean` and `deepswe-lean`, retire `EVE_BENCH_SSH_KEY`, and remove the unused `packages/eve-code/agent/` directory (currently kept only for `eve-bench`'s `stat` check).
 
 ## Open questions
 
