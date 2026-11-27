@@ -4,135 +4,93 @@ status: proposed
 last_updated: "2026-11-27"
 ---
 
-# In-repo code benchmark runner
+# Harbor-native code benchmark setup
 
 ## Problem
 
-`eve-code` is currently benchmarked through an external repository (`vercel-labs/eve-bench`) checked out over SSH (`EVE_BENCH_SSH_KEY`) in `.github/workflows/eve-code-benchmark.yml`. Keeping the runner outside this repository causes two recurring failure modes:
+`eve-code` is currently benchmarked through an external repository (`vercel-labs/eve-bench`) checked out over SSH (`EVE_BENCH_SSH_KEY`) in `.github/workflows/eve-code-benchmark.yml`. Keeping a custom benchmark runner outside this repository causes two recurring failure modes:
 
 1. **Runtime drift from stock `eve`.** `eve-bench` re-implemented its own container sandbox backend, booted `eve` in dev mode (`EVE_DEV=1` / `localDev()`), and drove sessions through a custom HTTP/v27 wire client with synchronous per-event logging. A single bug in that custom sandbox backend (`close: stop` killing sibling commands on every `ensureSandboxAccess.release()`) sent `SIGKILL` (exit `137`) to hundreds of concurrent subagent and background bash commands, invalidating `deepswe-lean` measurements. Now that `eve` ships stock `HostSandbox` (`eve/sandbox/host`, #6942), the benchmark no longer needs a custom sandbox implementation.
-2. **Cross-org friction.** Debugging regressions, updating peer model mappings (such as `openai/gpt-6.2-sol`), or aligning telemetry requires coordinated changes across two organizations and a dedicated SSH deploy key.
+2. **Unnecessary reinvention.** Both `swe-lean` and `deepswe-lean` are already Harbor datasets, and [`harbor-framework/harbor`](https://github.com/harbor-framework/harbor) already provides:
+   - A built-in `eve` agent (`src/harbor/agents/installed/eve.py` + `eve_runner.mjs`) that runs any regular `eve` app (`harbor run -a eve --ak path=./app`) through `eve build` and `eve start`.
+   - A built-in `vercel` environment (`src/harbor/environments/vercel/`) that mirrors/builds task Dockerfiles into Vercel Container Registry (`vcr.vercel.com`) and boots each trial natively as a Vercel Sandbox — plus `--env docker` for local runs.
+   - Native support for `verifier.environment_mode = "separate"`, `[[verifier.collect]]`, phase-scoped network policies, named-file artifact downloads, and ATIF trajectories.
+   - Built-in adapters for every peer harness we compare against: `pi`, `opencode` / `opencode-v2`, `fx`, `codex`, `claude-code`, `hermes`, and `oracle`.
 
-At the same time, simply porting a full Harbor-style orchestrator into `eve` — complete with custom TOML parsers, multi-arch binary mirroring, and binary tar validation for untrusted container directories — adds thousands of lines of brittle ceremony and unnecessary security surface.
-
-This plan proposes a minimal, first-principles in-repo runner under `apps/benchmarks/code/` that benchmarks stock `eve` as users deploy it, preserves the full comparison matrix (`eve-code`, `opencode`, `pi`, `fx`, `codex`, `claude-code`, and `oracle`), and eliminates unnecessary machinery by design.
+Rebuilding a Harbor clone inside `vercel/eve` (~3,900 lines of custom Docker/Sandbox orchestration, tar parsing, TOML parsing, binary mirroring, and peer runners) duplicates what Harbor already owns and maintains. Instead, we should update Harbor's upstream `eve` integration for current `eve` v1.x + `HostSandbox` and keep only a regular stock `eve` app plus thin CI/reporting glue inside `vercel/eve`.
 
 ## Goals and non-goals
 
 ### Goals
 
-- Own the code benchmark runner and `eve-code` benchmark app inside this repository (`apps/benchmarks/code/`), removing the `vercel-labs/eve-bench` checkout and `EVE_BENCH_SSH_KEY`.
-- Run `eve-code` in production mode (`eve build`, `HostSandbox`, `eve/extensions/code`, `verifyHttpBasic`, stock `eve/client`) with zero `EVE_DEV=1` paths, zero custom sandbox providers, and zero `/workspace` symlinks.
-- Preserve the full harness surface already supported by `.github/scripts/resolve-benchmark-request.mjs`:
-  - Automatic comparison defaults: `eve-code`, `opencode`, `pi`, `fx`.
-  - Frontier lab references: `codex`, `claude-code`.
-  - Verifier sanity baseline: `oracle` (runs each task's `solution/solve.sh`).
-  - Optional opt-in harnesses (for example `hermes`) via the same adapter contract.
-- Preserve all existing CI and docs contracts: `/benchmark` comment commands (`resolve-benchmark-request.mjs`), `report.json` schema consumed by `.github/scripts/eve-code-docs-snapshot.mjs`, and `apps/docs/lib/evals/eve-code-benchmark.json`.
-- Keep the runner small (~600–800 LOC target) by designing out whole categories of complexity instead of patching around them.
+- Retire the external `vercel-labs/eve-bench` dependency and `EVE_BENCH_SSH_KEY`.
+- Benchmark `eve-code` as a regular, checked-in standalone `eve` app (`apps/benchmarks/code/eve-code-app/`) built with `eve build` and run in production mode on stock `HostSandbox` (`eve/sandbox/host`) and stock `eve/client`.
+- Delegate task execution, container/Vercel Sandbox lifecycle, verifier isolation, and peer harness execution (`pi`, `opencode-v2`, `fx`, `codex`, `claude-code`, `hermes`, `oracle`) to `harbor-framework/harbor`.
+- Preserve all existing CI and docs contracts: `/benchmark` comment commands (`.github/scripts/resolve-benchmark-request.mjs`), `report.json` compatibility with `.github/scripts/eve-code-docs-snapshot.mjs`, and `apps/docs/lib/evals/eve-code-benchmark.json`.
+- Keep the code owned by `vercel/eve` tiny (~200 lines total: the 6-file `eve` app + thin CLI/report adapter).
 
 ### Non-goals
 
-- Building a general-purpose Harbor replacement for arbitrary third-party benchmarks or cloud backends.
-- Hand-rolling binary archive parsers, TOML parsers, or GitHub REST comment clients.
+- Building or maintaining custom Docker/Vercel Sandbox trial orchestrators, tar parsers, TOML parsers, binary downloaders, or peer CLI runners inside `vercel/eve`.
 - Adding benchmark-only runtime switches, telemetry hooks, or endpoints to `packages/eve`.
 
-## Architecture and simplifying decisions
+## Architecture
 
 ```text
-GitHub Workflow / Local CLI (Host)
-  ├── 1. Build stock eve-code app once (`eve build` -> `.output` + `eve/client`)
-  ├── 2. Prepare 1 template snapshot (Docker + pinned peer CLIs + dataset + `.output`)
-  └── 3. Run bounded trial pool (local Docker or N `persistent: false` Vercel Sandboxes)
-            │
-            ▼ (1 isolated sandbox/host per trial)
-        [Agent container: real task WORKDIR, inference keys only]
-          ├── eve-code : production `.output/server` + `HostSandbox` + stock `eve/client`
-          ├── peer CLI : `pi` | `opencode` | `fx` | `codex` | `claude-code`
-          └── oracle   : task's `solution/solve.sh`
-            │  (stop/remove agent container; transfer only bounded named artifacts if separateVerifier)
-            ▼
-        [Verifier container (`--network none` when separate): `tests/test.sh` -> `reward.txt`]
-            │  (read ONLY allowlisted named files with hard byte caps — no untrusted directory tar)
-            ▼
-        Host aggregates -> `report.json` + `report.md` + `comment.md`
+GitHub Workflow / Local CLI (`vercel/eve`)
+  ├── 1. Stage `apps/benchmarks/code/eve-code-app/` + pack workspace `eve` (`pnpm --filter eve pack`)
+  ├── 2. Run `harbor run --env vercel` (CI) or `--env docker` (local)
+  │        ├── agent `eve` (`--ak path=<staged-app>`, `--ak reasoning_effort=<level>`)
+  │        │     └── `eve build` -> `eve start` -> stock `HostSandbox` (cwd = `HARBOR_TASK_WORKDIR`)
+  │        │         -> stock `eve/client` (Basic auth on `EVE_HARBOR_TOKEN`) -> `session.end()`
+  │        ├── peers: `pi`, `opencode-v2`, `fx`, `codex`, `claude-code`, `hermes`
+  │        └── baseline: `oracle` (`solution/solve.sh`)
+  │      (Harbor handles VCR/Vercel Sandbox, separate verifiers, collect hooks, named-file downloads, ATIF)
+  └── 3. Summarize Harbor job results -> `report.json` (snapshot-compatible) + `comment.md`
 ```
 
-### 1. Stock `eve` benchmark app on `HostSandbox`
+### 1. Upstream updates in `harbor-framework/harbor`
 
-`apps/benchmarks/code/eve-code-app/` is a real, typechecked standalone `eve` app checked into the repo — no string-templated code generation and no custom sandbox provider:
+Harbor's built-in `eve` adapter (`src/harbor/agents/installed/eve.py` and `eve_runner.mjs`) was written in June 2026 before `eve` v1.x, v27 session events, and `HostSandbox`. One small upstream PR brings it up to date:
 
-- `agent/agent.ts`: `defineAgent({ model, reasoning })` reading `EVE_CODE_BENCH_MODEL` and `EVE_CODE_BENCH_REASONING`.
+- **Current `eve/client` API and v27 events:** update `eve_runner.mjs` from legacy `new Client({ host })` / `client.session()` / `step.completed` to `new Client({ baseUrl, auth })`, `client.sessions.create({ message })`, `delivery.stream()`, `session.end()` (ensuring `HostSandbox.onSessionEnd()` cleans up background processes before `SIGTERM`), and v27 events (`usage.recorded` including `delegated-late`, `model.settled`, `call.requested`, `call.completed`/`call.failed`, `content.completed`, `turn.settled`, `delivery.settled`, `session.ended`). Update `eve.py`'s ATIF converter to match.
+- **Production auth on `eve start`:** generate an ephemeral per-run `EVE_HARBOR_TOKEN` (unless already provided), pass it to `eve start`, and authenticate `Client` with HTTP Basic (`harbor:<token>`). Apps using `eveChannel({ auth: [verifyHttpBasic...] })` work in real production mode without `EVE_DEV=1`, while apps using `auth: none()` ignore the header.
+- **Task `WORKDIR` handoff:** execute `eve_runner.mjs` in the container's default `WORKDIR` (rather than `/installed-agent/eve-project`) and pass `HARBOR_TASK_WORKDIR` to `eve start` (which still runs with `cwd: projectDir`). Apps using `HostSandbox` open directly on `process.env.HARBOR_TASK_WORKDIR` with no `/workspace` symlink.
+- **Reasoning effort option:** add `reasoning_effort` to `EveOptions` and forward `HARBOR_REASONING_EFFORT` to `eve build` and `eve start` alongside `HARBOR_MODEL`, matching `pi`, `opencode`, `fx`, `codex`, and `claude-code`.
+
+### 2. Stock `eve` benchmark app in `vercel/eve`
+
+`apps/benchmarks/code/eve-code-app/` is a regular, typechecked `eve` application with zero custom sandbox or wire code:
+
+- `agent/agent.ts`: `defineAgent({ model, reasoning })` reading `HARBOR_MODEL` and `HARBOR_REASONING_EFFORT`.
 - `agent/extensions/code.ts`: `export default code({})` from `eve/extensions/code`.
-- `agent/channels/eve.ts`: `eveChannel` with `verifyHttpBasic` + `withAuthChallenges` against an ephemeral per-trial `EVE_BENCH_TOKEN`.
-- `agent/sandbox.ts`: stock `HostSandbox` from `eve/sandbox/host`, opening `cwd: process.env.CODE_BENCH_TASK_WORKDIR` directly and unsetting only benchmark-specific env vars (`EVE_BENCH_TOKEN`, `CODE_BENCH_*`, `EVE_CODE_BENCH_*`). `HostSandbox` natively strips `NODE_ENV`, `HOST`, `PORT`, `NITRO_*`, `AI_GATEWAY_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `VERCEL_*`, isolates bundled skills in `$EVE_SKILLS_DIR`, avoids `close()`-on-release `SIGKILL`s, and injects `Current working directory: <cwd>` with the real container path (`/app` or `/testbed`).
-- `agent/tools/web_search.ts` and `agent/tools/web_fetch.ts`: `disableTool()` to match offline peer configurations.
-- `agent/instructions.md`: minimal required instructions file (no `/workspace` alias).
+- `agent/channels/eve.ts`: `eveChannel` with `verifyHttpBasic` + `withAuthChallenges` against `EVE_HARBOR_TOKEN`.
+- `agent/sandbox.ts`: stock `HostSandbox` from `eve/sandbox/host`, opening `cwd: process.env.HARBOR_TASK_WORKDIR` and unsetting `EVE_HARBOR_TOKEN`, `HARBOR_*`, and `EVE_AGENT_*`. `HostSandbox` natively strips `NODE_ENV`, `HOST`, `PORT`, `NITRO_*`, `AI_GATEWAY_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `VERCEL_*`, isolates bundled skills in `$EVE_SKILLS_DIR`, and injects `Current working directory: <cwd>`.
+- `agent/tools/web_search.ts` and `agent/tools/web_fetch.ts`: `disableTool()` to match offline peers.
+- `agent/instructions.md`: minimal instructions file (no `/workspace` reference).
 
-Inside the task container, a small runner boots `.output/server/index.mjs` without `EVE_DEV`, drives one turn via `Client` from `eve/client`, records `events.ndjson` + `result.json`, and shuts down via `session.end()` + `SIGTERM`.
+To benchmark an unreleased PR commit of `vercel/eve`, the thin staging step runs `pnpm --filter eve pack` into a `.tgz` inside the staged app directory and points `package.json` at `"eve": "file:./eve.tgz"` so Harbor installs the exact PR build inside the container.
 
-### 2. Bounded named-file readback instead of untrusted directory archives
+### 3. Thin `vercel/eve` wrapper and CI workflow
 
-Copying entire container output directories via `tar` creates an unnecessary security and complexity surface (tar/gzip bombs, GNU/PAX sparse files, PAX `size` header desyncs, symlink traversal, and unbounded host memory buffering).
-
-Instead, container and sandbox boundaries only transfer an explicit allowlist of small regular files with hard byte caps:
-
-| File                                                           | Direction                   |         Cap | Purpose                                                                                |
-| -------------------------------------------------------------- | --------------------------- | ----------: | -------------------------------------------------------------------------------------- |
-| `trial.json`                                                   | Sandbox -> Host             |     256 KiB | Structured trial result (`reward`, `usage`, `overhead`, `status`, `error`)             |
-| `agent/result.json`                                            | Container -> Worker         |       1 MiB | Harness telemetry and status                                                           |
-| `verifier/reward.txt` (or `reward.json`)                       | Container -> Worker         |      64 KiB | Verifier score or `-1` crash sentinel                                                  |
-| Declared `separateVerifier` artifacts (e.g. `model.patch`)     | Agent -> Verifier           | 16 MiB each | Regular files only (`! -L`), copied by explicit name                                   |
-| Diagnostic logs (`events.ndjson`, `agent.log`, `verifier.log`) | Container -> Worker -> Host |  4 MiB each | Streamed directly with truncation marker; never archived/extracted via untrusted `tar` |
-
-On Vercel Sandbox, the host reads those named files directly through `sandbox.readFile()` streams capped per file and bounded across concurrent downloads. Removing untrusted directory archiving eliminates all custom tar parsing by construction.
-
-### 3. Snapshot-native peer installation (no CI-host binary mirroring)
-
-Rather than downloading Linux `x64` and `arm64` Node and peer tarballs on the GitHub Actions runner and uploading hundreds of megabytes in `cache.tar.gz`:
-
-- In Vercel Sandbox mode, one template sandbox installs Docker plus the pinned CLI versions for the requested harnesses once before snapshotting (`npm install --ignore-scripts` for `pi`, `codex`, `claude-code`; pinned releases for `opencode` and `fx`). The host uploads only the prebuilt `eve-code` `.output` and the active dataset's task metadata.
-- In local Docker mode, the runner uses the local Docker daemon and caches only the host/container arch needed for the selected harnesses.
-
-### 4. Standard parsers and repo-native workflow plumbing
-
-- **Dataset parsing:** Parse upstream `task.toml` with a standard existing TOML `devDependency` (or a checked-in JSON task manifest generated from pinned dataset commits) instead of a custom TOML parser.
-- **Harness adapter contract:** Every harness (`eve-code`, `opencode`, `pi`, `fx`, `codex`, `claude-code`, `oracle`) implements one small uniform contract: install/stage assets, launch command with uniform `CODE_BENCH_*` env, and normalize telemetry into `result.json`. `oracle` runs each task's `solution/solve.sh` directly inside the task container.
-- **PR comments and docs snapshots:** Post and update PR comments via `actions/github-script` with `github.paginate` in `.github/workflows/eve-code-benchmark.yml` (matching `bundle-analysis.yml` and `docker-image-size-analysis.yml`), and keep `report.json` byte-compatible with `.github/scripts/eve-code-docs-snapshot.mjs` and its GraphQL `createCommitOnBranch` signed-commit flow.
+- **Local and CI entrypoint (~150 LOC):** stages `eve-code-app/` with the packed workspace `eve` tarball, invokes `harbor run` with the requested dataset (`swe-lean` or `deepswe-lean`), harnesses, model, reasoning, attempts, and environment (`vercel` in CI, `docker` locally), and translates Harbor's job output into `report.json` (matching `.github/scripts/eve-code-docs-snapshot.mjs`) plus `report.md` and `comment.md`.
+- **PR comments and docs snapshots:** `.github/workflows/eve-code-benchmark.yml` posts/updates PR comments via `actions/github-script` with `github.paginate` and keeps the existing `eve-code-docs-snapshot.mjs` GraphQL signed-commit flow unchanged.
 
 ## Invariants
 
-- **Credential isolation:** Task containers receive only inference credentials (`AI_GATEWAY_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) — never `VERCEL_TOKEN`, `VERCEL_OIDC_TOKEN`, or repository secrets.
-- **Cross-harness fairness:** Every harness runs in the same task container image, real `WORKDIR`, timeout budget, reasoning effort, and offline web-tool policy. Containers start with `--init --entrypoint ""`; agent timeouts terminate the in-container process group before collect hooks or verification run. For `separateVerifier` tasks, `agentContainer` is removed before starting the `--network none` verifier container to bound peak disk and RAM.
-- **Truthful scoring and telemetry:**
-  - Verifier `-1` crash sentinels, empty files, and out-of-range values map to `reward: null` (`incomplete`), never `reward: 0`.
-  - Peer API errors that still exit `0` (such as `pi --mode json` assistant `stopReason: "error"`) record `status: "failed"`.
-  - Token accounting is consistent across harnesses: OpenCode includes reasoning tokens, `fx` rolls up `subagents[].usage`, and `eve-code` includes `delegated-late` usage and `delivery.settled` failure outcomes (`failed`, `refused`, `awaiting-input`).
-  - Runs where 100% of trials fail without a reward exit non-zero in CI.
-- **Deterministic sandbox cleanup:** Every Vercel Sandbox is created with `persistent: false`, retried with backoff on HTTP `429`, and torn down with `stop()` + `delete({ deleteOrphanSnapshots: true })` in `finally` and on `SIGINT`/`SIGTERM`. Template snapshots use a 24-hour expiration and are deleted when the run ends. Reports persist progressively as trials finish.
-
-## CLI surface
-
-```sh
-pnpm --filter @eve-internal/benchmarks code-bench \
-  --dataset swe-lean|deepswe-lean \
-  --harness eve-code,opencode,pi,fx \
-  --model anthropic/claude-sonnet-5.5 \
-  --reasoning low|high \
-  --attempts 5 \
-  --concurrency 16 \
-  --backend docker|vercel-sandbox \
-  --output benchmark-results
-```
+- **Stock `eve` runtime:** `eve-code` always runs from `eve build` + `eve start` on `HostSandbox` with production auth — never `EVE_DEV=1`, never a custom sandbox provider, never a `/workspace` symlink.
+- **Credential isolation:** Task containers receive only inference keys (`AI_GATEWAY_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`), never `VERCEL_TOKEN` or `VERCEL_OIDC_TOKEN` (note: ensure Harbor's `auto_env` does not forward `VERCEL_OIDC_TOKEN` into task containers).
+- **Truthful scoring and parity:** Verifier crash sentinels (`-1`) and incomplete trials remain distinct from `reward: 0` so incomplete runs never publish docs snapshots; all harnesses share the same dataset, task `WORKDIR`, reasoning effort, and offline web-tool policy.
+- **Contract preservation:** `/benchmark` PR commands in `.github/scripts/resolve-benchmark-request.mjs` and the `report.json` contract in `.github/scripts/eve-code-docs-snapshot.mjs` stay backward-compatible.
 
 ## Rollout phases
 
-1. **Phase 1 — Local Docker vertical slice (`eve-code` + `oracle`):** Add `apps/benchmarks/code/eve-code-app/` (stock `HostSandbox`) and the minimal local Docker runner with bounded named-file readback. Verify `oracle` passes 100% of `swe-lean` and `eve-code` runs cleanly end-to-end.
-2. **Phase 2 — Vercel Sandbox fan-out, peer adapters, and `deepswe-lean`:** Add snapshot-native peer installation (`pi`, `opencode`, `fx`, `codex`, `claude-code`), `separateVerifier` support, bounded Vercel Sandbox worker pool, and `report.json` compatibility tests against `.github/scripts/eve-code-docs-snapshot.mjs`.
-3. **Phase 3 — CI cutover:** Switch `.github/workflows/eve-code-benchmark.yml` from `vercel-labs/eve-bench` to `apps/benchmarks/code/`, validate both `anthropic` and `openai` (`openai/gpt-6.2-sol`) legs on `swe-lean` and `deepswe-lean`, retire `EVE_BENCH_SSH_KEY`, and remove the unused `packages/eve-code/agent/` directory (currently kept only for `eve-bench`'s `stat` check).
+1. **Phase 1 — Upstream Harbor `eve` PR:** Update `src/harbor/agents/installed/eve.py` and `eve_runner.mjs` in `harbor-framework/harbor` for `eve` v1.x `Client`, v27 events, `EVE_HARBOR_TOKEN`, `HARBOR_TASK_WORKDIR`, and `HARBOR_REASONING_EFFORT` (and verify `opencode-v2` / `pi` / `fx` route `openai/gpt-6.2-sol` cleanly).
+2. **Phase 2 — Stock `eve-code-app` + thin Harbor wrapper in `vercel/eve`:** Add `apps/benchmarks/code/eve-code-app/` and the ~150-line Harbor runner/report adapter under `apps/benchmarks/code/`, verifying `swe-lean` and `deepswe-lean` locally (`--env docker`) and on Vercel (`--env vercel`) across `eve`, `oracle`, and peers.
+3. **Phase 3 — CI cutover:** Switch `.github/workflows/eve-code-benchmark.yml` from `vercel-labs/eve-bench` to `harbor run`, validate both `anthropic` and `openai` (`openai/gpt-6.2-sol`) legs, retire `EVE_BENCH_SSH_KEY`, and remove the unused `packages/eve-code/agent/` directory (currently kept only for `eve-bench`'s `stat` check).
 
 ## Open questions
 
-1. **Task definition source:** Should we keep pulling `swe-lean` / `deepswe-lean` task definitions from pinned upstream git commits at run time, or check in a compact JSON task manifest under `apps/benchmarks/code/datasets/` so CI has zero external git fetches?
-2. **Harbor CLI vs thin Docker wrapper:** `swe-lean` and `deepswe-lean` use Harbor's `task.toml` + `tests/test.sh` convention. Owning a ~120-line Docker lifecycle wrapper avoids a Python runtime dependency inside Vercel Sandboxes, whereas shelling out to Harbor tracks upstream dataset schema changes automatically. Which tradeoff do we prefer?
-3. **Gateway vs provider-native keys for `codex` and `claude-code`:** When `/benchmark codex` or `/benchmark claude-code` runs in CI, should both route through Vercel AI Gateway (`AI_GATEWAY_API_KEY`) for uniform model routing, or use direct provider keys when present?
+1. **Prebuilt `eve-code` vs in-container `eve build`:** Harbor's `eve.py` currently runs `npm install` + `eve build` per trial (or once via `--install-only` + `--ak skip_install=true`). Should CI use Harbor's `--install-only` snapshot flow so `npm install` + `eve build` runs once per job instead of per trial?
+2. **Dataset pinning:** Keep referencing `swe-lean` and `deepswe-lean` from Harbor's dataset registry / pinned task paths, or check a tiny manifest in `apps/benchmarks/code/` pinning exact dataset revisions and `deepswe-lean` timeout/env overrides?
+3. **`VERCEL_OIDC_TOKEN` in Harbor's `Eve._AUTO_ENV_PACKAGE_KEYS`:** Harbor's `eve.py:114` currently maps `@ai-sdk/gateway` to `{"AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN"}`. Should our upstream PR (or `--ak auto_env=false`) avoid forwarding `VERCEL_OIDC_TOKEN` when `AI_GATEWAY_API_KEY` is already set so task containers never receive Vercel OIDC credentials?
