@@ -14,7 +14,7 @@ import { supportsInteractiveAuthorization } from "#shared/connection-types.js";
 import {
   credentialFailureCode,
   type ModelCredentialFailureCode,
-  refusesCredential,
+  rejectsCredential,
 } from "./errors.js";
 
 export async function pauseForModelSignIn(
@@ -67,7 +67,7 @@ function credentialFailureMessage(
 
 function signInFailureMessage(name: string, error: unknown): string {
   if (!isConnectionAuthorizationFailedError(error)) {
-    return refusesCredential(error)
+    return rejectsCredential(error)
       ? `${name} rejected the credential.`
       : `The turn got no ${name} credential.`;
   }

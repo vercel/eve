@@ -219,6 +219,15 @@ describe("summarizeKnownError (catalog table)", () => {
       id: "model-request-bio-policy-refused",
     },
     {
+      title: "flagged prompt refusal",
+      error: named(
+        "AI_StreamProviderError",
+        "Invalid prompt: your prompt was flagged as potentially violating our usage policy.",
+        { code: "invalid_prompt", statusCode: 400 },
+      ),
+      id: "model-request-prompt-flagged",
+    },
+    {
       title: "unsupported model capability",
       error: named("AI_UnsupportedFunctionalityError", "tool type not supported"),
       id: "model-capability-unsupported",

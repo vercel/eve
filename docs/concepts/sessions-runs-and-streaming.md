@@ -220,7 +220,7 @@ When a model call fails transiently before publishing anything, the run records 
 
 A provider `content-filter` response fails the run and turn with `MODEL_CALL_FAILED` and a `hint` to review the request against the provider's content policy. eve doesn't retry it; deltas already streamed stay visible, and the session can receive another message. A refusal note replaces the turn's input in conversation history, and the refused response's partial output stays out of history. Completed tool calls and their results stay, so the model knows which actions already ran. Removing the input doesn't guarantee recovery: retained history or tool results can still trigger the provider's filter. Other failed model calls keep the turn's input in history.
 
-OpenAI's `cyber_policy` and `bio_policy` refusals also fail only their turn, with `MODEL_CALL_FAILED`, and the session can receive another message.
+OpenAI's `cyber_policy`, `bio_policy` and `invalid_prompt` refusals also fail only their turn, with `MODEL_CALL_FAILED`, and the session can receive another message.
 
 A provider's rejection of a request longer than the model's context window also fails only its turn, with `MODEL_CALL_FAILED` and a `hint`. [Compaction](./default-harness#compaction) explains how eve keeps requests under the window.
 
