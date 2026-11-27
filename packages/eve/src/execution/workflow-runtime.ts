@@ -26,10 +26,12 @@ import type {
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
+  EVE_STREAM_VERSION_ATTRIBUTE,
   EVE_VERSION_ATTRIBUTE,
   EVE_PREWARM_ATTRIBUTE,
   readParentLineage,
 } from "#execution/eve-workflow-attributes.js";
+import { EVE_MESSAGE_STREAM_VERSION } from "#protocol/session-http.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import { formatCapabilityError } from "#internal/capability-error.js";
@@ -52,6 +54,7 @@ import {
   readSessionRecordHistory,
   readSessionRecords,
   readSessionStreamTailIndex,
+  readSessionStreamVersion,
 } from "#execution/session-event-stream.js";
 import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
 import { prepareInitialEntry, type SessionRuntimeConfig } from "#execution/initial-entry.js";
@@ -151,6 +154,7 @@ export function createWorkflowRuntime(config: SessionRuntimeConfig): Runtime {
     const attributes = {
       ...sessionAttributes,
       [EVE_PREWARM_ATTRIBUTE]: "1",
+      [EVE_STREAM_VERSION_ATTRIBUTE]: EVE_MESSAGE_STREAM_VERSION,
       ...(input.externalInvocation === undefined
         ? {}
         : buildInvocationAttributes(input.externalInvocation)),
@@ -287,6 +291,10 @@ export function createWorkflowRuntime(config: SessionRuntimeConfig): Runtime {
 
     async getStreamTailIndex(sessionId: string): Promise<number> {
       return await readSessionStreamTailIndex(sessionId);
+    },
+
+    async getStreamVersion(sessionId: string): Promise<string | undefined> {
+      return await readSessionStreamVersion(sessionId);
     },
 
     async readChildBinding(sessionId: string, childSessionId: string) {

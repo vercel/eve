@@ -555,6 +555,7 @@ describe("createWorkflowRuntime#createSession", () => {
           "$eve.is_otel_trace_enabled": "false",
           "$eve.is_trace_content_visible": "false",
           "$eve.prewarm": "1",
+          "$eve.stream_version": "27",
           "$eve.title": "hello",
           "$eve.trigger": "http",
           "$eve.type": "session",
@@ -778,6 +779,7 @@ describe("createWorkflowRuntime#createSession", () => {
           "$eve.is_otel_trace_enabled": "false",
           "$eve.is_trace_content_visible": "false",
           "$eve.prewarm": "1",
+          "$eve.stream_version": "27",
           "$eve.title": "hello",
           "$eve.trigger": "http",
           "$eve.type": "session",
@@ -830,6 +832,7 @@ describe("createWorkflowRuntime#createSession", () => {
         "$eve.parent_turn": "turn-1",
         "$eve.prewarm": "1",
         "$eve.root": "root-session",
+        "$eve.stream_version": "27",
         "$eve.subagent": "researcher",
         "$eve.is_trace_content_visible": "false",
         "$eve.trigger": "subagent",
@@ -864,6 +867,7 @@ describe("createWorkflowRuntime#createSession", () => {
         "$eve.is_otel_trace_enabled": "false",
         "$eve.is_trace_content_visible": "false",
         "$eve.prewarm": "1",
+        "$eve.stream_version": "27",
         "$eve.title": "hello",
         "$eve.trigger": "http",
         "$eve.type": "session",
@@ -1310,5 +1314,22 @@ describe("createWorkflowRuntime#getLineStream", () => {
       }).getLineStream("session-1"),
     ).rejects.toBeInstanceOf(WorkflowRunNotFoundError);
     expect(cancel).toHaveBeenCalled();
+  });
+});
+
+describe("createWorkflowRuntime#getStreamVersion", () => {
+  it("reads the stream version from run attributes without opening the stream", async () => {
+    getRunRecordMock.mockResolvedValue({
+      attributes: { "$eve.version": "1.5.0" },
+      status: "running",
+    });
+
+    const version = await createWorkflowRuntime({
+      compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
+    }).getStreamVersion!("session-1");
+
+    expect(version).toBe("27");
+    expect(getRunRecordMock).toHaveBeenCalledWith("session-1", { resolveData: "none" });
+    expect(getRunMock).not.toHaveBeenCalled();
   });
 });
