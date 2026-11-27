@@ -198,7 +198,7 @@ async function prepareTemplateSnapshot(options: {
       throw new Error(`Failed to unpack benchmark assets in template: ${await unpackRes.stderr()}`);
     }
 
-    return await template.snapshot({ expiration: 4 * 60 * 60 * 1000 });
+    return await template.snapshot({ expiration: 24 * 60 * 60 * 1000 });
   } finally {
     await cleanupSandbox(template, false);
   }

@@ -314,7 +314,7 @@ async function runPi({
                 ? "https://ai-gateway.vercel.sh"
                 : "https://ai-gateway.vercel.sh/v1",
               api: isAnthropic ? "anthropic-messages" : "openai-responses",
-              apiKey: "AI_GATEWAY_API_KEY",
+              apiKey: "$AI_GATEWAY_API_KEY",
               models: [modelEntry],
             },
           },

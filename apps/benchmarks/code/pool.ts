@@ -2,12 +2,7 @@ import { join } from "node:path";
 
 import type { BenchmarkRunOptions, HarnessName, TaskSpec, TrialResult } from "./types.ts";
 
-const CREDENTIAL_ENV_VARS = [
-  "AI_GATEWAY_API_KEY",
-  "VERCEL_OIDC_TOKEN",
-  "ANTHROPIC_API_KEY",
-  "OPENAI_API_KEY",
-] as const;
+const CREDENTIAL_ENV_VARS = ["AI_GATEWAY_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"] as const;
 
 export function forwardCredentials(): Record<string, string> {
   const out: Record<string, string> = {};
