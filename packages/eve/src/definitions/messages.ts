@@ -4,7 +4,7 @@ import {
   type HarnessModelMessage,
   turnAnchorOf,
 } from "#harness/messages.js";
-import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
+import { awaitsProviderToolResult } from "#shared/provider-tool-history.js";
 import type { AnchoredEntry, CallRecord } from "./definition.js";
 
 export function announce(

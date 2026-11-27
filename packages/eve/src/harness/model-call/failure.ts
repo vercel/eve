@@ -4,7 +4,7 @@ import {
   extractModelCallErrorDetails,
   extractUpstreamRejectionMessage,
 } from "#harness/model-call/errors.js";
-import type { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
+import type { CompactionOverLimitError } from "#shared/compaction-over-limit-error.js";
 import { createErrorId, createLogger, formatError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { Step } from "#harness/step/context.js";

@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 
-import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
+import { normalizeProviderToolHistory } from "./provider-tool-history.js";
 
 describe("normalizeProviderToolHistory", () => {
   it("preserves text ordering around provider-executed tool results", () => {

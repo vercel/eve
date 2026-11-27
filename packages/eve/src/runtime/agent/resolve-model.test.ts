@@ -31,7 +31,12 @@ const BUILD_METADATA = createModelMetadata({
       {
         slug: "anthropic/claude-opus-5",
         providers: [
-          { contextWindowTokens: 200_000, provider: "anthropic", providerModelId: "claude-opus-5" },
+          {
+            contextWindowTokens: 200_000,
+            maxOutputTokens: 64_000,
+            provider: "anthropic",
+            providerModelId: "claude-opus-5",
+          },
         ],
       },
     ],
@@ -138,7 +143,7 @@ describe("dynamic runtime model resolution", () => {
 
     await expect(
       resolveRuntimeModelReference({ credentialed: true, id: "anthropic/claude-sonnet-5" }),
-    ).rejects.toThrow('the "anthropic/claude-sonnet-5" model needs it');
+    ).rejects.toThrow('the "anthropic/claude-sonnet-5" model needs what it returned to run');
   });
 
   it("leaves a model id to a custom AI SDK default provider under eve dev", async () => {
@@ -247,8 +252,31 @@ describe("dynamic runtime model resolution", () => {
 
     expect(resolved).toMatchObject({
       model,
-      reference: { contextWindowTokens: 200_000, id: "anthropic/claude-opus-5" },
+      reference: {
+        contextWindowTokens: 200_000,
+        id: "anthropic/claude-opus-5",
+        maxOutputTokens: 64_000,
+      },
     });
+  });
+
+  it("carries the catalog's max output on a Gateway id, and none for a model it doesn't list", async () => {
+    const resolved = await resolveRuntimeModelSelection({
+      durability: "durable",
+      modelMetadata: metadataSource(),
+      selection: "anthropic/claude-opus-5",
+    });
+    expect(resolved.reference).toMatchObject({
+      contextWindowTokens: 200_000,
+      maxOutputTokens: 64_000,
+    });
+
+    const unlisted = await resolveRuntimeModelSelection({
+      durability: "durable",
+      modelMetadata: metadataSource(),
+      selection: "openai/gpt-5.5",
+    });
+    expect(unlisted.reference.maxOutputTokens).toBeUndefined();
   });
 
   it("rejects missing, malformed, and unknown selections", async () => {
@@ -283,6 +311,49 @@ describe("dynamic runtime model resolution", () => {
     ).rejects.toThrow(
       'Cannot select model "custom/unknown" because the AI Gateway model catalog this build read at 2026-10-27T00:00:00.000Z has no context window for it. Return modelContextWindowTokens',
     );
+  });
+
+  describe("experimental.compaction on a selection", () => {
+    const select = (experimental: unknown, durability: "durable" | "live" = "live") =>
+      resolveRuntimeModelSelection({
+        durability,
+        modelMetadata: metadataSource(),
+        selection: {
+          experimental,
+          model: "openai/gpt-5.5",
+          modelContextWindowTokens: 128_000,
+        } as never,
+      });
+
+    it("carries a strategy, and a fallback beside it", async () => {
+      const strategy = () => undefined;
+      const fallback = () => undefined;
+
+      await expect(select({ compaction: strategy })).resolves.toMatchObject({
+        compaction: { strategy },
+      });
+      await expect(select({ compaction: { fallback, strategy } })).resolves.toMatchObject({
+        compaction: { fallback, strategy },
+      });
+    });
+
+    it("rejects a strategy on a durable selection, which must be serializable", async () => {
+      await expect(select({ compaction: () => undefined }, "durable")).rejects.toThrow(
+        /experimental\.compaction, but durable model selections must be serializable/,
+      );
+    });
+
+    it("rejects what is not a strategy, and any other experimental setting", async () => {
+      await expect(select({ compaction: { strategy: "x" } })).rejects.toThrow(
+        /"experimental.compaction" must be a compaction strategy/,
+      );
+      await expect(
+        select({ compaction: { fallback: "x", strategy: () => undefined } }),
+      ).rejects.toThrow(/"experimental.compaction.fallback" must be a compaction strategy/);
+      await expect(select({ workflow: {} })).rejects.toThrow(
+        "takes only experimental.compaction. It returned experimental.workflow.",
+      );
+    });
   });
 
   it("explains a build that couldn't read the catalog", async () => {

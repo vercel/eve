@@ -32,6 +32,7 @@ import {
   type PublicAgentModelSelectionDefinition,
   type PublicAgentTurnModelDefinition,
 } from "#shared/agent-definition.js";
+import { type ModelCompaction, modelCompaction } from "#shared/compaction-strategy.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import {
   lookupCatalogModelByProviderModelId,
@@ -59,6 +60,7 @@ export type RuntimeModel = LanguageModel | DefinedModel;
 export interface ResolvedRuntimeModelSelection {
   readonly model?: RuntimeModel;
   readonly reference: RuntimeModelReference;
+  readonly compaction?: ModelCompaction<never>;
 }
 
 export async function resolveRuntimeModelReference(
@@ -83,7 +85,7 @@ export async function resolveRuntimeModelReference(
 
   if (reference.credentialed === true) {
     throw new Error(
-      `The dynamic model function failed, and the "${reference.id}" model needs it to run on the caller's credential.`,
+      `The dynamic model function failed, and the "${reference.id}" model needs what it returned to run: the caller's credential, or the selection's compaction strategy.`,
     );
   }
 
@@ -188,11 +190,55 @@ export async function loadDynamicRuntimeModelDefinition(input: {
   return authoredModel;
 }
 
-export async function resolveRuntimeModelSelection(input: {
+type RuntimeModelSelectionInput = {
   readonly durability: "durable" | "live";
   readonly modelMetadata: () => Promise<ModelMetadata>;
   readonly selection: PublicAgentDynamicModelResult;
-}): Promise<ResolvedRuntimeModelSelection> {
+};
+
+export async function resolveRuntimeModelSelection(
+  input: RuntimeModelSelectionInput,
+): Promise<ResolvedRuntimeModelSelection> {
+  const resolved = await resolveSelectedModel(input);
+  const compaction = selectionCompaction(input.selection);
+  if (compaction === undefined) return resolved;
+  if (input.durability === "durable") {
+    throw new InvalidRuntimeModelSelectionError(
+      "Dynamic model selection returned experimental.compaction, but durable model selections must be serializable. Return it from a live selection.",
+    );
+  }
+  const id = resolved.reference.id;
+  return {
+    compaction,
+    model: resolved.model ?? localGatewayModel(id) ?? id,
+    reference: { ...resolved.reference, credentialed: true },
+  };
+}
+
+function selectionCompaction(
+  selection: PublicAgentDynamicModelResult,
+): ModelCompaction<never> | undefined {
+  if (selection === null || selection === undefined) return undefined;
+  const experimental = normalizeDynamicModelSelection(selection).experimental;
+  if (experimental === undefined) return undefined;
+  try {
+    const unknownKeys = Object.keys(experimental).filter((key) => key !== "compaction");
+    if (unknownKeys.length > 0) {
+      throw new Error(
+        `A dynamic model selection takes only experimental.compaction. It returned experimental.${unknownKeys.join(", experimental.")}.`,
+      );
+    }
+    const compaction = experimental.compaction;
+    if (compaction === undefined) return undefined;
+    return modelCompaction(compaction, "experimental.compaction");
+  } catch (error) {
+    throw invalidSelectionError(error);
+  }
+}
+
+async function resolveSelectedModel(
+  input: RuntimeModelSelectionInput,
+): Promise<ResolvedRuntimeModelSelection> {
   if (input.selection === null || input.selection === undefined) {
     throw new InvalidRuntimeModelSelectionError(
       "The dynamic model returned no model. Return a model ID, a provider model, or { model, reasoning?, modelContextWindowTokens?, modelOptions? }.",
@@ -224,17 +270,17 @@ export async function resolveRuntimeModelSelection(input: {
   if (typeof selectedModel === "string") {
     const id = formatLanguageModelGatewayId(selectedModel);
     if (promptCache !== undefined && !isAnthropicGatewayId(id)) throw gatewayPromptCacheError(id);
-    const contextWindowTokens =
-      selection.modelContextWindowTokens ??
-      (
-        await lookupModelMetadata(input.modelMetadata, id, (metadata) =>
-          lookupCatalogModelBySlug(metadata, id),
-        )
-      ).contextWindowTokens;
+    const entry =
+      selection.modelContextWindowTokens === undefined
+        ? await lookupModelMetadata(input.modelMetadata, id, (metadata) =>
+            lookupCatalogModelBySlug(metadata, id),
+          )
+        : undefined;
     return {
       reference: {
         id,
-        contextWindowTokens,
+        contextWindowTokens: selection.modelContextWindowTokens ?? entry!.contextWindowTokens,
+        maxOutputTokens: entry?.maxOutputTokens,
         promptCache,
         providerOptions,
         reasoning: selection.reasoning,
@@ -281,6 +327,7 @@ export async function resolveRuntimeModelSelection(input: {
   }
   let id = routesThroughGateway ? selectedModel.modelId : formattedId;
   let contextWindowTokens = selection.modelContextWindowTokens;
+  let maxOutputTokens: number | undefined;
   if (contextWindowTokens === undefined) {
     const entry = await lookupModelMetadata(input.modelMetadata, id, (metadata) =>
       routesThroughGateway
@@ -293,6 +340,7 @@ export async function resolveRuntimeModelSelection(input: {
     );
     if (!routesThroughGateway) id = entry.slug;
     contextWindowTokens = entry.contextWindowTokens;
+    maxOutputTokens = entry.maxOutputTokens;
   }
 
   return {
@@ -300,6 +348,7 @@ export async function resolveRuntimeModelSelection(input: {
     reference: {
       id,
       contextWindowTokens,
+      maxOutputTokens,
       promptCache,
       providerOptions,
       reasoning: selection.reasoning,
@@ -341,6 +390,7 @@ async function lookupModelMetadata(
 }
 
 const DYNAMIC_MODEL_SELECTION_KEYS = new Set([
+  "experimental",
   "model",
   "modelContextWindowTokens",
   "modelOptions",
@@ -355,7 +405,7 @@ function validateDynamicModelSelection(
   );
   if (unknownKeys.length > 0) {
     throw new Error(
-      `A dynamic model returns only runtime settings: model, reasoning, modelContextWindowTokens, and modelOptions. It returned ${unknownKeys.map((key) => `"${key}"`).join(", ")}, which can't vary per session; declare ${unknownKeys.length === 1 ? "it" : "them"} on defineAgent() instead.`,
+      `A dynamic model returns only runtime settings: model, reasoning, modelContextWindowTokens, modelOptions, and experimental.compaction. It returned ${unknownKeys.map((key) => `"${key}"`).join(", ")}, which can't vary per session; declare ${unknownKeys.length === 1 ? "it" : "them"} on defineAgent() instead.`,
     );
   }
 

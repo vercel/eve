@@ -109,11 +109,19 @@ async function keptModel(
     modelMetadata,
     selection: result as PublicAgentDynamicModelResult,
   });
+  const mocked =
+    selection.model !== undefined &&
+    !isMockModel(selection.model) &&
+    shouldMockAuthoredRuntimeModels();
   const live =
-    selection.model === undefined ||
-    (!isMockModel(selection.model) && shouldMockAuthoredRuntimeModels())
+    selection.model === undefined
       ? undefined
-      : selection;
+      : mocked
+        ? selection.compaction && {
+            compaction: selection.compaction,
+            reference: selection.reference,
+          }
+        : selection;
   const value: ModelSlotValue = { reference: selection.reference };
   return { live, value: parseJsonValue(value) };
 }

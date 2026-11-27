@@ -29,6 +29,7 @@ import { defineDynamicSchedules, type ScheduleProvider } from "#public/schedules
 import { createScheduleCollectionClient } from "#runtime/schedules/collection-client.js";
 import { readScheduleCollectionSource } from "#shared/schedule-collection-definition.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
+import { tagCompactionStrategy } from "#shared/compaction-strategy.js";
 import { z } from "#compiled/zod/index.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import {
@@ -1138,6 +1139,70 @@ describe("compileAgentManifest source graph", () => {
       moduleMap,
     });
     expect(resolved.config?.model?.promptCache).toEqual({ anthropic: { ttl: "1h" } });
+  });
+
+  describe("a compaction strategy on the agent", () => {
+    const forOpenAI = () =>
+      tagCompactionStrategy(() => undefined, {
+        description: "an OpenAI model",
+        matches: ({ modelId }) => modelId.startsWith("openai/"),
+      });
+    const compileWith = (definition: Record<string, unknown>) =>
+      compileAgentManifest(manifest(), {
+        sourceRegistries: [
+          registry([
+            {
+              logicalPath: "agent.ts",
+              loadNamespace: async () => ({
+                default: defineAgent({ modelContextWindowTokens: 200_000, ...definition } as never),
+              }),
+            },
+          ]),
+        ],
+      });
+
+    it("rejects a strategy that works with another provider than the agent's model", async () => {
+      await expect(
+        compileWith({
+          experimental: { compaction: forOpenAI() },
+          model: "anthropic/claude-opus-5",
+        }),
+      ).rejects.toThrow(
+        'In "agent.ts", The compaction strategy works with an OpenAI model, but the model is gateway (anthropic/claude-opus-5).',
+      );
+    });
+
+    it("rejects a fallback that works with another provider than the agent's model", async () => {
+      await expect(
+        compileWith({
+          experimental: { compaction: { fallback: forOpenAI(), strategy: () => undefined } },
+          model: "anthropic/claude-opus-5",
+        }),
+      ).rejects.toThrow("The compaction fallback works with an OpenAI model");
+    });
+
+    it("rejects a strategy that is not a function", async () => {
+      await expect(
+        compileWith({ experimental: { compaction: { strategy: "x" } }, model: "openai/gpt-5.5" }),
+      ).rejects.toThrow(/"experimental.compaction" must be a compaction strategy/);
+    });
+
+    it("compiles a matching strategy and records only that the agent has one", async () => {
+      const compiled = await compileWith({
+        experimental: { compaction: { fallback: forOpenAI(), strategy: forOpenAI() } },
+        model: "openai/gpt-5.5",
+      });
+
+      expect(JSON.stringify(compiled)).toContain('"compaction":true');
+    });
+
+    it("leaves a dynamic model's strategy to the runtime check", async () => {
+      await compileWith({
+        experimental: { compaction: forOpenAI() },
+        modelContextWindowTokens: undefined,
+        model: defineDynamicModel(() => ({ model: "anthropic/claude-opus-5" })),
+      });
+    });
   });
 
   it("classifies extension mount initialization as runtime-only", async () => {

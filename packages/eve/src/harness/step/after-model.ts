@@ -33,7 +33,7 @@ import { DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS } from "#execution/dynamic-workf
 import { isWorkflowTool, workingTaskIds } from "#execution/tasks/model-step.js";
 import { isProgramTool } from "#harness/program-calls.js";
 import { newProgram, savePrograms } from "#harness/session-machine/programs.js";
-import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
+import { normalizeProviderToolHistory } from "#shared/provider-tool-history.js";
 import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { withPromptMeasurement } from "#harness/compaction/engine.js";

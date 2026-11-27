@@ -2,45 +2,32 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { compactionConfig } from "#harness/compaction/config.js";
-import { shouldCompact, withPromptMeasurement } from "#harness/compaction/engine.js";
+import { withPromptMeasurement } from "#harness/compaction/engine.js";
+import { shouldCompact } from "#internal/testing/compaction-trigger.js";
 import type { CompactionState } from "#harness/types.js";
-import { fromCompiledBundle } from "#definitions/compiled-agent.js";
-import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 
-const step = (input: { readonly window?: number; readonly thresholdPercent?: number }) => ({
-  ctx: agentContext(input.thresholdPercent),
+const step = (window?: number) => ({
+  ctx: new ContextContainer(),
   model: {
-    reference:
-      input.window === undefined ? { id: "m" } : { contextWindowTokens: input.window, id: "m" },
+    reference: window === undefined ? { id: "m" } : { contextWindowTokens: window, id: "m" },
   },
   session: { compaction: { lastKnownInputTokens: 321, lastKnownPromptMessageCount: 7 } },
 });
 
 describe("compactionConfig", () => {
-  it("compacts past a share of the model's context window", () => {
-    expect(compactionConfig(step({ window: 1_000_000 }))).toEqual({
+  it("returns the session's measurement and the model's context window", () => {
+    expect(compactionConfig(step(1_000_000))).toEqual({
       contextWindowTokens: 1_000_000,
       lastKnownInputTokens: 321,
       lastKnownPromptMessageCount: 7,
-      recentWindowSize: 10,
-      target: 500_000,
-      threshold: 900_000,
-      thresholdPercent: 0.9,
-    });
-    expect(compactionConfig(step({ thresholdPercent: 0.5, window: 200_000 }))).toMatchObject({
-      threshold: 100_000,
-      thresholdPercent: 0.5,
     });
   });
 
-  it("compacts past 100k tokens for a model whose window it doesn't know", () => {
-    expect(compactionConfig(step({})).threshold).toBe(100_000);
-  });
-
-  it("compacts down to half the window, never above the threshold", () => {
-    expect(compactionConfig(step({ window: 200_000 })).target).toBe(100_000);
-    expect(compactionConfig(step({ thresholdPercent: 0.4, window: 200_000 })).target).toBe(80_000);
-    expect(compactionConfig(step({})).target).toBe(50_000);
+  it("leaves the window out for a model whose window it doesn't know", () => {
+    expect(compactionConfig(step())).toEqual({
+      lastKnownInputTokens: 321,
+      lastKnownPromptMessageCount: 7,
+    });
   });
 
   it("counts the prompt with the step model's own measurement after the session switched models", () => {
@@ -61,14 +48,17 @@ describe("compactionConfig", () => {
       promptMessageCount: 6,
     });
     const on = (id: string) => ({
-      ctx: agentContext(0.2),
+      ctx: new ContextContainer(),
       model: { reference: { contextWindowTokens: 1_000_000, id } },
       session: { compaction },
     });
 
     const prompt = { messages, requestEnvelopeTokens: 0 };
-    expect(shouldCompact(messages, compactionConfig(on("provider/model-b"), prompt))).toBe(false);
-    expect(shouldCompact(messages, compactionConfig(on("provider/model-a"), prompt))).toBe(true);
+    const threshold = 200_000;
+    const due = (id: string) =>
+      shouldCompact(messages, { ...compactionConfig(on(id), prompt), threshold });
+    expect(due("provider/model-b")).toBe(false);
+    expect(due("provider/model-a")).toBe(true);
     expect(compactionConfig(on("provider/model-c"))).toMatchObject({
       lastKnownInputTokens: 145_000,
       lastKnownPromptMessageCount: 6,
@@ -94,7 +84,7 @@ describe("compactionConfig", () => {
     });
     const config = compactionConfig(
       {
-        ctx: agentContext(undefined),
+        ctx: new ContextContainer(),
         model: { reference: { contextWindowTokens: 250_000, id: "model-a" } },
         session: { compaction },
       },
@@ -106,18 +96,13 @@ describe("compactionConfig", () => {
       lastKnownPromptMessageCount: 1,
       requestEnvelopeTokens: 1_000,
     });
-    expect(shouldCompact(messages, config, 100_000, config.requestEnvelopeTokens)).toBe(true);
+    expect(
+      shouldCompact(
+        messages,
+        { ...config, threshold: 225_000 },
+        100_000,
+        config.requestEnvelopeTokens,
+      ),
+    ).toBe(true);
   });
 });
-
-function agentContext(thresholdPercent: number | undefined): ContextContainer {
-  const ctx = new ContextContainer();
-  ctx.set(
-    SessionAgentKey,
-    fromCompiledBundle({
-      resolvedAgent: { config: { compaction: { thresholdPercent } } },
-      turnAgent: {},
-    } as never),
-  );
-  return ctx;
-}

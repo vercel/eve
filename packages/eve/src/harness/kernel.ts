@@ -49,7 +49,7 @@ import type {
 import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { eventsOf } from "#harness/publication.js";
-import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
+import { awaitsProviderToolResult } from "#shared/provider-tool-history.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
 const eveVersion = resolveInstalledPackageInfo().version;

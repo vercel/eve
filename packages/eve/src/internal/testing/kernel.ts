@@ -1,6 +1,7 @@
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import type { AgentSettings } from "#execution/effective-agent-config.js";
+import type { ModelCompactionInput } from "#shared/compaction-strategy.js";
 import { createKernel } from "#harness/kernel.js";
 import { foldPublication } from "#harness/session-machine/current.js";
 import type { KernelConfig, StepFn, StepResult } from "#harness/types.js";
@@ -11,7 +12,12 @@ import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { SessionAgent } from "#runtime/sessions/session-agent.js";
 
 export interface TestKernelConfig extends KernelConfig {
-  readonly agent: { readonly model: RuntimeModelReference } & AgentSettings;
+  readonly agent: {
+    readonly instructions?: string;
+    readonly model: RuntimeModelReference;
+  } & Omit<AgentSettings, "compactionStrategy"> & {
+      readonly compactionStrategy?: ModelCompactionInput<never>;
+    };
 }
 
 export function createTestKernel({ agent, ...config }: TestKernelConfig): StepFn {
@@ -49,9 +55,22 @@ function testAgent(agent: TestKernelConfig["agent"]): SessionAgent {
     nodeId: "root",
     resolvedAgent: {
       channels: [],
-      config: { compaction: { thresholdPercent: agent.thresholdPercent } },
+      config: {
+        compaction: { thresholdPercent: agent.thresholdPercent },
+        experimental: { compaction: agent.compactionStrategy },
+      },
       definitions: [],
-      instructions: [],
+      instructions:
+        agent.instructions === undefined
+          ? []
+          : [
+              {
+                content: agent.instructions,
+                name: "instructions/test",
+                owner: { kind: "application" },
+                role: "system",
+              },
+            ],
       skills: [],
     },
     subagentRegistry: { dynamicResolvers: [], preparedTools: [], subagentsByName: new Map() },

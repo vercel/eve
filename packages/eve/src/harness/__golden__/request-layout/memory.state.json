@@ -176,7 +176,6 @@
           "estimateRatio": 0.0006752194463200541,
           "lastKnownInputTokens": 1,
           "lastKnownPromptMessageCount": 4,
-          "lastStage": "tail",
           "measurementsByModel": {
             "eve-test/layout": {
               "inputTokens": 1,
@@ -184,6 +183,7 @@
               "requestEnvelopeTokens": 1402
             }
           },
+          "recentRewrite": true,
           "requestEnvelopeTokens": 1402
         },
         "continuationToken": "http:layout-memory",

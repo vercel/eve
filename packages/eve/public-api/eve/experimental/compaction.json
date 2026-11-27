@@ -1,0 +1,11 @@
+[
+  "CompactionContext",
+  "CompactionModelIdentity",
+  "CompactionModelMatcher",
+  "CompactionOverflowError",
+  "CompactionStrategy",
+  "StoredHistoryMessage",
+  "defaultCompaction",
+  "tagCompactionStrategy",
+  "withoutInjected"
+]
