@@ -72,7 +72,7 @@ jobs:
           # model family. Avoid Gemini: opencode drops its tool-call thought
           # signatures, so it stops reasoning after the first steps there.
           ANTHROPIC_MODEL: ${{ vars.EVE_CODE_BENCH_MODEL || 'anthropic/claude-sonnet-5.5' }}
-          OPENAI_MODEL: ${{ vars.EVE_CODE_BENCH_OPENAI_MODEL || 'openai/gpt-6.1-sol' }}
+          OPENAI_MODEL: ${{ vars.EVE_CODE_BENCH_OPENAI_MODEL || 'openai/gpt-6.2-sol' }}
         with:
           script: |
             const { pathToFileURL } = await import('node:url');
