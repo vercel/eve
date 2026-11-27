@@ -40,7 +40,7 @@ import { materializeWorkspaceDirectory } from "#runtime/workspace/seed-files.js"
 import { toErrorMessage } from "#shared/errors.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
-import { MODEL_SKILL_ROOT, resolveSandboxModelPath } from "#shared/skill-paths.js";
+import { resolveSandboxSkillRoot } from "#shared/skill-paths.js";
 
 export interface SandboxPreparedArtifactStore {
   write(input: {
@@ -263,21 +263,19 @@ export function createSandboxPrepareContext(input: {
         log("writing workspace and skills");
         const bytes = (file: SandboxProviderResourceFile) =>
           typeof file.content === "string" ? Buffer.from(file.content) : file.content;
+        const skillRoot =
+          skills.length > 0 ? await resolveSandboxSkillRoot({ sandbox: session }) : undefined;
         await session.writeFiles({
           files: [
             ...workspace.map((file) => ({
               content: bytes(file),
               path: session.resolvePath(file.relativePath),
             })),
-            ...(await Promise.all(
-              skills.map(async (file) => ({
-                content: bytes(file),
-                path: await resolveSandboxModelPath({
-                  path: `${MODEL_SKILL_ROOT}/${file.relativePath}`,
-                  sandbox: session,
-                }),
-              })),
-            )),
+            ...skills.map((file) => ({
+              content: bytes(file),
+              path:
+                skillRoot === "/" ? `/${file.relativePath}` : `${skillRoot!}/${file.relativePath}`,
+            })),
           ],
         });
       }

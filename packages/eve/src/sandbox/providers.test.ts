@@ -4,10 +4,11 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   DefaultSandbox,
   DockerSandbox,
+  HostSandbox,
   JustBashSandbox,
   VercelSandbox,
 } from "#sandbox/providers.js";
-import type { RuntimeSandboxSession } from "#shared/sandbox-session.js";
+import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
 
 describe("sandbox providers", () => {
   it("exposes image and Dockerfile constructors only for local image providers", () => {
@@ -40,6 +41,11 @@ describe("sandbox providers", () => {
     const environment = DockerSandbox.environment({});
     expectTypeOf(environment.open).returns.toEqualTypeOf<
       Promise<RuntimeSandboxSession<DockerSandboxSession>>
+    >();
+    const hostEnvironment = HostSandbox.environment();
+    expect(hostEnvironment.provider).toBe("host");
+    expectTypeOf(hostEnvironment.open).returns.toEqualTypeOf<
+      Promise<RuntimeSandboxSession<SandboxSession>>
     >();
   });
 });

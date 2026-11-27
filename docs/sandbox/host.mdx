@@ -1,0 +1,83 @@
+---
+title: "Host Sandbox"
+description: "Run an eve agent directly against the host filesystem and shell."
+---
+
+`HostSandbox` connects an eve agent directly to the host filesystem and shell without a container, virtual machine, or virtual filesystem. Use it for local coding agents, devboxes, CI runners, or workloads that already run inside an outer container.
+
+```ts title="agent/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { HostSandbox } from "eve/sandbox/host";
+
+export const environment = HostSandbox.environment();
+export default defineSandbox(() => environment.open());
+```
+
+- `DefaultSandbox` never selects `HostSandbox`. Import it explicitly from `eve/sandbox/host`.
+- `HostSandbox` requires a POSIX host (Linux or macOS). On Windows, run inside WSL2 or use [Docker Sandbox](/docs/sandbox/docker) or [just-bash Sandbox](/docs/sandbox/just-bash).
+- `HostSandbox` provides no filesystem, process, or network isolation from the host. Commands run as the same operating system user as the eve server. Its session has no `setNetworkPolicy()`.
+
+## Working directory
+
+Commands start and relative paths resolve directly in the session's working directory (`cwd`), with no `/workspace` alias or symlink:
+
+1. `cwd` passed to `environment.open({ cwd })`
+2. `cwd` passed to `HostSandbox.environment({ cwd })` (relative paths resolve from your project root)
+3. `process.cwd()` when the session starts
+
+The working directory must already exist when the session opens. eve saves the resolved directory in session state so later turns and server restarts reconnect to the same directory. If the directory no longer exists when a session resumes, eve treats the sandbox as gone and starts fresh.
+
+```ts title="agent/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { HostSandbox } from "eve/sandbox/host";
+
+export const environment = HostSandbox.environment({ inheritEnv: false });
+
+export default defineSandbox(() =>
+  environment.open({
+    cwd: process.env.TASK_WORKDIR,
+    env: { HOME: process.env.HOME, PATH: process.env.PATH },
+  }),
+);
+```
+
+## Environment options
+
+Pass options to `HostSandbox.environment(options)` to configure defaults shared by every session:
+
+| Option       | Default                                    | Effect                                                                                                                                                              |
+| ------------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cwd`        | `process.cwd()` at session start           | Default working directory for new sessions.                                                                                                                         |
+| `env`        | `{}`                                       | Variables layered over the inherited host environment. Set a key to `undefined` to unset an inherited variable.                                                     |
+| `inheritEnv` | `true`                                     | Inherits `process.env` minus eve, Nitro, and model-provider server variables. Pass `false` to start with only `AI_AGENT=eve`, `EVE_SKILLS_DIR`, and explicit `env`. |
+| `shell`      | `/bin/bash`, `/usr/bin/bash`, or `/bin/sh` | Shell executable used for `run()` and `spawn()`.                                                                                                                    |
+| `loginShell` | `false`                                    | Runs commands with `-lc` instead of `-c`. Keep `false` so `/etc/profile` does not reset `PATH` and startup scripts do not print banners to stdout.                  |
+
+When `inheritEnv` is `true`, `HostSandbox` omits `AI_GATEWAY_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `VERCEL_OIDC_TOKEN`, `EVE_DEV`, `EVE_DEVELOPMENT_*`, `NITRO_HOST`, and `NITRO_PORT` from child environments so routine commands do not print server credentials or collide with Nitro ports. Re-enable any variable explicitly through `env`.
+
+Environment precedence runs from lowest to highest: inherited host environment, `AI_AGENT=eve`, `EVE_SKILLS_DIR`, environment-level `env`, `open()` `env`, and per-command `env`.
+
+## Live session options
+
+Pass `cwd` and `env` to `environment.open(options)` to customize one session at runtime. Values passed in `open({ env })` are saved in session state so resumed turns keep them; pass ephemeral secrets per command or in environment-level `env`.
+
+## Skills and workspace files
+
+`HostSandbox` never writes agent files into your working directory or `$HOME/.agents/skills/`:
+
+- Agent skills (both static and dynamic) are written into an eve-owned directory exposed as `$EVE_SKILLS_DIR`, and prompts advertise `$EVE_SKILLS_DIR/<skill>/SKILL.md`.
+- `read_file` and `bash` both resolve `$EVE_SKILLS_DIR`, so bundled skill scripts and references work without touching your personal `~/.agents/skills/`.
+- `HostSandbox` rejects non-empty `agent/sandbox/workspace/` seeds and build-time `prepare` scripts during `eve build`. Install host tools in your machine or container image, or run one-time setup after `environment.open()` in `defineSandbox()`.
+
+## Teardown and process cleanup
+
+Each spawned command runs in its own process group. Aborting a command, calling `sandbox.stop()`, ending the session, or shutting down the eve server terminates tracked process groups (`SIGTERM`, then `SIGKILL` after 200ms) and removes eve's session-private `$EVE_SKILLS_DIR` directory.
+
+Ending or deleting a `HostSandbox` session **never deletes `cwd` or any files in it**.
+
+## Limitations
+
+- `HostSandbox` runs on Linux and macOS only.
+- On macOS, the opt-in `grep` tool requires GNU `realpath` (`-e -z`); the default `bash`, `read_file`, `write_file`, and `edit_file` tools work with stock macOS utilities.
+
+Use [Docker Sandbox](/docs/sandbox/docker) or [Vercel Sandbox](/docs/sandbox/vercel) instead when the agent runs untrusted code or needs filesystem, process, or network isolation. See the [sandbox overview](/docs/sandbox) for shared sandbox APIs and parent inheritance.

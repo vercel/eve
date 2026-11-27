@@ -43,6 +43,14 @@ export function formatProjectInstructions(file: ProjectInstructionsFile): string
   ].join("\n\n");
 }
 
+export function formatWorkspaceContext(
+  workingDirectory: string,
+  file: ProjectInstructionsFile | null,
+): string {
+  const cwdLine = `Current working directory: ${workingDirectory}`;
+  return file === null ? cwdLine : `${cwdLine}\n\n${formatProjectInstructions(file)}`;
+}
+
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
