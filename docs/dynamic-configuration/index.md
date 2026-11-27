@@ -223,7 +223,7 @@ A workflow can't read the variables around it, so a `defineWorkflowTool()` creat
 
 ### Author replayable callbacks
 
-Build callbacks and schemas with ordinary code. Save observations in memos when a fresh process must rebuild from the same data, because values fetched outside a memo are fetched again. Avoid `Math.random()`, `Date.now()` and `ctx.now` in names, descriptions and instructions unless memoized: each changes between model calls and breaks the prompt cache.
+Build callbacks and schemas with ordinary code. Save observations in memos when a fresh process must rebuild from the same data, because values fetched outside a memo are fetched again. Avoid `Math.random()`, `Date.now()` and `ctx.now` in declarations (names, descriptions, schemas and instructions) unless memoized: each changes between model calls and breaks the prompt cache.
 
 ### Create dynamic tools in a package
 
