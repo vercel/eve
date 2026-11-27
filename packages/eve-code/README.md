@@ -56,7 +56,7 @@ Consumers with a PAT, benchmark token, or another credential provider can omit t
 
 ## Develop in this workspace
 
-Rebuild eve after editing `extension/`; the local agent under `agent/` mounts the built `eve/extensions/code`:
+Rebuild eve after editing `extension/`:
 
 ```sh
 pnpm build:eve
