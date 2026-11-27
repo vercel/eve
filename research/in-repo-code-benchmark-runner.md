@@ -85,7 +85,7 @@ To benchmark an unreleased PR commit of `vercel/eve`, the thin staging step runs
 
 ## Rollout phases
 
-1. **Phase 1 — Upstream Harbor `eve` PR:** Update `src/harbor/agents/installed/eve.py` and `eve_runner.mjs` in `harbor-framework/harbor` for `eve` v1.x `Client`, v27 events, `EVE_HARBOR_TOKEN`, `HARBOR_TASK_WORKDIR`, and `HARBOR_REASONING_EFFORT` (and verify `opencode-v2` / `pi` / `fx` route `openai/gpt-6.2-sol` cleanly).
+1. **Phase 1 — Upstream Harbor `eve` PR ([harbor-framework/harbor#4505](https://github.com/harbor-framework/harbor/pull/4505)):** Update `src/harbor/agents/installed/eve.py` and `eve_runner.mjs` in `harbor-framework/harbor` for `eve` v1.x `Client`, v27 events, `EVE_HARBOR_TOKEN`, `HARBOR_TASK_WORKDIR`, and `HARBOR_REASONING_EFFORT` (and verify `opencode-v2` / `pi` / `fx` route `openai/gpt-6.2-sol` cleanly).
 2. **Phase 2 — Stock `eve-code-app` + thin Harbor wrapper in `vercel/eve`:** Add `apps/benchmarks/code/eve-code-app/` and the ~150-line Harbor runner/report adapter under `apps/benchmarks/code/`, verifying `swe-lean` and `deepswe-lean` locally (`--env docker`) and on Vercel (`--env vercel`) across `eve`, `oracle`, and peers.
 3. **Phase 3 — CI cutover:** Switch `.github/workflows/eve-code-benchmark.yml` from `vercel-labs/eve-bench` to `harbor run`, validate both `anthropic` and `openai` (`openai/gpt-6.2-sol`) legs, retire `EVE_BENCH_SSH_KEY`, and remove the unused `packages/eve-code/agent/` directory (currently kept only for `eve-bench`'s `stat` check).
 
