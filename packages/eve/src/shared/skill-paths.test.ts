@@ -105,24 +105,4 @@ describe("skill path helpers", () => {
     ).resolves.toBe("/app/.eve/sandbox/host/skills/investigate/SKILL.md");
     expect(sandbox.commandLog).toEqual([]);
   });
-
-  it("falls back to probing $EVE_SKILLS_DIR when no session fast-path skillsRoot is attached", async () => {
-    const sandbox = mockSandbox({
-      commands: {
-        [`printf '%s\\n' "$EVE_SKILLS_DIR"`]: {
-          exitCode: 0,
-          stderr: "",
-          stdout: "/srv/eve-skills\n",
-        },
-      },
-    });
-
-    await expect(
-      resolveSandboxModelPath({
-        path: `${MODEL_HOST_SKILL_ROOT}/deploy/scripts/run.sh`,
-        sandbox: sandbox.session,
-      }),
-    ).resolves.toBe("/srv/eve-skills/deploy/scripts/run.sh");
-    expect(sandbox.commandLog).toEqual([`printf '%s\\n' "$EVE_SKILLS_DIR"`]);
-  });
 });

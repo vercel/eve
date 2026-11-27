@@ -21,6 +21,5 @@ export const HostSandbox: SandboxProvider<
   SandboxSession
 > = defineSandboxProvider({
   name: HOST_PROVIDER_NAME,
-  stateProtocolVersion: 1,
   environment: (options: HostSandboxEnvironmentOptions) => createHostSandboxProvider(options),
 });

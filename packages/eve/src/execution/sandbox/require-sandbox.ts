@@ -6,28 +6,22 @@ export async function resolveAbsoluteFilePath(
   filePath: string,
 ): Promise<string> {
   const resolvedPath = await resolveSandboxModelPath({ path: filePath, sandbox });
-
-  if (
-    resolvedPath === MODEL_HOST_SKILL_ROOT ||
-    resolvedPath.startsWith(`${MODEL_HOST_SKILL_ROOT}/`)
-  ) {
+  const unexpandedRoot = unexpandedRootOf(resolvedPath);
+  if (unexpandedRoot !== undefined) {
     throw new Error(
-      `Cannot resolve "${filePath}": the sandbox has no usable ${MODEL_HOST_SKILL_ROOT}. ` +
+      `Cannot resolve "${filePath}": the sandbox has no usable ${unexpandedRoot}. ` +
         "Use an absolute path or a path relative to the workspace root.",
     );
   }
-
-  if (
-    resolvedPath === "$HOME" ||
-    resolvedPath.startsWith("$HOME/") ||
-    resolvedPath === "~" ||
-    resolvedPath.startsWith("~/")
-  ) {
-    throw new Error(
-      `Cannot resolve "${filePath}": the sandbox has no usable $HOME. ` +
-        "Use an absolute path or a path relative to the workspace root.",
-    );
-  }
-
   return sandbox.resolvePath(resolvedPath);
+}
+
+function unexpandedRootOf(path: string): string | undefined {
+  if (path === MODEL_HOST_SKILL_ROOT || path.startsWith(`${MODEL_HOST_SKILL_ROOT}/`)) {
+    return MODEL_HOST_SKILL_ROOT;
+  }
+  if (path === "$HOME" || path.startsWith("$HOME/") || path === "~" || path.startsWith("~/")) {
+    return "$HOME";
+  }
+  return undefined;
 }

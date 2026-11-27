@@ -16,28 +16,22 @@ const ANNOUNCEMENT_KEY = "skills";
 const SKILL_RELOAD_KEY = "eve.skill-reload";
 const NO_SKILLS = "Available skills: none";
 
-export interface AvailableSkillSectionOptions {
-  readonly skillRoot?: string;
-}
-
 export function formatAvailableSkillsSection(
   skills: readonly AvailableSkillDescription[],
-  options: AvailableSkillSectionOptions = {},
+  options: { readonly skillRoot?: string } = {},
 ): string | null {
   if (skills.length === 0) {
     return null;
   }
 
   const root = options.skillRoot ?? MODEL_SKILL_ROOT;
-  const locationLine =
-    root === MODEL_SKILL_ROOT
-      ? `Files live under \`${MODEL_SKILL_ROOT}/<skill>/\` (fallback \`skills/<skill>/\` when \`$HOME\` is unavailable); resolve sibling references relative to that \`SKILL.md\`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills; omitted static skills stay available.`
-      : `Files live under \`${root}/<skill>/\`; resolve sibling references relative to that \`SKILL.md\`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills; omitted static skills stay available.`;
+  const fallback =
+    root === MODEL_SKILL_ROOT ? " (fallback `skills/<skill>/` when `$HOME` is unavailable)" : "";
 
   const lines = [
     "Available skills",
     `Load the minimal matching skills with ${SKILL_TOOL_NAME}({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.`,
-    locationLine,
+    `Files live under \`${root}/<skill>/\`${fallback}; resolve sibling references relative to that \`SKILL.md\`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills; omitted static skills stay available.`,
     ...skills.map((skill) => formatAvailableSkillLine(skill, root)),
   ];
 
@@ -46,7 +40,7 @@ export function formatAvailableSkillsSection(
 
 export function dynamicSkillAnnouncements(
   dynamic: readonly CatalogSkill[],
-  options: AvailableSkillSectionOptions = {},
+  options: { readonly skillRoot?: string } = {},
 ): Readonly<Record<string, Announcement>> {
   const text =
     formatAvailableSkillsSection(

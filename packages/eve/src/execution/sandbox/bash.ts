@@ -56,9 +56,11 @@ set -m
 ) < /dev/null > /dev/null 2>&1 &
 pid=$!
 set +m
+trap 'kill -TERM -- -"$pid" 2>/dev/null; sleep 0.1; kill -KILL -- -"$pid" 2>/dev/null; exit 143' TERM HUP
 echo "$pid" > "$_eve_d/pid"
 wait "$pid" 2> /dev/null
 code=$?
+trap - TERM HUP
 mkdir "$_eve_d/claimed" 2> /dev/null || exit 0
 _eve_keep=0 _eve_out_lines=0 _eve_err_lines=0
 if [ -s "$_eve_d/stdout" ]; then

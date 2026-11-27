@@ -21,7 +21,6 @@ import {
 } from "#shared/skill-package.js";
 import { formatAvailableSkillsSection, skillFilePath } from "#execution/skills/instructions.js";
 import { announcementDigest } from "#harness/announcements.js";
-import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { owningSandboxDefinition } from "#runtime/sandbox/registry.js";
 import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import { MODEL_HOST_SKILL_ROOT, MODEL_SKILL_ROOT } from "#shared/skill-paths.js";
@@ -38,11 +37,9 @@ import {
 export function modelSkillRootOf(container: Pick<ContextReader, "get">): string {
   const bundle = compiledBundleOf(container);
   if (bundle === undefined) return MODEL_SKILL_ROOT;
-  const node = bundle.graph?.nodesByNodeId?.get(bundle.nodeId ?? ROOT_RUNTIME_AGENT_NODE_ID);
+  const registered = bundle.graph?.root?.sandboxRegistry?.sandbox;
   const sandbox =
-    node?.sandboxRegistry?.sandbox !== undefined
-      ? owningSandboxDefinition(node.sandboxRegistry.sandbox)
-      : bundle.resolvedAgent?.sandbox;
+    registered != null ? owningSandboxDefinition(registered) : bundle.resolvedAgent?.sandbox;
   return sandbox?.kind === "independent" && sandbox.environment.provider === "host"
     ? MODEL_HOST_SKILL_ROOT
     : MODEL_SKILL_ROOT;

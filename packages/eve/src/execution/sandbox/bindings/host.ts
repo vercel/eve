@@ -6,11 +6,10 @@ import { constants as osConstants } from "node:os";
 import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
 
-import {
-  type ConnectionCommandOptions,
-  withConnectionFastPaths,
-} from "#execution/sandbox/internal-shell.js";
+import { resolveLocalProviderSessionRootPath } from "#execution/sandbox/bindings/local-provider-utils.js";
+import { withConnectionFastPaths } from "#execution/sandbox/internal-shell.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
+import { streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import type {
   HostSandboxEnvironmentOptions,
   HostSandboxRuntimeOptions,
@@ -29,7 +28,7 @@ import {
   type SandboxProviderImplementation,
   type SandboxSessionContext,
 } from "#public/sandbox/provider.js";
-import { isObject } from "#shared/guards.js";
+import { isErrnoCode, isObject } from "#shared/guards.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
 import {
   invalidPreparedSandboxArtifactError,
@@ -41,23 +40,32 @@ export const HOST_PROVIDER_NAME = "host";
 
 const HOST_STATE_VERSION = 1;
 const HOST_ARTIFACT_VERSION = 1;
-const HOST_CACHE_DIRECTORY_NAME = "host";
 const CAPTURE_WORKSPACE_ROOT = "/__eve_host_prepare_workspace__";
 const CAPTURE_SKILLS_ROOT = "/__eve_host_prepare_skills__";
-const PROCESS_KILL_GRACE_MS = 200;
+const PROCESS_KILL_GRACE_MS = 500;
+const PROCESS_GROUP_POLL_MS = 20;
+const LINGERING_REAPER_INTERVAL_MS = 1_000;
+const MAX_FAST_OUTPUT_BYTES = 4 * 1024 * 1024;
 
 const DEFAULT_STRIPPED_ENV_KEYS = new Set([
   "AI_GATEWAY_API_KEY",
   "ANTHROPIC_API_KEY",
   "EVE_DEV",
+  "EVE_EVAL_AUTH_TOKEN",
+  "EVE_EVAL_OIDC_TOKEN",
+  "EVE_INBOX_HANDLE_SECRET",
+  "EVE_SELF_MODIFICATION_GITHUB_TOKEN",
   "GOOGLE_GENERATIVE_AI_API_KEY",
+  "HOST",
   "NITRO_HOST",
   "NITRO_PORT",
   "OPENAI_API_KEY",
+  "PORT",
+  "VERCEL_AUTOMATION_BYPASS_SECRET",
   "VERCEL_OIDC_TOKEN",
+  "VERCEL_TOKEN",
+  "WORKFLOW_LOCAL_BASE_URL",
 ]);
-
-const DEFAULT_STRIPPED_ENV_PREFIXES = ["EVE_DEVELOPMENT_"] as const;
 
 type HostSandboxPreparedSkillFile = {
   readonly contentBase64: string;
@@ -77,23 +85,58 @@ type HostSandboxSessionState = {
   readonly version: typeof HOST_STATE_VERSION;
 };
 
-interface TrackedHostProcess {
+interface ActiveProcessGroup {
+  readonly pgid: number | undefined;
   kill(): Promise<void>;
+  untrack(): void;
 }
 
-const activeProcessesBySession = new Map<string, Set<TrackedHostProcess>>();
+const activeProcessesBySession = new Map<string, Set<ActiveProcessGroup>>();
+const lingeringProcessGroups = new Set<ActiveProcessGroup>();
+let lingeringReaperTimer: ReturnType<typeof setInterval> | undefined;
+let exitHookInstalled = false;
 
-export function assertPosixHost(platform: NodeJS.Platform = process.platform): void {
-  if (platform === "win32") {
+function scheduleLingeringReaper(entry: ActiveProcessGroup): void {
+  lingeringProcessGroups.add(entry);
+  if (lingeringReaperTimer !== undefined) return;
+  lingeringReaperTimer = setInterval(() => {
+    for (const candidate of lingeringProcessGroups) {
+      if (candidate.pgid === undefined || !isProcessGroupAlive(candidate.pgid)) {
+        candidate.untrack();
+      }
+    }
+    if (lingeringProcessGroups.size === 0 && lingeringReaperTimer !== undefined) {
+      clearInterval(lingeringReaperTimer);
+      lingeringReaperTimer = undefined;
+    }
+  }, LINGERING_REAPER_INTERVAL_MS);
+  lingeringReaperTimer.unref?.();
+}
+
+function installExitHook(): void {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.once("exit", () => {
+    for (const processes of activeProcessesBySession.values()) {
+      for (const entry of processes) {
+        if (entry.pgid !== undefined) {
+          try {
+            process.kill(-entry.pgid, "SIGKILL");
+          } catch {}
+        }
+      }
+    }
+    activeProcessesBySession.clear();
+    lingeringProcessGroups.clear();
+  });
+}
+
+function assertPosixHost(): void {
+  if (process.platform === "win32") {
     throw new Error(
       "HostSandbox requires a POSIX host (Linux or macOS). On Windows, run inside WSL2 or use DockerSandbox or JustBashSandbox.",
     );
   }
-}
-
-export function isDefaultStrippedHostEnv(name: string): boolean {
-  if (DEFAULT_STRIPPED_ENV_KEYS.has(name)) return true;
-  return DEFAULT_STRIPPED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix));
 }
 
 export function resolveHostEnvironment(input: {
@@ -101,13 +144,18 @@ export function resolveHostEnvironment(input: {
   readonly callEnv?: Readonly<Record<string, string>>;
   readonly environmentEnv?: Readonly<Record<string, string | undefined>>;
   readonly inheritEnv: boolean;
-  readonly runtimeEnv?: Readonly<Record<string, string | undefined>>;
+  readonly runtimeEnv?: Readonly<Record<string, string | null | undefined>>;
   readonly skillsDir: string;
 }): Record<string, string> {
   const merged: Record<string, string> = {};
   if (input.inheritEnv) {
     for (const [key, value] of Object.entries(input.baseEnv)) {
-      if (value !== undefined && !isDefaultStrippedHostEnv(key)) {
+      if (
+        value !== undefined &&
+        !DEFAULT_STRIPPED_ENV_KEYS.has(key) &&
+        !key.startsWith("EVE_DEV_") &&
+        !key.startsWith("EVE_DEVELOPMENT_")
+      ) {
         merged[key] = value;
       }
     }
@@ -147,15 +195,35 @@ export function createHostSandboxProvider(
     return "/bin/sh";
   }
 
+  async function connect(
+    context: SandboxSessionContext,
+    artifactValue: SandboxJson,
+    cwd: string,
+    runtimeEnv: Readonly<Record<string, string | null | undefined>> | undefined,
+    goneOnMissing: boolean,
+  ): Promise<SandboxConnection> {
+    assertPosixHost();
+    const artifact = requirePreparedHostArtifact(artifactValue);
+    await assertHostDirectoryExists(cwd, { goneOnMissing });
+    const skillsDir = join(resolveHostSessionDir(context), "skills");
+    await materializeHostSkills(skillsDir, artifact.skills);
+    return createHostConnection({
+      cwd,
+      environmentEnv: options.env,
+      inheritEnv,
+      loginShell,
+      runtimeEnv,
+      sessionKey: sessionRegistryKey(context),
+      shell: resolveShell(),
+      skillsDir,
+    });
+  }
+
   return {
     async onSessionEnd(context, _state, { signal }) {
-      throwIfAborted(signal);
-      const sessionKey = sessionRegistryKey(context);
-      await stopSessionProcesses(sessionKey);
-      const { sessionDir, sessionsRoot } = resolveHostSessionPaths(context);
-      if (isPathInsideOrEqual(sessionDir, sessionsRoot)) {
-        await rm(sessionDir, { force: true, recursive: true });
-      }
+      signal?.throwIfAborted();
+      await stopSessionProcesses(sessionRegistryKey(context));
+      await rm(resolveHostSessionDir(context), { force: true, recursive: true });
     },
 
     async prepare(context) {
@@ -175,16 +243,10 @@ export function createHostSandboxProvider(
       const captureConnection: SandboxConnection = withConnectionFastPaths(
         {
           workspaceRoot: CAPTURE_WORKSPACE_ROOT,
-          async readFile() {
-            return unsupportedBuildMutation();
-          },
-          async removePath() {
-            return unsupportedBuildMutation();
-          },
-          async spawn() {
-            return unsupportedBuildMutation();
-          },
-          async stop() {},
+          readFile: async () => unsupportedBuildMutation(),
+          removePath: async () => unsupportedBuildMutation(),
+          spawn: async () => unsupportedBuildMutation(),
+          stop: async () => {},
           async writeFiles({ files }) {
             for (const file of files) {
               const normalized = posix.normalize(file.path);
@@ -223,42 +285,14 @@ export function createHostSandboxProvider(
     },
 
     async resume(context, artifactValue, stateValue) {
-      assertPosixHost();
-      const artifact = requirePreparedHostArtifact(artifactValue);
       const state = requireHostSessionState(stateValue);
-      await assertHostDirectoryExists(state.cwd, { goneOnMissing: true });
-      const { skillsDir } = resolveHostSessionPaths(context);
-      await materializeHostSkills(skillsDir, artifact.skills);
-      return createHostConnection({
-        cwd: state.cwd,
-        environmentEnv: options.env,
-        inheritEnv,
-        loginShell,
-        runtimeEnv: deserializeEnvOverrides(state.env),
-        sessionKey: sessionRegistryKey(context),
-        shell: resolveShell(),
-        skillsDir,
-      });
+      return await connect(context, artifactValue, state.cwd, state.env, true);
     },
 
     async start(context, openOptions, artifactValue) {
-      assertPosixHost();
-      const artifact = requirePreparedHostArtifact(artifactValue);
       const cwd = resolveStartWorkingDirectory(context, options.cwd, openOptions?.cwd);
-      await assertHostDirectoryExists(cwd, { goneOnMissing: false });
-      const { skillsDir } = resolveHostSessionPaths(context);
-      await materializeHostSkills(skillsDir, artifact.skills);
+      const connection = await connect(context, artifactValue, cwd, openOptions?.env, false);
       const serializedEnv = serializeEnvOverrides(openOptions?.env);
-      const connection = createHostConnection({
-        cwd,
-        environmentEnv: options.env,
-        inheritEnv,
-        loginShell,
-        runtimeEnv: openOptions?.env,
-        sessionKey: sessionRegistryKey(context),
-        shell: resolveShell(),
-        skillsDir,
-      });
       const state: HostSandboxSessionState = {
         cwd,
         ...(serializedEnv !== undefined && { env: serializedEnv }),
@@ -276,15 +310,16 @@ function createHostConnection(input: {
   readonly environmentEnv?: Readonly<Record<string, string | undefined>>;
   readonly inheritEnv: boolean;
   readonly loginShell: boolean;
-  readonly runtimeEnv?: Readonly<Record<string, string | undefined>>;
+  readonly runtimeEnv?: Readonly<Record<string, string | null | undefined>>;
   readonly sessionKey: string;
   readonly shell: string;
   readonly skillsDir: string;
 }): SandboxConnection {
   const { cwd, environmentEnv, inheritEnv, loginShell, runtimeEnv, sessionKey, shell, skillsDir } =
     input;
-  const primaryArgs = loginShell ? ["-lc"] : ["-c"];
-  const fastArgs = isBashShell(shell) ? ["--noprofile", "--norc", "-c"] : ["-c"];
+  const primaryArgs = loginShell ? ["-lc", "--"] : ["-c", "--"];
+  const bashShell = basename(shell) === "bash";
+  const fastArgs = bashShell ? ["--noprofile", "--norc", "-c", "--"] : ["-c", "--"];
 
   const commandEnv = (callEnv: Readonly<Record<string, string>>) =>
     resolveHostEnvironment({
@@ -306,7 +341,7 @@ function createHostConnection(input: {
       readonly workingDirectory: string;
     },
   ): Promise<SandboxProcess> => {
-    throwIfAborted(options.signal);
+    options.signal?.throwIfAborted();
     const child = spawn(shell, [...argsPrefix, options.command], {
       cwd: options.workingDirectory,
       detached: true,
@@ -317,64 +352,35 @@ function createHostConnection(input: {
       child.stdin.on("error", () => {});
     }
 
-    const tracked = trackHostChildProcess(sessionKey, child, options.signal);
-    if (options.signal?.aborted) {
-      await tracked.kill();
-    }
+    const stdout = Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>;
+    const stderr = Readable.toWeb(child.stderr!) as ReadableStream<Uint8Array>;
+    const tracked = trackHostChildProcess(sessionKey, child, stdout, stderr, options.signal);
 
     return {
       pid: child.pid,
       ...(options.stdin === true && child.stdin !== null
         ? { stdin: Writable.toWeb(child.stdin) as WritableStream<Uint8Array> }
         : {}),
-      stderr: Readable.toWeb(child.stderr!) as ReadableStream<Uint8Array>,
-      stdout: Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>,
+      stderr,
+      stdout,
       kill: tracked.kill,
       wait: () => tracked.completed,
-    };
-  };
-
-  const runBuffered = async (
-    argsPrefix: readonly string[],
-    options: ConnectionCommandOptions,
-  ): Promise<SandboxCommandResult> => {
-    throwIfAborted(options.signal);
-    const child = spawn(shell, [...argsPrefix, options.command], {
-      cwd: options.workingDirectory,
-      detached: true,
-      env: commandEnv(options.env) as NodeJS.ProcessEnv,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-    child.stdout!.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
-    child.stderr!.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
-
-    const tracked = trackHostChildProcess(sessionKey, child, options.signal);
-    if (options.signal?.aborted) {
-      await tracked.kill();
-    }
-    const { exitCode } = await tracked.completed;
-    return {
-      exitCode,
-      stderr: Buffer.concat(stderrChunks).toString("utf8"),
-      stdout: Buffer.concat(stdoutChunks).toString("utf8"),
     };
   };
 
   const connection: SandboxConnection = {
     workspaceRoot: cwd,
     async readFile({ path, signal }) {
-      throwIfAborted(signal);
+      signal?.throwIfAborted();
       try {
         return await readFile(path, { signal });
       } catch (error) {
-        if (isErrnoException(error) && error.code === "ENOENT") return null;
+        if (isErrnoCode(error, "ENOENT")) return null;
         throw error;
       }
     },
     async removePath(options: SandboxRemovePathOptions) {
-      throwIfAborted(options.signal);
+      options.signal?.throwIfAborted();
       await rm(options.path, {
         force: options.force === true,
         recursive: options.recursive === true,
@@ -384,7 +390,7 @@ function createHostConnection(input: {
     stop: () => stopSessionProcesses(sessionKey),
     async writeFiles(options: SandboxWriteFilesOptions) {
       for (const file of options.files) {
-        throwIfAborted(options.signal);
+        options.signal?.throwIfAborted();
         await mkdir(dirname(file.path), { recursive: true });
         await writeFile(file.path, file.content, { signal: options.signal });
       }
@@ -392,55 +398,113 @@ function createHostConnection(input: {
   };
 
   return withConnectionFastPaths(connection, {
-    runFast: (options) => runBuffered(fastArgs, options),
-    runLogin: (options) => runBuffered(primaryArgs, options),
+    ...(bashShell || loginShell
+      ? {
+          async runFast(cmdOptions): Promise<SandboxCommandResult> {
+            const proc = await spawnWithArgs(fastArgs, cmdOptions);
+            let overflowed = false;
+            const onOverflow = () => {
+              if (overflowed) return;
+              overflowed = true;
+              void Promise.resolve(proc.kill()).catch(() => {});
+            };
+            const [stdoutBytes, stderrBytes, { exitCode }] = await Promise.all([
+              streamToBuffer(proc.stdout, { maxBytes: MAX_FAST_OUTPUT_BYTES, onOverflow }),
+              streamToBuffer(proc.stderr, { maxBytes: MAX_FAST_OUTPUT_BYTES, onOverflow }),
+              proc.wait(),
+            ]);
+            if (overflowed) {
+              throw new Error(
+                `Sandbox internal command output exceeded the ${MAX_FAST_OUTPUT_BYTES}-byte limit.`,
+              );
+            }
+            return {
+              exitCode,
+              stderr: stderrBytes.toString("utf8"),
+              stdout: stdoutBytes.toString("utf8"),
+            };
+          },
+        }
+      : {}),
     skillsRoot: skillsDir,
-    spawnBounded: (options) => spawnWithArgs(primaryArgs, options),
   });
 }
 
 function trackHostChildProcess(
   sessionKey: string,
   child: ChildProcess,
+  stdout: ReadableStream<Uint8Array>,
+  stderr: ReadableStream<Uint8Array>,
   signal: AbortSignal | undefined,
 ): {
   readonly completed: Promise<{ exitCode: number }>;
   kill(): Promise<void>;
 } {
-  let settled = false;
+  const pgid = child.pid;
+  let childExited = false;
   let killing: Promise<void> | undefined;
-  let graceTimer: ReturnType<typeof setTimeout> | undefined;
-  let resolveClosed!: () => void;
-  const closed = new Promise<void>((resolveDone) => {
-    resolveClosed = resolveDone;
+  let resolveExited!: () => void;
+  const exited = new Promise<void>((resolveDone) => {
+    resolveExited = resolveDone;
   });
 
+  const untrack = () => {
+    signal?.removeEventListener("abort", onAbort);
+    lingeringProcessGroups.delete(entry);
+    if (lingeringProcessGroups.size === 0 && lingeringReaperTimer !== undefined) {
+      clearInterval(lingeringReaperTimer);
+      lingeringReaperTimer = undefined;
+    }
+    const active = activeProcessesBySession.get(sessionKey);
+    if (active !== undefined) {
+      active.delete(entry);
+      if (active.size === 0) activeProcessesBySession.delete(sessionKey);
+    }
+  };
+
+  const destroyUnreadStdio = () => {
+    if (!stdout.locked) child.stdout?.destroy();
+    if (!stderr.locked) child.stderr?.destroy();
+  };
+
   const kill = (): Promise<void> => {
-    if (settled || child.pid === undefined) return Promise.resolve();
-    const pid = child.pid;
+    if (pgid === undefined) {
+      untrack();
+      return Promise.resolve();
+    }
+    if (childExited && !isProcessGroupAlive(pgid)) {
+      destroyUnreadStdio();
+      untrack();
+      return Promise.resolve();
+    }
     killing ??= (async () => {
-      sendGroupSignal(pid, "SIGTERM");
-      const exitedInGrace = await Promise.race([
-        closed.then(() => true),
-        new Promise<boolean>((resolveTimeout) => {
-          graceTimer = setTimeout(() => resolveTimeout(false), PROCESS_KILL_GRACE_MS);
-          graceTimer.unref?.();
-        }),
-      ]);
-      if (!exitedInGrace && !settled) {
-        sendGroupSignal(pid, "SIGKILL");
-        await closed;
+      try {
+        child.stdin?.destroy();
+        sendGroupSignal(pgid, "SIGTERM");
+        await waitForProcessGroupDeath(pgid, exited, PROCESS_KILL_GRACE_MS);
+        if (!childExited || isProcessGroupAlive(pgid)) {
+          sendGroupSignal(pgid, "SIGKILL");
+          await waitForProcessGroupDeath(pgid, exited, PROCESS_KILL_GRACE_MS);
+        }
+        destroyUnreadStdio();
+      } finally {
+        untrack();
       }
     })();
     return killing;
   };
 
-  const tracked: TrackedHostProcess = { kill };
-  const sessionProcesses = getOrCreateSessionProcesses(sessionKey);
-  sessionProcesses.add(tracked);
+  const entry: ActiveProcessGroup = { kill, pgid, untrack };
+  installExitHook();
+  let sessionProcesses = activeProcessesBySession.get(sessionKey);
+  if (sessionProcesses === undefined) {
+    sessionProcesses = new Set();
+    activeProcessesBySession.set(sessionKey, sessionProcesses);
+  }
+  sessionProcesses.add(entry);
 
   const onAbort = () => {
-    void kill();
+    void kill().catch(() => {});
   };
   signal?.addEventListener("abort", onAbort, { once: true });
 
@@ -448,22 +512,20 @@ function trackHostChildProcess(
     child.once("error", (error) => {
       rejectDone(error);
     });
-    child.once("close", (code, signalName) => {
+    child.once("exit", (code, signalName) => {
       if (signal?.aborted) {
-        rejectDone(abortError(signal));
+        rejectDone(signal.reason);
         return;
       }
       resolveDone({ exitCode: code ?? signalExitCode(signalName) });
     });
   }).finally(() => {
-    settled = true;
-    clearTimeout(graceTimer);
-    resolveClosed();
-    signal?.removeEventListener("abort", onAbort);
-    const active = activeProcessesBySession.get(sessionKey);
-    if (active !== undefined) {
-      active.delete(tracked);
-      if (active.size === 0) activeProcessesBySession.delete(sessionKey);
+    childExited = true;
+    resolveExited();
+    if (pgid === undefined || !isProcessGroupAlive(pgid)) {
+      untrack();
+    } else {
+      scheduleLingeringReaper(entry);
     }
   });
   completed.catch(() => {});
@@ -471,33 +533,50 @@ function trackHostChildProcess(
   return { completed, kill };
 }
 
-function getOrCreateSessionProcesses(sessionKey: string): Set<TrackedHostProcess> {
-  let set = activeProcessesBySession.get(sessionKey);
-  if (set === undefined) {
-    set = new Set();
-    activeProcessesBySession.set(sessionKey, set);
+async function waitForProcessGroupDeath(
+  pgid: number,
+  exited: Promise<void>,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  await Promise.race([exited, delayUnref(timeoutMs)]);
+  while (isProcessGroupAlive(pgid) && Date.now() < deadline) {
+    await delayUnref(Math.min(PROCESS_GROUP_POLL_MS, Math.max(1, deadline - Date.now())));
   }
-  return set;
+}
+
+function delayUnref(ms: number): Promise<void> {
+  return new Promise((resolveDelay) => {
+    const timer = setTimeout(resolveDelay, ms);
+    timer.unref?.();
+  });
+}
+
+function isProcessGroupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch (error) {
+    return !isErrnoCode(error, "ESRCH");
+  }
 }
 
 async function stopSessionProcesses(sessionKey: string): Promise<void> {
   const active = activeProcessesBySession.get(sessionKey);
   if (active === undefined) return;
-  const processes = [...active];
-  await Promise.allSettled(processes.map((proc) => proc.kill()));
+  const entries = [...active];
+  await Promise.allSettled(entries.map((entry) => entry.kill()));
 }
 
 function sendGroupSignal(pid: number, signal: NodeJS.Signals): void {
   try {
     process.kill(-pid, signal);
   } catch (error) {
-    if (!isErrnoException(error) || error.code !== "ESRCH") {
+    if (!isErrnoCode(error, "ESRCH")) {
       try {
         process.kill(pid, signal);
       } catch (fallbackError) {
-        if (!isErrnoException(fallbackError) || fallbackError.code !== "ESRCH") {
-          throw fallbackError;
-        }
+        if (!isErrnoCode(fallbackError, "ESRCH")) throw fallbackError;
       }
     }
   }
@@ -514,16 +593,12 @@ function resolveStartWorkingDirectory(
   environmentCwd: string | undefined,
   runtimeCwd: string | undefined,
 ): string {
-  if (runtimeCwd !== undefined) {
-    if (runtimeCwd.trim().length === 0) {
-      throw new Error("HostSandbox open `cwd` must be a non-empty directory path.");
+  const configured = runtimeCwd ?? environmentCwd;
+  if (configured !== undefined) {
+    if (configured.trim().length === 0) {
+      throw new Error("HostSandbox `cwd` must be a non-empty directory path.");
     }
-    return resolve(runtimeCwd);
-  }
-  if (environmentCwd !== undefined) {
-    return isAbsolute(environmentCwd)
-      ? resolve(environmentCwd)
-      : context.resolveProjectPath(environmentCwd);
+    return isAbsolute(configured) ? resolve(configured) : context.resolveProjectPath(configured);
   }
   return resolve(process.cwd());
 }
@@ -536,7 +611,7 @@ async function assertHostDirectoryExists(
   try {
     info = await stat(cwd);
   } catch (error) {
-    if (isErrnoException(error) && error.code === "ENOENT") {
+    if (isErrnoCode(error, "ENOENT")) {
       if (options.goneOnMissing) {
         throw new SandboxSessionGoneError(`HostSandbox directory "${cwd}" no longer exists.`);
       }
@@ -558,45 +633,45 @@ function sessionRegistryKey(context: SandboxSessionContext): string {
   return `${context.storagePath}\0${context.session.id}`;
 }
 
-function resolveHostSessionPaths(context: SandboxSessionContext): {
-  readonly sessionDir: string;
-  readonly sessionsRoot: string;
-  readonly skillsDir: string;
-} {
+function resolveHostSessionDir(context: SandboxSessionContext): string {
   const hash = createSandboxProviderIdentity({
     sessionId: context.session.id,
     version: HOST_STATE_VERSION,
   }).slice(0, 24);
-  const sessionsRoot = resolve(context.storagePath, HOST_CACHE_DIRECTORY_NAME, "sessions");
-  const sessionDir = join(sessionsRoot, hash);
-  return {
-    sessionDir,
-    sessionsRoot,
-    skillsDir: join(sessionDir, "skills"),
-  };
+  return resolve(
+    resolveLocalProviderSessionRootPath(context.storagePath, HOST_PROVIDER_NAME, hash),
+  );
 }
 
 async function materializeHostSkills(
   skillsDir: string,
   skills: readonly HostSandboxPreparedSkillFile[] | undefined,
 ): Promise<void> {
-  if (skills === undefined || skills.length === 0) return;
-  for (const file of skills) {
-    assertSafeRelativeSkillPath(file.path);
-    const target = resolve(skillsDir, file.path);
-    if (!isPathInsideOrEqual(target, skillsDir)) {
-      throw new Error(`HostSandbox prepared skill path escapes skills directory: "${file.path}".`);
+  if (skills === undefined || skills.length === 0 || existsSync(skillsDir)) return;
+  const tempDir = `${skillsDir}.${randomUUID()}.tmp`;
+  let published = false;
+  try {
+    await mkdir(tempDir, { recursive: true });
+    for (const file of skills) {
+      assertSafeRelativeSkillPath(file.path);
+      const target = resolve(tempDir, file.path);
+      if (!isPathInsideOrEqual(target, tempDir)) {
+        throw new Error(
+          `HostSandbox prepared skill path escapes skills directory: "${file.path}".`,
+        );
+      }
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, Buffer.from(file.contentBase64, "base64"));
     }
-    if (existsSync(target)) continue;
-    await mkdir(dirname(target), { recursive: true });
-    const temp = `${target}.${randomUUID()}.tmp`;
+    await mkdir(dirname(skillsDir), { recursive: true });
     try {
-      await writeFile(temp, Buffer.from(file.contentBase64, "base64"));
-      await rename(temp, target);
+      await rename(tempDir, skillsDir);
+      published = true;
     } catch (error) {
-      await rm(temp, { force: true }).catch(() => {});
-      if (!existsSync(target)) throw error;
+      if (!existsSync(skillsDir)) throw error;
     }
+  } finally {
+    if (!published) await rm(tempDir, { force: true, recursive: true }).catch(() => {});
   }
 }
 
@@ -614,11 +689,11 @@ function assertSafeRelativeSkillPath(relativePath: string): void {
 
 function applyEnvOverrides(
   target: Record<string, string>,
-  overrides: Readonly<Record<string, string | undefined>> | undefined,
+  overrides: Readonly<Record<string, string | null | undefined>> | undefined,
 ): void {
   if (overrides === undefined) return;
   for (const [key, value] of Object.entries(overrides)) {
-    if (value === undefined) delete target[key];
+    if (value == null) delete target[key];
     else target[key] = value;
   }
 }
@@ -630,15 +705,6 @@ function serializeEnvOverrides(
   const entries = Object.entries(overrides);
   if (entries.length === 0) return undefined;
   return Object.fromEntries(entries.map(([key, value]) => [key, value ?? null]));
-}
-
-function deserializeEnvOverrides(
-  overrides: SerializedEnvOverrides | undefined,
-): Readonly<Record<string, string | undefined>> | undefined {
-  if (overrides === undefined) return undefined;
-  return Object.fromEntries(
-    Object.entries(overrides).map(([key, value]) => [key, value === null ? undefined : value]),
-  );
 }
 
 function requirePreparedHostArtifact(artifact: SandboxJson): HostSandboxPreparedArtifact {
@@ -687,22 +753,4 @@ function requireHostSessionState(state: SandboxJson): HostSandboxSessionState {
     ...(state.env !== undefined && { env: state.env as SerializedEnvOverrides }),
     version: HOST_STATE_VERSION,
   };
-}
-
-function isBashShell(shell: string): boolean {
-  return basename(shell) === "bash";
-}
-
-function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
-}
-
-function abortError(signal: AbortSignal): unknown {
-  return signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
-}
-
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) {
-    throw abortError(signal);
-  }
 }

@@ -406,30 +406,24 @@ describe("dynamic skill files after a change", () => {
     };
 
     const hostRoot = containerWith({
-      graph: { nodesByNodeId: new Map() },
+      graph: { root: { sandboxRegistry: { sandbox: null } } },
       resolvedAgent: { sandbox: { environment: hostEnv, kind: "independent" } },
     });
     const defaultRoot = containerWith({
-      graph: { nodesByNodeId: new Map() },
+      graph: {},
       resolvedAgent: { sandbox: { environment: defaultEnv, kind: "independent" } },
     });
     const hostSubagent = containerWith({
       graph: {
-        nodesByNodeId: new Map([
-          [
-            "subagent-1",
-            {
-              sandboxRegistry: {
-                sandbox: {
-                  definition: { kind: "parent" },
-                  inheritance: { definition: { environment: hostEnv, kind: "independent" } },
-                },
-              },
+        root: {
+          sandboxRegistry: {
+            sandbox: {
+              definition: { kind: "parent" },
+              inheritance: { definition: { environment: hostEnv, kind: "independent" } },
             },
-          ],
-        ]),
+          },
+        },
       },
-      nodeId: "subagent-1",
       resolvedAgent: { sandbox: { kind: "parent" } },
     });
 

@@ -36,19 +36,17 @@ export async function readProjectInstructions(
   };
 }
 
-export function formatProjectInstructions(file: ProjectInstructionsFile): string {
-  return [
-    "Project-specific instructions and guidelines:",
-    `<project_instructions path="${file.path}">\n${file.content}\n</project_instructions>`,
-  ].join("\n\n");
-}
-
 export function formatWorkspaceContext(
   workingDirectory: string,
   file: ProjectInstructionsFile | null,
 ): string {
   const cwdLine = `Current working directory: ${workingDirectory}`;
-  return file === null ? cwdLine : `${cwdLine}\n\n${formatProjectInstructions(file)}`;
+  if (file === null) return cwdLine;
+  return [
+    cwdLine,
+    "Project-specific instructions and guidelines:",
+    `<project_instructions path="${file.path}">\n${file.content}\n</project_instructions>`,
+  ].join("\n\n");
 }
 
 function shellQuote(value: string): string {

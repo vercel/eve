@@ -36,8 +36,9 @@ export interface HostSandboxEnvironmentOptions {
 /** Options applied when eve opens one live HostSandbox session. */
 export interface HostSandboxRuntimeOptions {
   /**
-   * Working directory for this session. Overrides the environment's `cwd` and
-   * defaults to `process.cwd()` when neither is set.
+   * Working directory for this session. Relative paths resolve from the project
+   * root. Overrides the environment's `cwd` and defaults to `process.cwd()`
+   * when neither is set.
    */
   readonly cwd?: string;
   /**
