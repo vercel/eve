@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { DATASET_LOCKS } from "./datasets.ts";
+import { extractBoundedTar, streamToFileWithLimit } from "./docker.ts";
 import { forwardCredentials, runTrialPool } from "./pool.ts";
 import type {
   BenchmarkRunOptions,
@@ -24,6 +25,28 @@ const SANDBOX_CACHE_DIR = "/opt/code-bench/cache";
 const SANDBOX_BOOT_SCRIPT = "/opt/code-bench/boot-sandbox.sh";
 const SANDBOX_VCPUS = 4;
 const SANDBOX_TRIAL_TIMEOUT_MS = 60 * 60 * 1000;
+const MAX_TRIAL_ARCHIVE_BYTES = 32 * 1024 * 1024;
+const MAX_TRIAL_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
+const MAX_TRIAL_ARCHIVE_FILES = 1_000;
+const MAX_CONCURRENT_DOWNLOADS = 4;
+
+let activeDownloads = 0;
+const downloadWaiters: Array<() => void> = [];
+
+async function withDownloadSlot<T>(fn: () => Promise<T>): Promise<T> {
+  while (activeDownloads >= MAX_CONCURRENT_DOWNLOADS) {
+    await new Promise<void>((resolveWait) => {
+      downloadWaiters.push(resolveWait);
+    });
+  }
+  activeDownloads += 1;
+  try {
+    return await fn();
+  } finally {
+    activeDownloads -= 1;
+    downloadWaiters.shift()?.();
+  }
+}
 
 const INSTALL_DOCKER_SH = `#!/usr/bin/env bash
 set -euo pipefail
@@ -288,21 +311,47 @@ async function runSingleTrialInSandbox(options: {
       sudo: true,
     });
 
+    const maxArchiveKb = Math.floor(MAX_TRIAL_UNCOMPRESSED_BYTES / 1024);
     await sandbox.runCommand({
       cmd: "bash",
-      args: ["-c", `tar -czf /tmp/trial-out.tar.gz -C ${remoteOut} . 2>/dev/null || true`],
+      args: [
+        "-c",
+        `set -euo pipefail
+out="${remoteOut}"
+rm -f /tmp/trial-out.tar.gz
+[ -d "$out" ] || exit 0
+count=$(find "$out" -mindepth 1 | head -n ${MAX_TRIAL_ARCHIVE_FILES + 1} | wc -l | tr -d ' ')
+kb=$(du -sk "$out" 2>/dev/null | awk '{print $1}')
+if [ "$count" -le ${MAX_TRIAL_ARCHIVE_FILES} ] && [ "\${kb:-0}" -le ${maxArchiveKb} ]; then
+  tar -czf /tmp/trial-out.tar.gz -C "$out" . 2>/dev/null || true
+elif [ -f "$out/trial.json" ] && [ ! -L "$out/trial.json" ] && [ "$(wc -c < "$out/trial.json")" -le 1048576 ]; then
+  tar -czf /tmp/trial-out.tar.gz -C "$out" trial.json 2>/dev/null || true
+fi`,
+      ],
       sudo: true,
     });
-    const tarBuf = await sandbox.readFileToBuffer({ path: "/tmp/trial-out.tar.gz" });
-    if (tarBuf && tarBuf.length > 0) {
+    const activeSandbox = sandbox;
+    await withDownloadSlot(async () => {
+      const tarStream = await activeSandbox.readFile({ path: "/tmp/trial-out.tar.gz" });
+      if (!tarStream) return;
       const localTar = join(trialDir, ".trial-out.tar.gz");
-      await writeFile(localTar, tarBuf);
       try {
-        await execFileAsync("tar", ["-xzf", localTar, "-C", trialDir]);
+        const downloadedBytes = await streamToFileWithLimit(
+          tarStream,
+          localTar,
+          MAX_TRIAL_ARCHIVE_BYTES,
+        );
+        if (downloadedBytes > 0) {
+          await extractBoundedTar(localTar, trialDir, {
+            gzip: true,
+            maxFiles: MAX_TRIAL_ARCHIVE_FILES,
+            maxUncompressedBytes: MAX_TRIAL_UNCOMPRESSED_BYTES,
+          });
+        }
       } finally {
         await rm(localTar, { force: true }).catch(() => {});
       }
-    }
+    });
 
     try {
       return JSON.parse(await readFile(join(trialDir, "trial.json"), "utf8")) as TrialResult;

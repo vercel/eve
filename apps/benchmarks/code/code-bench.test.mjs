@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import { snapshotFromReport } from "../../../.github/scripts/eve-code-docs-snapshot.mjs";
 import { loadTaskFromDir } from "./datasets.ts";
-import { parseRewardText } from "./docker.ts";
+import { extractBoundedTar, parseRewardText, streamToFileWithLimit } from "./docker.ts";
 import { summarizeEvents } from "./harnesses/eve-runner.mjs";
 import {
   buildOpencodeConfig,
@@ -72,6 +75,81 @@ test("parseRewardText rejects DeepSWE -1 crash sentinels, empty files, and out-o
   const outOfRange = parseRewardText("2");
   assert.equal(outOfRange.reward, null);
   assert.match(outOfRange.error ?? "", /out-of-range/u);
+});
+
+const execFileAsync = promisify(execFile);
+
+test("streamToFileWithLimit and extractBoundedTar enforce byte, file-count, and symlink caps", async (t) => {
+  const work = await mkdtemp(join(tmpdir(), "code-bench-tar-"));
+  t.after(() => rm(work, { recursive: true, force: true }));
+
+  const limitedFile = join(work, "limited.bin");
+  let aborted = false;
+  await assert.rejects(
+    streamToFileWithLimit(
+      Readable.from([Buffer.alloc(60, 1), Buffer.alloc(60, 2)]),
+      limitedFile,
+      100,
+      () => {
+        aborted = true;
+      },
+    ),
+    /exceeded 100 byte limit/u,
+  );
+  assert.equal(aborted, true);
+  await assert.rejects(readFile(limitedFile));
+
+  const srcDir = join(work, "src");
+  await mkdir(join(srcDir, "agent"), { recursive: true });
+  await writeFile(join(srcDir, "agent", "result.json"), '{"status":"completed"}\n');
+  const validTar = join(work, "valid.tar.gz");
+  await execFileAsync("tar", ["-czf", validTar, "-C", srcDir, "."]);
+
+  const outDir = join(work, "out");
+  await extractBoundedTar(validTar, outDir, {
+    gzip: true,
+    maxFiles: 10,
+    maxUncompressedBytes: 64 * 1024,
+  });
+  assert.equal(
+    await readFile(join(outDir, "agent", "result.json"), "utf8"),
+    '{"status":"completed"}\n',
+  );
+
+  await assert.rejects(
+    extractBoundedTar(validTar, join(work, "too-many"), {
+      gzip: true,
+      maxFiles: 1,
+      maxUncompressedBytes: 64 * 1024,
+    }),
+    /entry limit/u,
+  );
+
+  await writeFile(join(srcDir, "zeros.bin"), Buffer.alloc(128 * 1024, 0));
+  const bombTar = join(work, "bomb.tar.gz");
+  await execFileAsync("tar", ["-czf", bombTar, "-C", srcDir, "."]);
+  await assert.rejects(
+    extractBoundedTar(bombTar, join(work, "bomb-out"), {
+      gzip: true,
+      maxFiles: 20,
+      maxUncompressedBytes: 16 * 1024,
+    }),
+    /uncompressed byte limit/u,
+  );
+
+  const symSrc = join(work, "sym-src");
+  await mkdir(symSrc, { recursive: true });
+  await symlink("/etc/passwd", join(symSrc, "leak"));
+  const symTar = join(work, "sym.tar");
+  await execFileAsync("tar", ["-cf", symTar, "-C", symSrc, "."]);
+  await assert.rejects(
+    extractBoundedTar(symTar, join(work, "sym-out"), {
+      gzip: false,
+      maxFiles: 10,
+      maxUncompressedBytes: 64 * 1024,
+    }),
+    /disallowed entry type/u,
+  );
 });
 
 test("peer-runner handles OpenCode gpt-6.2-sol config, reasoning tokens, pi error masking, and fx subagents", () => {

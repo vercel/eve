@@ -1,11 +1,12 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { createWriteStream } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { finished } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { createGunzip } from "node:zlib";
 
 import type {
   AgentOutcome,
@@ -25,6 +26,8 @@ const TASK_DIR = "/task";
 const TESTS_DIR = "/tests";
 const LOGS_DIR = "/logs";
 const PEER_RUNNER_SRC = join(dirname(fileURLToPath(import.meta.url)), "harnesses/peer-runner.mjs");
+const MAX_CONTAINER_COPY_FILES = 1_000;
+const MAX_CONTAINER_COPY_BYTES = 64 * 1024 * 1024;
 
 const dockerCmd = (args: readonly string[], timeoutMs = 120_000) =>
   execFileAsync("docker", [...args], { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 });
@@ -80,14 +83,173 @@ async function execInContainer(options: {
   return { exitCode: timedOut ? 124 : exitCode, timedOut, durationMs: Date.now() - startedAt };
 }
 
+export async function streamToFileWithLimit(
+  source: NodeJS.ReadableStream,
+  destPath: string,
+  maxBytes: number,
+  onLimit?: () => void,
+): Promise<number> {
+  await mkdir(dirname(destPath), { recursive: true });
+  const out = createWriteStream(destPath);
+  let totalBytes = 0;
+  let exceeded = false;
+  try {
+    for await (const rawChunk of source) {
+      const chunk = typeof rawChunk === "string" ? Buffer.from(rawChunk) : Buffer.from(rawChunk);
+      totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        exceeded = true;
+        onLimit?.();
+        if ("destroy" in source && typeof source.destroy === "function") {
+          source.destroy();
+        }
+        throw new RangeError(`Transfer exceeded ${maxBytes} byte limit`);
+      }
+      if (!out.write(chunk)) {
+        await new Promise<void>((resolveDrain, rejectDrain) => {
+          out.once("drain", resolveDrain);
+          out.once("error", rejectDrain);
+        });
+      }
+    }
+    out.end();
+    await finished(out);
+    return totalBytes;
+  } catch (err) {
+    out.destroy();
+    await rm(destPath, { force: true }).catch(() => {});
+    if (exceeded && err instanceof RangeError) throw err;
+    throw err;
+  }
+}
+
+async function measureTarUncompressedBytes(
+  tarPath: string,
+  gzip: boolean,
+  maxBytes: number,
+): Promise<number> {
+  if (!gzip) {
+    const size = (await stat(tarPath)).size;
+    if (size > maxBytes) {
+      throw new RangeError(`Archive exceeded ${maxBytes} uncompressed byte limit`);
+    }
+    return size;
+  }
+  const input = createReadStream(tarPath);
+  const gunzip = createGunzip();
+  input.pipe(gunzip);
+  let total = 0;
+  try {
+    for await (const chunk of gunzip) {
+      total += (chunk as Buffer).length;
+      if (total > maxBytes) {
+        input.destroy();
+        gunzip.destroy();
+        throw new RangeError(`Archive exceeded ${maxBytes} uncompressed byte limit`);
+      }
+    }
+    return total;
+  } catch (err) {
+    input.destroy();
+    gunzip.destroy();
+    throw err;
+  }
+}
+
+export async function extractBoundedTar(
+  tarPath: string,
+  destDir: string,
+  options: {
+    readonly gzip: boolean;
+    readonly maxFiles: number;
+    readonly maxUncompressedBytes: number;
+  },
+): Promise<void> {
+  await measureTarUncompressedBytes(tarPath, options.gzip, options.maxUncompressedBytes);
+  const listFlag = options.gzip ? "-tzf" : "-tf";
+  const verboseFlag = options.gzip ? "-tzvf" : "-tvf";
+  const { stdout: namesOut } = await execFileAsync("tar", [listFlag, tarPath], {
+    timeout: 60_000,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  const entries = namesOut
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (entries.length > options.maxFiles) {
+    throw new RangeError(`Archive exceeded ${options.maxFiles} entry limit (${entries.length})`);
+  }
+  for (const entry of entries) {
+    if (entry.startsWith("/") || entry.split("/").includes("..")) {
+      throw new RangeError(`Archive contains unsafe path: ${entry}`);
+    }
+  }
+  const { stdout: verboseOut } = await execFileAsync("tar", [verboseFlag, tarPath], {
+    timeout: 60_000,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  for (const line of verboseOut.split("\n")) {
+    if (!line) continue;
+    const typeChar = line[0];
+    if (typeChar !== "-" && typeChar !== "d") {
+      throw new RangeError(`Archive contains disallowed entry type '${typeChar}'`);
+    }
+  }
+  await mkdir(destDir, { recursive: true });
+  const extractFlag = options.gzip ? "-xzf" : "-xf";
+  await execFileAsync("tar", ["--no-same-owner", extractFlag, tarPath, "-C", destDir], {
+    timeout: 120_000,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+}
+
 const copyInto = (src: string, container: string, dest: string) =>
   dockerCmd(["cp", src, `${container}:${dest}`], 120_000);
 
-const copyFrom = (container: string, src: string, dest: string) =>
-  dockerCmd(["cp", `${container}:${src}`, dest], 120_000).then(
-    () => true,
-    () => false,
-  );
+async function copyFrom(container: string, src: string, dest: string): Promise<boolean> {
+  const tempTar = join(dirname(dest), `.copy-${randomUUID().slice(0, 8)}.tar`);
+  const child = spawn("docker", ["cp", `${container}:${src}/.`, "-"], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stderr.resume();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill("SIGKILL");
+  }, 120_000);
+  const exitPromise = new Promise<number>((resolveExit) => {
+    child.once("close", (code) => resolveExit(code ?? 1));
+    child.once("error", () => resolveExit(1));
+  });
+  try {
+    const bytes = await streamToFileWithLimit(
+      child.stdout,
+      tempTar,
+      MAX_CONTAINER_COPY_BYTES,
+      () => {
+        child.kill("SIGKILL");
+      },
+    );
+    const exitCode = await exitPromise;
+    if (timedOut) {
+      throw new Error(`Timed out copying ${src} from container`);
+    }
+    if (exitCode !== 0 || bytes === 0) {
+      return false;
+    }
+    await extractBoundedTar(tempTar, dest, {
+      gzip: false,
+      maxFiles: MAX_CONTAINER_COPY_FILES,
+      maxUncompressedBytes: MAX_CONTAINER_COPY_BYTES,
+    });
+    return true;
+  } finally {
+    clearTimeout(timer);
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    await exitPromise;
+    await rm(tempTar, { force: true }).catch(() => {});
+  }
+}
 
 async function ensureTaskImage(task: TaskSpec): Promise<{ image: string; builtLocally: boolean }> {
   if (task.dockerImage) {
