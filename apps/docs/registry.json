@@ -47,7 +47,7 @@
         {
           "path": "registry/eve/self-modification/extension.ts",
           "type": "registry:file",
-          "target": "agent/extensions/self-modification/extension.ts"
+          "target": "agent/extensions/self/extension.ts"
         }
       ]
     },
@@ -95,7 +95,7 @@
         {
           "path": "registry/eve/self-modification/extension.ts",
           "type": "registry:file",
-          "target": "agent/extensions/self-modification/extension.ts"
+          "target": "agent/extensions/self/extension.ts"
         }
       ]
     },

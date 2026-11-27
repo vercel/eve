@@ -1,19 +1,24 @@
+import { access, stat } from "node:fs/promises";
+import { join } from "node:path";
+
 import { defineTool } from "eve/tools";
 
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
-import { queryLocalTraceSummaries, type LocalTraceSortBy } from "#tracing/local/trace-query.js";
-import { summarizeLocalTrace, type LocalTraceSummary } from "#tracing/local/trace-summary.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 import {
   localTraceConversationMarker,
   localTraceIndexedMarker,
 } from "#tracing/local/trace-discovery-index.js";
+import { queryLocalTraceSummaries, type LocalTraceSortBy } from "#tracing/local/trace-query.js";
+import { listLocalTraceIds, readLocalTraceActivityMs } from "#tracing/local/trace-reader.js";
+import { resolveLocalTraceSchemaDirectory } from "#tracing/local/trace-span-processor.js";
+import { summarizeLocalTrace, type LocalTraceSummary } from "#tracing/local/trace-summary.js";
 
 import type { ResolvedSelfModificationConfig } from "../../../../config.js";
 import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js";
 import {
   readTraceSources,
-  TRACE_ID,
+  requireLocalTraceAppRoot,
   type LocalTraceSpanSource,
 } from "../../../trace-inspection.js";
 
@@ -57,20 +62,43 @@ const searchTracesTool = defineTool({
     const conversationId = resolveConversationId(
       ctx.session.parent?.rootSessionId ?? ctx.session.id,
     );
-    const sandbox = await ctx.getSandbox();
-    const [available, indexed, conversation] = await Promise.all([
-      sandbox.run({ command: "ls -1dt /traces/*" }),
-      sandbox.run({ command: `ls -1 /traces/*/${localTraceIndexedMarker()}` }),
-      sandbox.run({ command: `ls -1 /traces/*/${localTraceConversationMarker(conversationId)}` }),
-    ]);
-    if (available.exitCode !== 0 && !isEmptyTraceListing(available)) {
-      throw new Error(`Could not list local traces: ${available.stderr}`);
-    }
+    const appRoot = requireLocalTraceAppRoot();
+    const schemaDirectory = resolveLocalTraceSchemaDirectory(appRoot);
+    const rawIds = await listLocalTraceIds(appRoot);
+    const stored = (
+      await Promise.all(
+        rawIds.map(async (traceId) => ({
+          activityMs: await traceActivityMs(appRoot, schemaDirectory, traceId),
+          traceId,
+        })),
+      )
+    )
+      .sort(
+        (left, right) =>
+          right.activityMs - left.activityMs || left.traceId.localeCompare(right.traceId),
+      )
+      .map(({ traceId }) => traceId);
 
-    const stored = [...traceIds(available.stdout)];
     const eligible = stored.filter((traceId) => traceId !== currentTraceId);
-    const indexedIds = traceIds(indexed.stdout);
-    const matchingIds = new Set(traceIds(conversation.stdout));
+    const indexedMarker = localTraceIndexedMarker();
+    const conversationMarker = localTraceConversationMarker(conversationId);
+    const markerChecks = await Promise.all(
+      eligible.map(async (traceId) => {
+        const traceDirectory = join(schemaDirectory, traceId);
+        const [indexed, matchesConversation] = await Promise.all([
+          pathExists(join(traceDirectory, indexedMarker)),
+          pathExists(join(traceDirectory, conversationMarker)),
+        ]);
+        return { indexed, matchesConversation, traceId };
+      }),
+    );
+
+    const indexedIds = new Set(
+      markerChecks.filter((entry) => entry.indexed).map((entry) => entry.traceId),
+    );
+    const matchingIds = new Set(
+      markerChecks.filter((entry) => entry.matchesConversation).map((entry) => entry.traceId),
+    );
     const unindexed = eligible.filter((traceId) => !indexedIds.has(traceId));
     const scannedUnindexed = unindexed.slice(0, MAX_UNINDEXED_TRACES);
     const digests = new Map<string, LocalTraceSummary>();
@@ -146,6 +174,29 @@ const searchTracesTool = defineTool({
   },
 });
 
+async function traceActivityMs(
+  appRoot: string,
+  schemaDirectory: string,
+  traceId: string,
+): Promise<number> {
+  const activity = await readLocalTraceActivityMs(appRoot, traceId);
+  if (activity !== undefined) return activity;
+  try {
+    return (await stat(join(schemaDirectory, traceId))).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function parseInput(value: unknown): SearchInput {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Trace search input must be an object.");
@@ -168,29 +219,6 @@ function parseInput(value: unknown): SearchInput {
     limit,
     sortBy: (input.sortBy as LocalTraceSortBy | undefined) ?? DEFAULT_SORT_BY,
   };
-}
-
-function traceIds(value: string): Set<string> {
-  const ids = new Set<string>();
-  for (const line of value.split(/\r?\n/u)) {
-    const id = line
-      .split("/")
-      .filter(Boolean)
-      .find((part) => TRACE_ID.test(part));
-    if (id !== undefined) ids.add(id);
-  }
-  return ids;
-}
-
-function isEmptyTraceListing(result: {
-  readonly stderr: string;
-  readonly stdout: string;
-}): boolean {
-  return (
-    result.stdout.trim() === "" &&
-    result.stderr.includes("/traces/*") &&
-    /no such file or directory/iu.test(result.stderr)
-  );
 }
 
 function contains(

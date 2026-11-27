@@ -213,7 +213,7 @@ export function toolDisplayTitle(toolName: string): string {
   return displayTitle(toolBaseName(toolName));
 }
 
-export const SELF_MODIFICATION_AGENT_NAME = "self-modification__agent";
+export const SELF_MODIFICATION_AGENT_NAME = "self__modify";
 
 const AGENT_DISPLAY_NAMES: ReadonlyMap<string, string> = new Map([
   ["agent", "subagent"],

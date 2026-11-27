@@ -211,7 +211,7 @@ describe("presentTool", () => {
       "Delegate subagent(code review)",
     );
     const selfModification = presentTool(
-      "self-modification__agent",
+      "self__modify",
       { message: "Edit Alice's agent" },
       { isSubagent: true },
     );
@@ -222,8 +222,7 @@ describe("presentTool", () => {
 
   it("names the self-modification subagent without its extension namespace", () => {
     expect(
-      presentTool("self-modification__agent", { message: "Add a tool." }, { isSubagent: true })
-        .title,
+      presentTool("self__modify", { message: "Add a tool." }, { isSubagent: true }).title,
     ).toBe("Delegate agent editor");
   });
 

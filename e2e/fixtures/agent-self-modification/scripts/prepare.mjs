@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const fixtureRoot = fileURLToPath(new URL("../", import.meta.url));
 const repoRoot = resolve(fixtureRoot, "../../..");
-const targetDirectory = "agent/extensions/self-modification";
+const targetDirectory = "agent/extensions/self";
 
 /** Materialize the checkout's registry scaffold without network access or installer setup. */
 export async function prepareSelfModification(options = {}) {

@@ -12,7 +12,7 @@ function isSelfModification(source: AgentInfoSource): boolean {
   return (
     source.owner.kind === "extension" &&
     source.owner.packageName === "eve" &&
-    source.owner.namespace === "self-modification"
+    (source.owner.namespace === "self" || source.owner.namespace === "self-modification")
   );
 }
 

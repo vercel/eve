@@ -32,11 +32,11 @@ export default defineDynamic(() => {
   return defineInstructions({
     content: renderInstructions([
       roleInstructions,
-      sourceWorkspaceInstructions,
+      sourceWorkspaceInstructions("/source"),
       sourceEditingInstructions,
-      toolAuthoringInstructions,
+      toolAuthoringInstructions("/source"),
       registryWorkflowInstructions,
-      documentationInstructions,
+      documentationInstructions("/eve-docs"),
       deployedGuidance,
       workingInstructions,
       deployedReportingGuidance,

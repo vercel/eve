@@ -186,6 +186,8 @@ export function assertAllowedChange(
     ) ||
     path.startsWith(".github/workflows/") ||
     path.startsWith(`${agentRoot}subagents/self-modification/`) ||
+    path.startsWith(`${agentRoot}extensions/self/`) ||
+    path === `${appRoot}agent/extensions/self.ts` ||
     path.startsWith(`${agentRoot}extensions/self-modification/`) ||
     path === `${appRoot}agent/extensions/self-modification.ts` ||
     protectedMounts.some((mount) => path === mount || path.startsWith(`${mount}/`)) ||

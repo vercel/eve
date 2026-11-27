@@ -4,7 +4,7 @@ import { parseGatewayModelCatalog } from "#shared/gateway-model-catalog.js";
 
 import searchModels, {
   searchGatewayModels,
-} from "./extension/subagents/agent/tools/search_models.js";
+} from "./extension/subagents/modify/tools/search_models.js";
 
 const CATALOG = {
   data: [

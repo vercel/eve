@@ -1504,8 +1504,7 @@ export function registryHandoffAddress(
   toolName: string | undefined,
   output: unknown,
 ): string | undefined {
-  const isPackagedChild =
-    subagentName === "self-modification__agent" && toolName === "registry_add";
+  const isPackagedChild = subagentName === "self__modify" && toolName === "registry_add";
   if (!isPackagedChild || typeof output !== "object" || output === null) {
     return undefined;
   }

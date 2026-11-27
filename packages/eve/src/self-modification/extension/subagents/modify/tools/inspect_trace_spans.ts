@@ -64,7 +64,7 @@ const inspectTraceSpansTool = defineTool({
         found: true,
         availableFields,
         fields,
-        rawPath: `/traces/${traceId}/segments/${source.segmentFile}`,
+        rawPath: `.eve/traces/v1/${traceId}/segments/${source.segmentFile}`,
         truncated: spanTruncated,
       };
     });

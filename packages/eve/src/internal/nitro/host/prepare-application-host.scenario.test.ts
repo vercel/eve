@@ -154,7 +154,7 @@ describe("application host preparation", () => {
         ),
       ),
     );
-    const subagent = manifest.subagents.find((node) => node.name === "self-modification__agent");
+    const subagent = manifest.subagents.find((node) => node.name === "self__modify");
     expect(subagent).toBeDefined();
     expect(subagent!.agent.appRoot).toBe(
       join(host.generation.runtimeAppRoot, "node_modules", "eve"),

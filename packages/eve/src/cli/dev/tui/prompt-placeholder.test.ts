@@ -47,14 +47,14 @@ function scaffold(): AgentInfoResult {
           ...info.agent.config,
           owner: {
             kind: "extension",
-            mountId: "extensions/self-modification",
-            namespace: "self-modification",
+            mountId: "extensions/self",
+            namespace: "self",
             packageName: "eve",
           },
-          name: "self-modification__agent",
-          entryPath: "subagents/agent/agent.ts",
-          rootPath: "/eve/self-modification",
-          nodeId: "self-modification__agent",
+          name: "self__modify",
+          entryPath: "subagents/modify/agent.ts",
+          rootPath: "/eve/self",
+          nodeId: "self__modify",
           parentNodeId: "__root__",
           summary: {
             channels: 0,
@@ -84,7 +84,7 @@ describe("initialPromptPlaceholder", () => {
             static: [
               {
                 ...info.subagents.local[0]!,
-                name: "self-modification__trace_analysis",
+                name: "self__trace_analysis",
                 description: "Inspect traces",
                 markdown: "Inspect traces",
               },

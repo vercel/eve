@@ -16,7 +16,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import type { EveEvalContext, EveEvalLiveTurn, EveEvalSession, EveEvalTurn } from "eve/evals";
 
-const SELF_MODIFICATION_AGENT = "self-modification__agent";
+const SELF_MODIFICATION_AGENT = "self__modify";
 const CLEANUP_TIMEOUT_MS = 30_000;
 const REBUILD_TIMEOUT_MS = 30_000;
 const REBUILD_POLL_INTERVAL_MS = 100;

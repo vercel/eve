@@ -16,7 +16,7 @@ import type { VercelProjectReference } from "#setup/project-resolution.js";
 
 import { renderLocalSelfModificationExtension } from "./scaffold.js";
 
-export const SELF_MODIFICATION_CONFIG_PATH = "agent/extensions/self-modification/extension.ts";
+export const SELF_MODIFICATION_CONFIG_PATH = "agent/extensions/self/extension.ts";
 export const DEPLOYED_SELF_MODIFICATION_CONFIG_PATH =
   "agent/extensions/self-modification-remote/extension.ts";
 

@@ -52,12 +52,24 @@ describe("deployed self-modification sandbox", () => {
     ).rejects.toThrow("Deployed self-modification requires deploying on Vercel");
   });
 
-  it("does not probe the host during eve dev", () => {
+  it("does not probe the host during eve dev", async () => {
     vi.stubEnv("EVE_DEV", "1");
     const isDeployedOnVercel = vi.fn(() => false);
-    expect(defineDeployedSelfModificationSandbox(connectConfig, isDeployedOnVercel)).toBeTypeOf(
-      "function",
-    );
+    const selector = defineDeployedSelfModificationSandbox(connectConfig, isDeployedOnVercel);
+    expect(selector).toBeTypeOf("function");
+    const environment = getBoundSandboxEnvironment(selector);
+    expect(environment?.provider).toBe("self-modification-disabled");
+    const runtime = getSandboxEnvironmentRuntime(environment!);
+    const prepareContext = createSandboxPrepareContext({
+      appRoot: "/app",
+      files: { list: async () => [], read: vi.fn(), readText: vi.fn() },
+      log: () => {},
+      provider: runtime,
+      resources: {},
+      sourceRevision: "revision",
+      storagePath: "/app/.eve/sandbox",
+    });
+    await expect(runtime.implementation.prepare(prepareContext)).resolves.toEqual({});
     expect(isDeployedOnVercel).not.toHaveBeenCalled();
   });
 });

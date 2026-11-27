@@ -22,9 +22,9 @@ import {
   handoffMessage,
   resolveRegistryAddTool,
   unsetEnvVars,
-} from "./extension/subagents/agent/tools/registry_add.js";
-import { clearRegistryIndexCache } from "./extension/subagents/agent/tools/search_registry.js";
-import { productionRegistryAddTool } from "./remote/subagents/agent/tools/registry_add.js";
+} from "./extension/subagents/modify/tools/registry_add.js";
+import { clearRegistryIndexCache } from "./extension/subagents/modify/tools/search_registry.js";
+import { productionRegistryAddTool } from "./remote/subagents/modify/tools/registry_add.js";
 
 const APP_ROOT = "/workspace/agent";
 const originalEveDev = process.env.EVE_DEV;

@@ -59,7 +59,7 @@ async function assertCurrentLayout(appRoot: string): Promise<void> {
     throw error;
   }
   throw new Error(
-    "The legacy agent/subagents/self-modification layout is no longer supported. Preserve any authored changes, remove that directory, and mount eve/extensions/self-modification/local at agent/extensions/self-modification/extension.ts instead.",
+    "The legacy agent/subagents/self-modification layout is no longer supported. Preserve any authored changes, remove that directory, and mount eve/extensions/self-modification/local at agent/extensions/self/extension.ts instead.",
   );
 }
 

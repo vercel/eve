@@ -67,7 +67,7 @@ describe("createGenerationPackageBoundaryPlugin", () => {
         plugin,
         resolve,
         "#shared/git.js",
-        join(PACKAGE_ROOT, "dist/src/self-modification/extension/subagents/agent/agent.js"),
+        join(PACKAGE_ROOT, "dist/src/self-modification/extension/subagents/modify/agent.js"),
       ),
     ).resolves.toEqual({
       id: join(PACKAGE_ROOT, "dist/src/shared/git.js"),
@@ -144,7 +144,7 @@ describe("createRuntimeLoaderPackageBoundaryPlugin", () => {
         "eve/tools",
         join(
           PACKAGE_ROOT,
-          "dist/src/self-modification/extension/subagents/agent/tools/edit_file.js",
+          "dist/src/self-modification/extension/subagents/modify/tools/search_registry.js",
         ),
       ),
     ).resolves.toEqual({
@@ -167,7 +167,7 @@ describe("createRuntimeLoaderPackageBoundaryPlugin", () => {
         plugin,
         resolve,
         "#shared/git.js",
-        join(PACKAGE_ROOT, "dist/src/self-modification/extension/subagents/agent/agent.js"),
+        join(PACKAGE_ROOT, "dist/src/self-modification/extension/subagents/modify/agent.js"),
       ),
     ).resolves.toEqual({
       external: true,
