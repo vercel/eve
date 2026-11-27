@@ -328,7 +328,7 @@ The caller stays the same for the whole turn; only its claims can change:
 
 Use the caller on `auth.current` (or `auth.initiator`) to limit tools, choose [dynamic tools, skills, and other definitions](./dynamic-capabilities) per user, or enforce tenant boundaries.
 
-Route auth doesn't check who may use a session, and eve adds no per-session access list. If multiple users or tenants can reach the same route, implement the per-user, per-tenant, or per-session authorization your application requires.
+By default route auth doesn't check who may use a session: any caller it admits can reach any session id it knows. To limit that, return [`sessionAccess`](#session-access) from the eve-channel authenticator. For other routes, implement the per-user, per-tenant, or per-session authorization your application requires.
 
 ## Tool replacement permission
 
@@ -352,6 +352,50 @@ export default eveChannel({
 eve removes the grant from the caller identity before it forwards or saves that identity, or uses it for audience classification.
 
 Later messages, approvals, controls, and result reads use normal channel authentication without rechecking the grant. Anyone your channel admits to an existing session can use its configured stubs, so apply the same session-access policy as for ordinary sessions.
+
+## Session access
+
+By default any caller your eve channel admits can reach any session whose id it knows. An eve-channel authenticator can decide per caller instead by returning `sessionAccess`, which applies to every `/eve/v1/session/:sessionId` route for that request. Like `allowToolStubs`, it applies only to the current request and is never persisted or forwarded.
+
+- `"owner"` lets the caller reach only sessions its own identity created. Any other session answers `404 Session not found.`, the same as an unknown id.
+- `"any"`, or omitting it, lets the caller reach every session id it knows.
+- A function decides per session. Return `false` for the same `404`, or throw an `HttpError` such as `ForbiddenError` from `eve/channels/auth` to refuse with its response. Any other thrown error fails the request with `500`.
+
+Because each authenticator returns its own policy, one channel can scope tenants to their own sessions while letting operators reach all of them:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel, type EveAuthFn } from "eve/channels/eve";
+
+const authenticateTenant: EveAuthFn = async (request) => {
+  const tenant = await verifyTenant(request);
+  return tenant ? { ...tenant, sessionAccess: "owner" } : null;
+};
+
+const authenticateOperator: EveAuthFn = async (request) => {
+  const operator = await verifyOperator(request);
+  return operator ? { ...operator, sessionAccess: "any" } : null;
+};
+
+export default eveChannel({ auth: [authenticateOperator, authenticateTenant] });
+```
+
+A predicate receives the `sessionId`, an `isOwner()` function, the caller's `auth` identity, and the `request`. `isOwner()` checks whether the caller created the session. It runs only when you call it, and it runs once per request however often you call it. This policy lets the owner and collaborators through:
+
+```ts
+import type { EveAuthFn } from "eve/channels/eve";
+
+const authenticateMember: EveAuthFn = async (request) => {
+  const member = await verifyMember(request);
+  if (!member) return null;
+  const shared = await sharedSessionIds(member.principalId);
+  return {
+    ...member,
+    sessionAccess: async ({ sessionId, isOwner }) => shared.has(sessionId) || (await isOwner()),
+  };
+};
+```
+
+eve removes `sessionAccess` from the caller identity before it saves or forwards that identity. A caller that a policy lets into a session you don't own is still its own principal: its messages don't join a turn that another principal is running, and they don't change that turn's `auth.initiator`. See [Overlapping messages](/docs/channels#overlapping-messages). Behind a [trusted forwarder](#accepting-forwarded-identity-from-another-deployment), `"owner"` compares the route caller, which is the forwarder. For the owner rules in full, see [Restrict session access](../channels/eve#restrict-session-access).
 
 ## Agent info access
 

@@ -12,6 +12,7 @@ const context: ScheduleProviderContext = {
   collection: "collection",
   namespace: "eve-namespace",
   operationId: "operation_1",
+  scope: "scope",
   target: { key: "dynamic-schedules" },
 };
 

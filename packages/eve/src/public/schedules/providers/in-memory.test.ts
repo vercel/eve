@@ -10,6 +10,7 @@ const context = (
   collection: "tasks",
   namespace: "namespace",
   operationId,
+  scope: "scope",
   target,
 });
 

@@ -21,12 +21,17 @@ type ConversationSource =
         >
       >);
 
+export function sessionOwnerAuth(
+  run: Pick<RunInput, "auth"> & Partial<Pick<RunInput, "audienceAuth">>,
+): SessionAuthContext | null {
+  return Object.hasOwn(run, "audienceAuth") ? (run.audienceAuth ?? null) : run.auth;
+}
+
 export function buildConversationContext(
   run: ConversationSource,
   environment: ConversationEnvironment,
 ): ConversationContext {
-  const hasRouteAuth = Object.hasOwn(run, "audienceAuth");
-  const auth = hasRouteAuth ? (run.audienceAuth ?? null) : run.auth;
+  const auth = sessionOwnerAuth(run);
   const projection = buildChannelInstrumentationProjection({
     adapter: run.adapter,
     channelName: run.channelName,
