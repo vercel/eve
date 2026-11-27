@@ -123,6 +123,18 @@ import {
 import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#public/channels/slack/constants.js";
 import { defineSlackAppManifest } from "#public/channels/slack/app-manifest.js";
+import type { SlackEventName } from "#public/channels/slack/event-scopes.js";
+import {
+  emitSlackEvent,
+  requireSlackReceivesEvent,
+  slackEventDefinitions,
+} from "#public/channels/slack/subscriptions.js";
+import type {
+  ChannelEventDefinition,
+  ChannelOnEvent,
+  ChannelOnSubscribe,
+  EmitChannelEventFn,
+} from "#shared/channel-subscriptions.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
   bindSlackSessionOperations,
@@ -865,6 +877,37 @@ export interface SlackChannelConfig {
    */
   readonly codeChannels?: boolean;
 
+  /** Experimental. These fields can change in a minor release. */
+  readonly experimental?: {
+    readonly subscriptions?: {
+      /**
+       * Makes Slack events subscribable with the `eve__subscribe` tool, and runs for each
+       * subscription and each event it receives, as the subscribed session. Return the message to
+       * send (`describeSlackEvent(event)` formats the payload) or `null` to drop the event.
+       * Filter on `event.name` (`reaction_added`) and on `subscription.input`, and check `auth`
+       * against the channel: without `onSubscribe`, any session of the agent can subscribe to
+       * any channel the bot is in. Nothing is subscribable without `onEvent`.
+       */
+      readonly onEvent: ChannelOnEvent;
+      /**
+       * Decides whether a session may subscribe, when it calls `eve__subscribe`. Check `auth`
+       * against `subscription.input.channel` (absent for an event of the whole workspace), and
+       * throw to deny. Return `{ input }` to narrow the scope, for example to drop `ts`. eve
+       * then checks that the bot token belongs to `team_id`, that the app has a bot scope that
+       * delivers the event, and that the bot is in `channel`.
+       */
+      readonly onSubscribe?: ChannelOnSubscribe;
+      /**
+       * The bot events a session can subscribe to, for `eve__search` and for `eve__subscribe`,
+       * named as in a Slack app manifest, such as `reaction_added` or `message.channels`. The
+       * generated app manifest subscribes to them and requests the scopes they need. Defaults to
+       * `app_mention` and the four `message.*` events. A Slack app you configure by hand has to
+       * subscribe to the same events in its settings under Event Subscriptions.
+       */
+      readonly events?: readonly SlackEventName[];
+    };
+  };
+
   /**
    * Inbound upload policy applied to file attachments before they reach
    * the harness. Violating attachments are dropped with a warning so the
@@ -1187,6 +1230,12 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
 
   const handledEvents = new Set<string>();
 
+  const subscriptionsOnEvent = config.experimental?.subscriptions?.onEvent;
+  const subscriptionEvents =
+    subscriptionsOnEvent === undefined
+      ? undefined
+      : slackEventDefinitions(config.experimental?.subscriptions?.events);
+
   const channel = defineChannel<
     SlackChannelState,
     SlackChannelContext,
@@ -1207,6 +1256,23 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       interactionCards: [],
       slackUsersByPrincipal: {},
     },
+    experimental: subscriptionsOnEvent &&
+      subscriptionEvents && {
+        subscriptions: {
+          onEvent: subscriptionsOnEvent,
+          onSubscribe: async (subscriber) => {
+            const grant = await config.experimental?.subscriptions?.onSubscribe?.(subscriber);
+            await requireSlackReceivesEvent({
+              api,
+              botToken: config.credentials?.botToken,
+              event: subscriber.subscription.event,
+              subscription: grant?.input ?? subscriber.subscription.input,
+            });
+            return grant;
+          },
+          catalog: subscriptionEvents,
+        },
+      },
     fetchFile: slackFetchFile,
     metadata(state): SlackInstrumentationMetadata {
       return {
@@ -1245,6 +1311,10 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       POST<SlackChannelState>(config.route ?? SLACK_CHANNEL_DEFAULT_ROUTE, async (req, args) => {
         const { waitUntil } = args;
         const { from, resolveSession } = args;
+        const subscriptions =
+          subscriptionEvents === undefined
+            ? undefined
+            : { declaredEvents: subscriptionEvents, emit: args.experimental.subscriptions.emit };
         const body = await verifyInbound(req, config.credentials);
         if (body === null) return new Response("unauthorized", { status: 401 });
 
@@ -1273,6 +1343,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           uploadPolicy,
           handledEvents,
           headers: req.headers,
+          subscriptions,
         });
       }),
     ],
@@ -1294,6 +1365,10 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     codeChannels: config.codeChannels === true,
     users: userResolver !== undefined,
     userEmails: typeof usersOption === "object" && usersOption.email === true,
+    subscriptionEvents:
+      subscriptionsOnEvent === undefined
+        ? undefined
+        : (config.experimental?.subscriptions?.events ?? []),
   });
   setChannelBuildMetadata(channel, (channelName) => ({
     externalCredentials: credentials?.vercelConnect,
@@ -1513,8 +1588,13 @@ async function handleEventPost(input: {
   readonly conversationKindReader: SlackConversationKindReader;
   readonly uploadPolicy: UploadPolicy;
   readonly handledEvents: Set<string>;
+  readonly subscriptions:
+    | {
+        readonly declaredEvents: readonly ChannelEventDefinition[];
+        readonly emit: EmitChannelEventFn;
+      }
+    | undefined;
 }): Promise<Response> {
-  const { config } = input;
   let payload;
   let envelope: SlackEventEnvelope | null;
   try {
@@ -1533,6 +1613,33 @@ async function handleEventPost(input: {
   }
 
   if (envelope === null) return new Response("ok");
+
+  const response = dispatchSlackEventPost(input, payload, envelope);
+  if (input.subscriptions === undefined) return response;
+  try {
+    await emitSlackEvent({ envelope, ...input.subscriptions });
+  } catch (error) {
+    logError(log, "Slack subscription delivery failed", error, {
+      eventId: envelope.event_id,
+      eventType: envelope.event.type,
+    });
+    return new Response("subscription delivery failed", { status: 503 });
+  }
+  return response;
+}
+
+type SlackEventPostInput = Parameters<typeof handleEventPost>[0];
+type SlackEventCallbackPayload = Exclude<
+  ReturnType<typeof parseSlackWebhookBody>,
+  { readonly kind: "url_verification" }
+>;
+
+function dispatchSlackEventPost(
+  input: SlackEventPostInput,
+  payload: SlackEventCallbackPayload,
+  envelope: SlackEventEnvelope,
+): Response {
+  const { config } = input;
   const appId = typeof envelope.api_app_id === "string" ? envelope.api_app_id : undefined;
   const botUserId = slackEventBotUserId(envelope);
   const receivingBotUserId = slackEventReceivingBotUserId(envelope);

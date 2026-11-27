@@ -2037,6 +2037,9 @@ importers:
       '@shadcn/registry':
         specifier: 0.2.1
         version: 0.2.1(supports-color@10.2.2)
+      '@slack/types':
+        specifier: 3.3.0
+        version: 3.3.0
       '@slack/web-api':
         specifier: 8.3.0
         version: 8.3.0
@@ -2055,6 +2058,9 @@ importers:
       '@types/react-test-renderer':
         specifier: 19.3.1
         version: 19.3.1
+      '@typescript/typescript6':
+        specifier: 6.0.2
+        version: 6.0.2
       '@vercel/agent-runs':
         specifier: workspace:*
         version: link:../tracing
@@ -7968,6 +7974,10 @@ packages:
     engines: {node: '>=16.20.0'}
     cpu: [x64]
     os: [win32]
+
+  '@typescript/typescript6@6.0.2':
+    resolution: {integrity: sha512-mbCddXd+jm7hfx7w2YU64/Av4/NqqeG3GoRZgxPcgoTxYjhrcfJRw9ULch71SS4G+Q3bOXFhRvPqjguN0Hyp5w==}
+    hasBin: true
 
   '@ungap/structured-clone@1.4.0':
     resolution: {integrity: sha512-1mEZtMKPM09vDmQt5y7YvmN2+DFTP7Tg0EWXdic8/C6VRnpb33e4ghisCIE3WZjsE2N8mf+QV1Zqh7ZFYLWInQ==}
@@ -21658,6 +21668,10 @@ snapshots:
 
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
+
+  '@typescript/typescript6@6.0.2':
+    dependencies:
+      '@typescript/old': typescript@6.0.3
 
   '@ungap/structured-clone@1.4.0': {}
 

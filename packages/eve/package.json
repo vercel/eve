@@ -474,6 +474,12 @@
       "import": "./dist/src/public/experimental/channels/github.js",
       "default": "./dist/src/public/experimental/channels/github.js"
     },
+    "./experimental/channels/slack": {
+      "eve-source": "./src/public/experimental/channels/slack.ts",
+      "types": "./dist/src/public/experimental/channels/slack.d.ts",
+      "import": "./dist/src/public/experimental/channels/slack.js",
+      "default": "./dist/src/public/experimental/channels/slack.js"
+    },
     "./experimental/channels/discord/gateway": {
       "eve-source": "./src/public/experimental/channels/discord/gateway.ts",
       "types": "./dist/src/public/experimental/channels/discord/gateway.d.ts",
@@ -709,12 +715,14 @@
     "@opentelemetry/sdk-trace-base": "catalog:",
     "@photon-ai/chat-adapter-imessage": "3.2.0",
     "@shadcn/registry": "0.2.1",
+    "@slack/types": "3.3.0",
     "@slack/web-api": "8.3.0",
     "@standard-schema/spec": "1.1.0",
     "@sveltejs/kit": "^2.0.0",
     "@types/json-schema": "7.0.15",
     "@types/react": "catalog:",
     "@types/react-test-renderer": "19.3.1",
+    "@typescript/typescript6": "6.0.2",
     "@vercel/agent-runs": "workspace:*",
     "@vercel/blob": "2.9.0",
     "@vercel/connect": "catalog:",

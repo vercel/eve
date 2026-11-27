@@ -113,6 +113,30 @@ export async function callSlackApiTrackingResponse(
   }
 }
 
+export interface SlackApiResult {
+  readonly body: SlackApiResponse;
+  readonly headers: Headers;
+}
+
+export async function callSlackApiWithHeaders(
+  operation: string,
+  body: Record<string, unknown>,
+  options: SlackApiOptions,
+  timeoutMs: number,
+): Promise<SlackApiResult> {
+  let headers = new Headers();
+  const observe: typeof globalThis.fetch = async (input, init) => {
+    const response = await (options.fetch ?? globalThis.fetch)(input, {
+      ...init,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    headers = response.headers;
+    return response;
+  };
+  const response = await callSlackApiPrimitive(operation, body, { ...options, fetch: observe });
+  return { body: response, headers };
+}
+
 export function isSlackResponseError(error: unknown): boolean {
   return typeof error === "object" && error !== null && slackResponseErrors.has(error);
 }
