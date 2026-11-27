@@ -959,5 +959,97 @@ describe("slackVideoRenderer", () => {
       async () => undefined,
     );
     eq(skipUploads.length, 0);
+
+    const preOrder: string[] = [];
+    const reqCalls: [string, unknown][] = [];
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      preOrder.push(`post:${String(url)}:${(init?.body as Uint8Array).byteLength}`);
+      return new Response("OK", { status: 200 });
+    };
+    try {
+      const preCtx: object = {
+        view: v1,
+        channel: {
+          state: {},
+          slack: {
+            channelId: "C123",
+            threadTs: "1700.1",
+            codeChannel: false,
+            request: async (op: string, body: unknown) => {
+              reqCalls.push([op, body]);
+              preOrder.push(`req:${op}`);
+              if (op === "files.getUploadURLExternal") {
+                return {
+                  ok: true,
+                  upload_url: "https://files.slack.com/upload/v1/abc",
+                  file_id: "F_PRE_1",
+                };
+              }
+              return { ok: true };
+            },
+            uploadFiles: async () => assert.fail("should not fall back to uploadFiles"),
+          },
+        },
+      };
+      const typedPreCtx = preCtx as Parameters<
+        NonNullable<NonNullable<ReturnType<typeof slackVideoRenderer>["events"]>["call.settled"]>
+      >[1];
+      const preEv = slackVideoRenderer({ storage }).events!;
+      await preEv["call.settled"]!(s1, typedPreCtx, async () => void preOrder.push("settled:next"));
+      deq(preOrder, [
+        "settled:next",
+        "req:files.getUploadURLExternal",
+        `post:https://files.slack.com/upload/v1/abc:${H.MP4_BYTES.byteLength}`,
+      ]);
+      await preEv["content.completed"]!(
+        replyFact,
+        typedPreCtx,
+        async () => void preOrder.push("reply:next"),
+      );
+      deq(preOrder, [
+        "settled:next",
+        "req:files.getUploadURLExternal",
+        `post:https://files.slack.com/upload/v1/abc:${H.MP4_BYTES.byteLength}`,
+        "reply:next",
+        "req:files.completeUploadExternal",
+      ]);
+      deq(reqCalls[1], [
+        "files.completeUploadExternal",
+        {
+          channel_id: "C123",
+          files: [{ id: "F_PRE_1", title: "clip.mp4" }],
+          thread_ts: "1700.1",
+        },
+      ]);
+
+      const fallbackUploads: string[] = [];
+      const badUrlCtx: object = {
+        view: v1,
+        channel: {
+          state: {},
+          slack: {
+            channelId: "C123",
+            threadTs: "1700.1",
+            codeChannel: false,
+            request: async () => ({
+              ok: true,
+              upload_url: "https://evil.example.com/upload",
+              file_id: "F_BAD",
+            }),
+            uploadFiles: async (files: readonly { filename: string }[]) =>
+              void fallbackUploads.push(files[0].filename),
+          },
+        },
+      };
+      const typedBadCtx = badUrlCtx as Parameters<
+        NonNullable<NonNullable<ReturnType<typeof slackVideoRenderer>["events"]>["call.settled"]>
+      >[1];
+      await preEv["call.settled"]!(s1, typedBadCtx, async () => undefined);
+      await preEv["content.completed"]!(replyFact, typedBadCtx, async () => undefined);
+      deq(fallbackUploads, ["clip.mp4"]);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
   });
 });

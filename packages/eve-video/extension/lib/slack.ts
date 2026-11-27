@@ -5,7 +5,7 @@ import {
 } from "eve/channels/slack";
 import { call } from "eve/events";
 
-import { extensionForMediaType } from "./media.ts";
+import { assertSafePublicUrl, extensionForMediaType } from "./media.ts";
 import { resolveConfiguredStorage } from "./storage/default.ts";
 import type { VideoStorage } from "./storage/types.ts";
 
@@ -17,6 +17,8 @@ interface PendingVideo {
   readonly storageKey: string;
   readonly mediaType?: string;
   readonly bytes?: number;
+  readonly fileId?: string;
+  readonly filename?: string;
 }
 
 interface PendingCall {
@@ -57,19 +59,61 @@ export function slackVideoRenderer(options: SlackVideoRendererOptions = {}): Sla
   const targetTool = options.toolName?.trim() || `${options.mount?.trim() || "video"}__generate`;
   const timing = options.timing ?? "after-reply";
 
+  const prestage = async (
+    channel: SlackEventContext,
+    videos: readonly PendingVideo[],
+  ): Promise<PendingVideo[]> => {
+    const storage = options.storage ?? resolveConfiguredStorage(undefined);
+    if (!storage?.get || typeof channel.slack.request !== "function" || !channel.slack.channelId) {
+      return [...videos];
+    }
+    const staged: PendingVideo[] = [];
+    for (const item of videos) {
+      if (typeof item.bytes === "number" && item.bytes > maxBytes) continue;
+      try {
+        const stored = await storage.get({
+          key: item.storageKey,
+          signal: AbortSignal.timeout(30_000),
+        });
+        if (!stored || !stored.data.byteLength || stored.data.byteLength > maxBytes) continue;
+        const filename = videoFilename(item.storageKey, stored.mediaType || item.mediaType);
+        const fileId = await preuploadToSlack(channel, stored.data, filename);
+        staged.push(fileId ? { ...item, fileId, filename } : item);
+      } catch {
+        staged.push(item);
+      }
+    }
+    return staged;
+  };
+
   const flush = async (channel: SlackEventContext): Promise<void> => {
     const state = videoState(channel);
     if (!state.pending.length) return;
     const batch = state.pending.splice(0, state.pending.length);
     const storage = options.storage ?? resolveConfiguredStorage(undefined);
-    if (!storage?.get) return;
     for (const entry of batch) {
       if (state.uploaded.includes(entry.callId)) continue;
       state.uploaded.push(entry.callId);
       if (state.uploaded.length > MAX_TRACKED_CALLS) {
         state.uploaded.splice(0, state.uploaded.length - MAX_TRACKED_CALLS);
       }
-      for (const item of entry.videos) {
+      const ready = entry.videos.filter(
+        (v): v is PendingVideo & { readonly fileId: string; readonly filename: string } =>
+          typeof v.fileId === "string" && typeof v.filename === "string",
+      );
+      let remaining: readonly PendingVideo[] = entry.videos;
+      if (
+        ready.length > 0 &&
+        typeof channel.slack.request === "function" &&
+        channel.slack.channelId
+      ) {
+        const completed = await completeSlackUpload(channel, ready);
+        if (completed) {
+          remaining = entry.videos.filter((v) => !v.fileId);
+        }
+      }
+      if (!remaining.length || !storage?.get) continue;
+      for (const item of remaining) {
         if (typeof item.bytes === "number" && item.bytes > maxBytes) continue;
         try {
           const stored = await storage.get({
@@ -112,8 +156,13 @@ export function slackVideoRenderer(options: SlackVideoRendererOptions = {}): Sla
         ) {
           return;
         }
-        state.pending.push({ callId: fact.data.callId, videos });
-        if (timing === "immediate") await flush(ctx.channel);
+        if (timing === "immediate") {
+          state.pending.push({ callId: fact.data.callId, videos });
+          await flush(ctx.channel);
+          return;
+        }
+        const staged = await prestage(ctx.channel, videos);
+        if (staged.length) state.pending.push({ callId: fact.data.callId, videos: staged });
       },
       async "content.completed"(fact, ctx, next) {
         await next();
@@ -130,6 +179,51 @@ export function slackVideoRenderer(options: SlackVideoRendererOptions = {}): Sla
       },
     },
   });
+}
+
+async function preuploadToSlack(
+  channel: SlackEventContext,
+  data: Uint8Array,
+  filename: string,
+): Promise<string | undefined> {
+  const init = await channel.slack.request("files.getUploadURLExternal", {
+    filename,
+    length: data.byteLength,
+  });
+  if (init.ok !== true) return undefined;
+  const uploadUrl = Reflect.get(init, "upload_url");
+  const fileId = Reflect.get(init, "file_id");
+  if (typeof uploadUrl !== "string" || typeof fileId !== "string" || !fileId.trim()) {
+    return undefined;
+  }
+  const safe = await assertSafePublicUrl(uploadUrl, { resolveDns: false });
+  if (safe.hostname !== "slack.com" && !safe.hostname.endsWith(".slack.com")) return undefined;
+  const body = Uint8Array.from(data);
+  const res = await fetch(safe.href, {
+    method: "POST",
+    body,
+    headers: { "content-type": "application/octet-stream" },
+    redirect: "error",
+    signal: AbortSignal.timeout(60_000),
+  });
+  return res.ok ? fileId.trim() : undefined;
+}
+
+async function completeSlackUpload(
+  channel: SlackEventContext,
+  ready: readonly { readonly fileId: string; readonly filename: string }[],
+): Promise<boolean> {
+  try {
+    const threadTs = channel.slack.codeChannel ? "" : channel.slack.threadTs;
+    const res = await channel.slack.request("files.completeUploadExternal", {
+      channel_id: channel.slack.channelId,
+      files: ready.map((item) => ({ id: item.fileId, title: item.filename })),
+      ...(threadTs && { thread_ts: threadTs }),
+    });
+    return res.ok === true;
+  } catch {
+    return false;
+  }
 }
 
 function videoState(channel: SlackEventContext): SlackVideoState {

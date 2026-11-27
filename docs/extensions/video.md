@@ -212,7 +212,7 @@ export default slackChannel({
 ```
 
 - Uses automatic storage selection by default; pass `{ storage }` when `agent/extensions/video.ts` uses a custom `VideoStorage` adapter.
-- Uploads right after the agent's text reply (`timing: "after-reply"`, default) and flushes on `turn.settled` / `session.ended` if no text reply posts; pass `timing: "immediate"` to upload as soon as `video__generate` finishes.
+- Uploads right after the agent's text reply (`timing: "after-reply"`, default) — pre-uploading bytes on `call.settled` while the reply is being written and finalizing via `files.completeUploadExternal` immediately after the reply posts (flushing on `turn.settled` / `session.ended` if no text reply posts). Pass `timing: "immediate"` to publish as soon as `video__generate` finishes.
 - Pass `{ mount }` (default `"video"`) or `{ toolName }` when mounted at a different path, `{ maxBytes }` to adjust the 100 MiB upload cap, and `{ onError }` to log upload failures without interrupting replies.
 
 ## Configuration reference
