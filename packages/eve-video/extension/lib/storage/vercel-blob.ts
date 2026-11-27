@@ -1,4 +1,4 @@
-import { del, get, put } from "@vercel/blob";
+import { del, get, issueSignedToken, presignUrl, put } from "@vercel/blob";
 
 import { normalizeStorageKey } from "./key.ts";
 import type { VideoStorage, VideoStorageVisibility } from "./types.ts";
@@ -78,8 +78,7 @@ export function vercelBlob(options: VercelBlobVideoStorageOptions = {}): VideoSt
         : key;
       return {
         key: logicalKey,
-        url: res.url,
-        downloadUrl: res.downloadUrl,
+        ...(access === "public" && { url: res.url, downloadUrl: res.downloadUrl }),
         mediaType: res.contentType || mediaType,
         bytes: data.byteLength,
         visibility: access,
@@ -100,6 +99,29 @@ export function vercelBlob(options: VercelBlobVideoStorageOptions = {}): VideoSt
         mediaType: res.blob.contentType || "application/octet-stream",
         bytes: data.byteLength,
       };
+    },
+    async getSignedUrl({ key: rawKey, expiresInSeconds = 900, signal }) {
+      signal.throwIfAborted();
+      if (!Number.isFinite(expiresInSeconds) || expiresInSeconds <= 0) {
+        throw new RangeError("expiresInSeconds must be a positive number.");
+      }
+      const key = normalizeStorageKey(rawKey);
+      const pathname = `${prefix}/${key}`;
+      const validUntil = Math.floor(Date.now() + expiresInSeconds * 1000);
+      const signedToken = await issueSignedToken({
+        pathname,
+        operations: ["get"],
+        validUntil,
+        abortSignal: signal,
+        ...creds(options),
+      });
+      const { presignedUrl } = await presignUrl(signedToken, {
+        access,
+        operation: "get",
+        pathname,
+        validUntil,
+      });
+      return presignedUrl;
     },
     async delete({ key, signal }) {
       signal.throwIfAborted();

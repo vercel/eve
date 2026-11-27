@@ -10,6 +10,7 @@ export type {
   VideoStorage,
   VideoStorageDeleteInput,
   VideoStorageGetInput,
+  VideoStorageGetSignedUrlInput,
   VideoStoragePutInput,
   VideoStorageVisibility,
 } from "./types.ts";

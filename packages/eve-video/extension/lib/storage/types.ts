@@ -67,12 +67,24 @@ export interface VideoStorageDeleteInput {
   readonly signal: AbortSignal;
 }
 
+/** Input passed to {@link VideoStorage.getSignedUrl} when minting a temporary fetchable URL for a stored video. */
+export interface VideoStorageGetSignedUrlInput {
+  /** Storage key of the video to sign. */
+  readonly key: string;
+  /** Lifetime in seconds for the signed URL. Defaults to `900` (15 minutes). */
+  readonly expiresInSeconds?: number;
+  /** Signal used to cancel signing. */
+  readonly signal: AbortSignal;
+}
+
 /** Provider-agnostic storage contract for persisting generated videos. */
 export interface VideoStorage {
   /** Stores video bytes and returns metadata describing where the artifact lives. */
   readonly put: (input: VideoStoragePutInput) => Promise<StoredVideo>;
   /** Reads stored video bytes by key, returning `null` when the object does not exist. */
   readonly get?: (input: VideoStorageGetInput) => Promise<StoredVideoContent | null>;
+  /** Mints a time-limited HTTPS URL for reading a stored object, enabling staging and edits on private storage. */
+  readonly getSignedUrl?: (input: VideoStorageGetSignedUrlInput) => Promise<string | null>;
   /** Deletes a stored video by key if it exists. */
   readonly delete?: (input: VideoStorageDeleteInput) => Promise<void>;
 }

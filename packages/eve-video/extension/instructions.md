@@ -8,5 +8,5 @@ You have a video `generate` tool provided by eve's video extension.
 - Use `start` and `end` for exact opening and closing frame images, or `references` for character, style, or motion guidance. Avoid combining `start` or `end` with `references` on models that ignore references when frame images are provided.
 - To edit or extend a video generated earlier in the session, pass its returned `url` (or sandbox `path` or `storageKey`) in `video` (set `extend: true` to continue from its last frame instead of editing in place), and omit `start` and `end`.
 - If the active model does not support video editing or extension (such as Veo), generate a new take with a refined `prompt`, reusing `seed`, `start`, `end`, or image `references` as needed.
-- When generation finishes, share the returned video `url` (or sandbox `path`) directly with the user.
+- When generation finishes, share the returned video `url` (or sandbox `path`) if present, and keep `storageKey` or `url` for follow-up edits.
 - Do not regenerate the same video unless the user asks.

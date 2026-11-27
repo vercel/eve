@@ -154,6 +154,15 @@ export async function submitToolVideoJob(
 
   const stagedKeys: string[] = [];
   let stagePrefix: string | undefined;
+  const signKey = async (key: string): Promise<string | null> => {
+    if (!storage?.getSignedUrl) return null;
+    const raw = await storage
+      .getSignedUrl({ key, expiresInSeconds: 900, signal })
+      .catch(() => null);
+    if (!raw) return null;
+    const safe = await media.assertSafePublicUrl(raw, { resolveDns: false }).catch(() => undefined);
+    return safe?.href ?? null;
+  };
   const stage = async (entry: ResolvedMedia): Promise<string | null> => {
     if (!storage || !entry.data || !entry.mediaType) return null;
     const filename = `${entry.slot}${media.extensionForMediaType(entry.mediaType)}`;
@@ -165,10 +174,11 @@ export async function submitToolVideoJob(
       ttlDays: 1,
       signal,
     });
-    const safe =
-      stored.url && stored.visibility !== "private"
-        ? await media.assertSafePublicUrl(stored.url, { resolveDns: false }).catch(() => undefined)
-        : undefined;
+    const rawUrl =
+      stored.url && stored.visibility !== "private" ? stored.url : await signKey(stored.key);
+    const safe = rawUrl
+      ? await media.assertSafePublicUrl(rawUrl, { resolveDns: false }).catch(() => undefined)
+      : undefined;
     if (!safe) {
       await cleanupStoredKeys(storage, [stored.key]);
       return null;
@@ -226,10 +236,14 @@ export async function submitToolVideoJob(
       }
     }
     let declared: string | undefined;
+    let fromStorageKey: string | undefined;
     if (data === null && storage?.get) {
       const key = tryKey(trimmed);
       const stored = key ? await storage.get({ key, signal }) : null;
-      if (stored) ({ data, mediaType: declared } = stored);
+      if (stored) {
+        ({ data, mediaType: declared } = stored);
+        fromStorageKey = stored.key;
+      }
     }
     if (data === null) {
       if (sb?.sandbox)
@@ -251,16 +265,18 @@ export async function submitToolVideoJob(
     totalInputBytes += data.byteLength;
     const entry: ResolvedMedia = { slot, data, mediaType, ...(frameType && { frameType }) };
     if (slot === "video" && grok) {
-      const url = await stage(entry);
+      const url = (fromStorageKey ? await signKey(fromStorageKey) : null) ?? (await stage(entry));
       if (!url)
-        throw new Error(`Model "${modelId}" requires public HTTPS storage or an https:// URL.`);
+        throw new Error(
+          `Model "${modelId}" requires public HTTPS storage, signed storage URLs, or an https:// URL.`,
+        );
       entry.url = url;
       entry.data = undefined;
       return entry;
     }
     const weight = data.byteLength * (frameType === "first_frame" ? 2 : 1);
     if (canStageInline && inlineBytes + weight > media.ASYNC_INLINE_INPUT_LIMIT_BYTES) {
-      const url = await stage(entry);
+      const url = (fromStorageKey ? await signKey(fromStorageKey) : null) ?? (await stage(entry));
       if (url) {
         entry.url = url;
         entry.data = undefined;

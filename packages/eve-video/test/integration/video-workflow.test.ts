@@ -392,6 +392,33 @@ describe("video iteration routing across Grok, Seedance, and FLUX 3", () => {
       );
       deq([blocked.startCalls.length, bad.keys()], [0, []]);
     }
+
+    const privBacking = inMemory({ visibility: "private" });
+    await putFile(privBacking, "videos/priv.mp4");
+    const signedStorage: VideoStorage = {
+      put: (i) => privBacking.put(i),
+      get: (i) => privBacking.get(i),
+      delete: (i) => privBacking.delete(i),
+      getSignedUrl: async ({ key }) => `https://signed.example.com/${key}?sig=ok`,
+    };
+    const privGrok = mkAsync({ modelId: GROK, provider: "gateway" });
+    extension({ model: privGrok.model, storage: signedStorage });
+    const privFromKey = await sub({ prompt: "PrivEdit", video: "videos/priv.mp4" });
+    if (privFromKey.kind !== "async") assert.fail();
+    eq(privFromKey.handle.stagedInputKeys, undefined);
+    deq(privGrok.startCalls[0].providerOptions, {
+      xai: { videoUrl: "https://signed.example.com/videos/priv.mp4?sig=ok" },
+    });
+    const privFromSb = await sub(
+      { prompt: "PrivSb", video: "clips/local.mp4", extend: true, duration: 5 },
+      { sandbox },
+    );
+    if (privFromSb.kind !== "async") assert.fail();
+    const pk = privFromSb.handle.stagedInputKeys![0];
+    assert.match(pk, /^inputs\/.*\/video\.mp4$/);
+    deq(privGrok.startCalls[1].providerOptions, {
+      xai: { videoUrl: `https://signed.example.com/${pk}?sig=ok`, mode: "extend-video" },
+    });
   });
 
   test("Seedance and FLUX 3 prepend video to inputReferences, omit extend aspectRatio, stage >180 KiB MP4s, and resolve storageKey", async () => {

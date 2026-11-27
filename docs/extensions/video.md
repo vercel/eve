@@ -69,7 +69,7 @@ To edit or extend a video produced earlier in the same session, call `<mount>__g
 
 `video` cannot be combined with `start` or `end`, and `extend: true` requires `video`. `@eve/video` automatically translates `video` and `extend` to the active provider's native API:
 
-- **`spacexai/grok-imagine-video` (default, and direct xAI models):** forwards `video` via `providerOptions.xai.videoUrl` and sets `mode: "extend-video"` when `extend: true`. On edit, `resolution` is also omitted because Grok rejects it. Local bytes are auto-staged to a public `https://` URL when public HTTPS storage is configured; otherwise pass an `https://` URL.
+- **`spacexai/grok-imagine-video` (default, and direct xAI models):** forwards `video` via `providerOptions.xai.videoUrl` and sets `mode: "extend-video"` when `extend: true`. On edit, `resolution` is also omitted because Grok rejects it. Local bytes and `storageKey` inputs are auto-staged or signed via `storage.getSignedUrl` (including on private Vercel Blob stores); otherwise pass an `https://` URL.
 - **`bytedance/seedance-2.5` and `bytedance/seedance-2.5-flash`:** prepends `video` as the first entry of `inputReferences` (before any additional `references`) and omits `aspectRatio` (including from `defaults`) on extensions as well as edits.
 - **`bfl/flux-3-video`, `topaz/*`, and other models:** prepends `video` as the first entry of `inputReferences` with explicit `mediaType`, staging large local inputs to public HTTPS storage on AI Gateway async models.
 - **Generation-only models (such as Google Veo):** iterate by generating a new take with a refined `prompt`, optionally reusing `seed`, `start`, `end`, or image `references`.
@@ -101,14 +101,14 @@ import { vercelBlob } from "@eve/video/vercel";
 
 export default video({
   storage: vercelBlob({
-    access: "public", // default; required for staging large local inputs
+    access: "public", // or "private" (uses short-lived signed URLs for staging and edits)
     prefix: "eve/video", // default
     ttlDays: 30,
   }),
 });
 ```
 
-An explicit `token` option takes precedence over OIDC. With environment variables, `EVE_VIDEO_BLOB_STORE_ID` uses OIDC when `VERCEL_OIDC_TOKEN` is set or `EVE_VIDEO_BLOB_READ_WRITE_TOKEN` is absent; otherwise `EVE_VIDEO_BLOB_READ_WRITE_TOKEN` is used, and when neither `EVE_VIDEO_BLOB_*` variable is set, `@vercel/blob` falls back to `BLOB_STORE_ID` + OIDC or `BLOB_READ_WRITE_TOKEN`. Blobs are stored under `${prefix}/${key}` while `put` returns the unprefixed logical `key`. Uploads over 5 MiB use multipart automatically unless `multipart` is set.
+An explicit `token` option takes precedence over OIDC. With environment variables, `EVE_VIDEO_BLOB_STORE_ID` uses OIDC when `VERCEL_OIDC_TOKEN` is set or `EVE_VIDEO_BLOB_READ_WRITE_TOKEN` is absent; otherwise `EVE_VIDEO_BLOB_READ_WRITE_TOKEN` is used, and when neither `EVE_VIDEO_BLOB_*` variable is set, `@vercel/blob` falls back to `BLOB_STORE_ID` + OIDC or `BLOB_READ_WRITE_TOKEN`. Blobs are stored under `${prefix}/${key}` while `put` returns the unprefixed logical `key`. With `access: "private"`, `put` omits the unauthenticated `url` and `vercelBlob()` implements `getSignedUrl` via Vercel Blob signed tokens (`issueSignedToken` + `presignUrl`) so staging and same-session edits work without making the store public. Uploads over 5 MiB use multipart automatically unless `multipart` is set.
 
 ### Local disk and in-memory storage
 
@@ -130,7 +130,7 @@ export default video({
 
 ### Custom storage adapter
 
-Implement `VideoStorage` from `@eve/video/storage` to persist videos to Amazon S3, Cloudflare R2, Google Cloud Storage, or another backend. Only `put` is required; implementing `get` lets callers iterate by `storageKey`, and implementing `delete` lets `@eve/video` clean up staged inputs and partial batches on failure:
+Implement `VideoStorage` from `@eve/video/storage` to persist videos to Amazon S3, Cloudflare R2, Google Cloud Storage, or another backend. Only `put` is required; implementing `get` lets callers iterate by `storageKey` and lets `slackVideoRenderer` upload clips inline, implementing `getSignedUrl` enables staging and edits on private stores, and implementing `delete` lets `@eve/video` clean up staged inputs and partial batches on failure:
 
 ```ts title="agent/lib/r2-video-storage.ts"
 import type { VideoStorage } from "@eve/video/storage";

@@ -169,6 +169,32 @@ describe("vercelBlob storage adapter over local HTTP server", () => {
             blobs.delete((u.startsWith("http") ? new URL(u).pathname : u).replace(/^\/+/, ""));
           return json(res, 200, {});
         }
+        if (method === "POST" && parsed.pathname === "/signed-token") {
+          const reqBody = JSON.parse(body.toString("utf8")) as {
+            pathname?: string;
+            operations?: string[];
+            validUntil?: number;
+          };
+          const auth = String(req.headers.authorization ?? "");
+          const tokenParts = auth.replace(/^Bearer\s+/i, "").split("_");
+          const storeId =
+            String(req.headers["x-vercel-blob-store-id"] ?? "") ||
+            (tokenParts[0] === "vercel" ? tokenParts[3] : "storepriv");
+          const validUntil = reqBody.validUntil ?? Date.now() + 3_600_000;
+          const payload = Buffer.from(
+            JSON.stringify({
+              storeId,
+              pathname: reqBody.pathname ?? "*",
+              operations: reqBody.operations ?? ["get"],
+              validUntil,
+            }),
+          ).toString("base64url");
+          return json(res, 200, {
+            delegationToken: `${payload}.mock_sig`,
+            clientSigningToken: "csec_test_key",
+            validUntil,
+          });
+        }
         if (method === "GET") {
           if (nextGetStatus !== undefined) {
             const st = nextGetStatus;
@@ -255,8 +281,22 @@ describe("vercelBlob storage adapter over local HTTP server", () => {
       const ps = await putItem(priv, "secret/clip.webm", WEBM_BYTES, "video/webm", { ttlDays: 2 });
       const hp = reqs[reqs.length - 1].headers;
       deq(
-        [ps.visibility, hp["x-vercel-blob-access"], hp["x-ttl-days"]],
-        ["private", "private", "2"],
+        [ps.visibility, ps.url, hp["x-vercel-blob-access"], hp["x-ttl-days"]],
+        ["private", undefined, "private", "2"],
+      );
+      const signed = await priv.getSignedUrl!({
+        key: ps.key,
+        expiresInSeconds: 600,
+        signal: SIG,
+      });
+      assert.ok(signed);
+      const signedParsed = new URL(signed);
+      eq(signedParsed.origin, "https://storepriv.private.blob.vercel-storage.com");
+      eq(signedParsed.pathname, "/eve/video/secret/clip.webm");
+      assert.ok(signedParsed.searchParams.has("vercel-blob-signature"));
+      await rej(
+        () => priv.getSignedUrl!({ key: ps.key, expiresInSeconds: 0, signal: SIG }),
+        RangeError,
       );
     }));
 
