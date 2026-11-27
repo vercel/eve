@@ -105,7 +105,7 @@ export function agent(options: AgentToolOptions = {}): AgentTool | AgentModelsTo
           "Delegate an independent, self-contained subtask to a copy of yourself, optionally on another model.",
           "Prefer doing routine file reads, targeted edits, and test runs directly; delegate only when isolated exploration, a different model, or genuinely independent work saves effort.",
           "A task keeps the model it started with.",
-          "Specify the goal, expected output, and non-overlapping scope if it may edit files.",
+          "Specify the goal, expected output, and whether it may edit files (if so, give it a non-overlapping scope).",
         ].join(" "),
         inputSchema,
         serve: agentModelsServeWorkflow,

@@ -47,17 +47,18 @@ export const READ_FILE_INPUT_SCHEMA = prepareJsonSchema<ReadFileToolInput>(
     properties: {
       filePath: {
         type: "string",
-        description: "Path to the file to read (relative or absolute)",
+        description:
+          "The path to the file to read: absolute, relative to the workspace root, or beginning with ~/ or $HOME/.",
       },
       limit: {
         type: "integer",
         minimum: 1,
-        description: "Maximum number of lines to read",
+        description: "Maximum number of lines to return. Defaults to 2000.",
       },
       offset: {
         type: "integer",
         minimum: 1,
-        description: "Line number to start reading from (1-indexed)",
+        description: "1-based line number to start from. Defaults to 1.",
       },
     },
     required: ["filePath"],
@@ -100,8 +101,10 @@ export const READ_FILE_OUTPUT_SCHEMA = defineJsonSchema<ReadFileToolOutput>({
 export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = frameworkTool(
   defineTool({
     label: { start: (input) => toolLabel("Read", input.filePath) },
-    description:
-      "Read the contents of a file. Supports text files, images (png, jpeg, gif, webp), and PDFs. Images and PDFs are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+    description: [
+      "Read the contents of a file. Supports text files, images (PNG, JPEG, GIF, WebP), and PDFs, including `Attached file <path>` references. Images and PDFs are sent as attachments.",
+      "Text is returned with a `<line>: ` prefix on each line; the prefix is not part of the file. Output stops at `limit` lines or 50 KB, whichever is hit first. Use `offset` and `limit` for large files, in large windows rather than tiny slices. When you need the full file, continue with `offset` until complete.",
+    ].join("\n"),
     async execute(input, ctx) {
       return await executeReadFileOnSandbox(await ctx.getSandbox(), input as ReadFileInput);
     },

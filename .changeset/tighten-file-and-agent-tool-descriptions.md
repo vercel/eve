@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Align `read_file`, `write_file`, and `edit_file` tool descriptions with `pi` 1.7.0, clarify `agent` delegation wording to discourage unnecessary subagent fan-out, and tighten `eve/extensions/code` editing and verification guidance.
+Clarify the `read_file`, `edit_file`, and `agent` tool descriptions so models make exact edits and delegate only independent work, and tighten the `eve/extensions/code` editing and verification guidance.

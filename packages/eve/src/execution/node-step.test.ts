@@ -144,11 +144,8 @@ describe("createNodeHarnessTools", () => {
     const node = await createNodeWithSourceOwnedTools({ names: ["agent"] });
     const agentTool = createNodeHarnessTools({ node }).get("agent");
 
-    expect(agentTool?.description).toContain("Delegate an independent, self-contained subtask");
-    expect(agentTool?.description).toContain("Prefer doing routine file reads");
-    expect(agentTool?.description).toContain("Specify the goal, expected output");
+    expect(agentTool?.description).toContain(AGENT_TOOL_DESCRIPTION);
     expect(agentTool?.description).toContain("no prior conversation context");
-    expect(agentTool?.description).toContain("non-overlapping scope");
     expect(agentTool?.description).not.toMatch(/\beve\b/);
     expect(agentTool?.execute).toBeUndefined();
     expect(agentTool?.workflowId).toBe("workflow//eve//agentToolServeWorkflow");

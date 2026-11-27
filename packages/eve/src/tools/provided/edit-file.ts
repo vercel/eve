@@ -6,7 +6,7 @@ import { frameworkTool } from "./framework-tool.js";
 
 /*!
  * Ported from pi's `edit` tool (packages/coding-agent/src/core/tools/edit.ts and
- * edit-diff.ts in badlogic/pi-mono v1.7.0) under the MIT License.
+ * edit-diff.ts in badlogic/pi-mono v1.5.0) under the MIT License.
  */
 
 /**
@@ -35,7 +35,7 @@ const EDIT_FILE_INPUT_SCHEMA = prepareJsonSchema<EditFileToolInput>(
   {
     type: "object",
     properties: {
-      path: { type: "string", description: "Path to the file to edit (relative or absolute)" },
+      path: { type: "string", description: "Path to the file to edit (relative or absolute)." },
       edits: {
         type: "array",
         items: {
@@ -44,14 +44,14 @@ const EDIT_FILE_INPUT_SCHEMA = prepareJsonSchema<EditFileToolInput>(
             oldText: {
               type: "string",
               description:
-                "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.",
+                "Exact text to replace. It must be unique in the original file and must not overlap any other edits[].oldText.",
             },
-            newText: { type: "string", description: "Replacement text for this targeted edit." },
+            newText: { type: "string", description: "Replacement text." },
           },
           required: ["oldText", "newText"],
         },
         description:
-          "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.",
+          "One or more targeted replacements, each matched against the original file, not incrementally.",
       },
     },
     required: ["path", "edits"],
@@ -79,7 +79,7 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
         typeof input.path === "string" ? `Edit ${input.path}` : "Edit",
     },
     description:
-      "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+      "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. Make all changes to one file in a single call, and merge changes to the same block or nearby lines into one edit. Do not include large unchanged regions just to connect distant changes.",
     inputSchema: EDIT_FILE_INPUT_SCHEMA,
     outputSchema: EDIT_FILE_OUTPUT_SCHEMA,
     async execute(input, ctx): Promise<EditFileToolOutput> {
