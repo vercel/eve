@@ -179,6 +179,46 @@ test("streamToFileWithLimit and extractBoundedTar enforce byte, file-count, and 
     }),
     /disallowed sparse entry/u,
   );
+
+  // Reject PAX size override desync (PAX size=0 vs raw header size=512 hiding a symlink).
+  const sizePaxLine = "10 size=0\n";
+  const sizePaxBody = Buffer.from(sizePaxLine, "utf8");
+  const sizePaxHdr = Buffer.alloc(512, 0);
+  sizePaxHdr.write("PaxHeader/decoy", 0, "utf8");
+  sizePaxHdr.write("0000644\0", 100, "ascii");
+  sizePaxHdr.write(`${sizePaxBody.length.toString(8).padStart(11, "0")}\0`, 124, "ascii");
+  sizePaxHdr.write("x", 156, "ascii");
+  const decoyHdr = Buffer.alloc(512, 0);
+  decoyHdr.write("decoy", 0, "utf8");
+  decoyHdr.write("0000644\0", 100, "ascii");
+  decoyHdr.write(`${(512).toString(8).padStart(11, "0")}\0`, 124, "ascii");
+  decoyHdr.write("0", 156, "ascii");
+  const hiddenSymHdr = Buffer.alloc(512, 0);
+  hiddenSymHdr.write("escape", 0, "utf8");
+  hiddenSymHdr.write("0000777\0", 100, "ascii");
+  hiddenSymHdr.write("00000000000\0", 124, "ascii");
+  hiddenSymHdr.write("2", 156, "ascii");
+  hiddenSymHdr.write("/tmp", 157, "utf8");
+  const desyncTar = join(work, "desync.tar");
+  await writeFile(
+    desyncTar,
+    Buffer.concat([
+      sizePaxHdr,
+      sizePaxBody,
+      Buffer.alloc(512 - sizePaxBody.length, 0),
+      decoyHdr,
+      hiddenSymHdr,
+      Buffer.alloc(1024, 0),
+    ]),
+  );
+  await assert.rejects(
+    extractBoundedTar(desyncTar, join(work, "desync-out"), {
+      gzip: false,
+      maxFiles: 10,
+      maxUncompressedBytes: 64 * 1024,
+    }),
+    /mismatched PAX size/u,
+  );
 });
 
 test("peer-runner handles OpenCode gpt-6.2-sol config, reasoning tokens, pi error masking, and fx subagents", () => {

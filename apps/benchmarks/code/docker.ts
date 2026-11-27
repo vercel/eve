@@ -157,9 +157,14 @@ function parsePaxRecords(data: Buffer): { size?: number; path?: string; hasSpars
       const key = record.slice(0, eq);
       const value = record.slice(eq + 1);
       if (key.startsWith("GNU.sparse.") || key.startsWith("SCHILY.sparse.")) hasSparse = true;
-      else if (key === "size") {
+      else if (key === "linkpath") {
+        throw new RangeError("Archive contains disallowed PAX linkpath");
+      } else if (key === "size") {
         const parsed = Number(value);
-        if (Number.isFinite(parsed) && parsed >= 0) size = parsed;
+        if (!Number.isSafeInteger(parsed) || parsed < 0) {
+          throw new RangeError("Archive contains invalid PAX size");
+        }
+        size = parsed;
       } else if (key === "path") {
         path = value;
       }
@@ -261,7 +266,7 @@ async function inspectBoundedTar(
       }
       const paddedDataSize = Math.ceil(rawDataSize / 512) * 512;
 
-      if (typeChar === "x" || typeChar === "g" || typeChar === "L") {
+      if (typeChar === "x" || typeChar === "L") {
         if (rawDataSize > 1024 * 1024) {
           throw new RangeError("Archive metadata header exceeds 1 MiB limit");
         }
@@ -276,10 +281,14 @@ async function inspectBoundedTar(
         throw new RangeError(`Archive contains disallowed entry type '${typeChar}'`);
       }
 
+      if (nextPax?.size !== undefined && nextPax.size !== rawDataSize) {
+        throw new RangeError("Archive contains mismatched PAX size override");
+      }
+
       const name = readCString(header.subarray(0, 100));
       const prefix = readCString(header.subarray(345, 500));
       const entryPath = nextPax?.path ?? nextGnuPath ?? (prefix ? `${prefix}/${name}` : name);
-      const logicalSize = Math.max(rawDataSize, nextPax?.size ?? 0);
+      const logicalSize = rawDataSize;
       nextPax = null;
       nextGnuPath = null;
 
@@ -312,6 +321,9 @@ async function inspectBoundedTar(
       }
       pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
       consumeBlocks();
+    }
+    if (captureKind !== null || skipBytes > 0) {
+      throw new RangeError("Archive is truncated");
     }
   } catch (err) {
     input.destroy();
