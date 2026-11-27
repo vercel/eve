@@ -171,7 +171,7 @@ export function createVercelSandbox(
       }
     },
     async resume(_context, artifact, stateValue) {
-      requirePreparedVercelTemplate(artifact);
+      const prepared = requirePreparedVercelTemplate(artifact);
       const state = requireVercelSessionState(stateValue);
       const sandboxModule = await loadSandboxModule();
       const sandbox = await getNamedVercelSandbox({
@@ -184,15 +184,24 @@ export function createVercelSandbox(
           `Vercel sandbox session "${state.sandboxName}" no longer exists.`,
         );
       }
-      try {
-        await ensureVercelSandboxBaseRuntime(sandbox);
-      } catch (error) {
-        if (isVercelSnapshotNotFoundError(error)) {
-          throw new SandboxSessionGoneError(
-            `Vercel sandbox session "${state.sandboxName}" can no longer resume: its snapshot expired or was deleted.`,
-          );
+      const canSkipBaseSetup =
+        sandbox.status === "running" &&
+        usesEveBase &&
+        prepared.snapshotId !== undefined &&
+        sandbox.sourceSnapshotId === prepared.snapshotId &&
+        mountsDoNotShadowBaseRuntime(sandbox.mounts) &&
+        mountsDoNotShadowBaseRuntime(createOptions.mounts);
+      if (!canSkipBaseSetup) {
+        try {
+          await ensureVercelSandboxBaseRuntime(sandbox);
+        } catch (error) {
+          if (isVercelSnapshotNotFoundError(error)) {
+            throw new SandboxSessionGoneError(
+              `Vercel sandbox session "${state.sandboxName}" can no longer resume: its snapshot expired or was deleted.`,
+            );
+          }
+          throw error;
         }
-        throw error;
       }
       return createVercelConnection(sandbox);
     },

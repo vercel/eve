@@ -90,7 +90,7 @@ eve skips the snapshot when the environment has no `prepare` callback, managed w
 
 When `VERCEL` is set, builds need `VERCEL_OIDC_TOKEN` for templates with a `prepare` callback, managed workspace or skill files, or a `source`. Empty templates without these inputs build without the token. For a local `vercel build`, run `vercel link` and `vercel pull` before building templates that need preparation.
 
-A new session sandbox from a snapshot of [eve's default image](/docs/sandbox/docker#eves-default-image), without mounts shadowing workspace or system paths, runs no setup command. eve runs base-runtime setup when it attaches any other sandbox. These include existing or resumed sandboxes, custom images or snapshot sources, sandboxes with mounts over workspace or system paths, and sandboxes created without a snapshot.
+A new or running resumed session sandbox from a snapshot of [eve's default image](/docs/sandbox/docker#eves-default-image), without mounts shadowing workspace or system paths, runs no setup command. eve runs base-runtime setup when it attaches any other sandbox: non-running resumed or existing-on-start sandboxes, custom images or snapshot sources, sandboxes with shadowing mounts, and sandboxes created without a snapshot.
 
 ## Initialize after open
 
