@@ -239,13 +239,13 @@ cancelled work still counts toward session limits.
 
 ## Stream events
 
-| Event          | When                                                                     | Data                                                      |
-| -------------- | ------------------------------------------------------------------------ | --------------------------------------------------------- |
-| `task.started` | A call starts a task                                                     | `taskId`, `name`, `kind`, and `startedBy: { callId }`     |
-| `call.started` | A call reaches its task, including a later call to a resumable task      | `callId` and `taskId`                                     |
-| `call.settled` | A reply, return, failure, or cancel ends one call                        | `callId`, `outcome`, and `output`, `outputOf`, or `error` |
-| `task.ended`   | The task ends; agent and one-shot tasks end immediately on cancellation  | `taskId`, `outcome`, and `reason` or `error`              |
-| `child.opened` | A workflow run, including an agent tool's, opens a session with an agent | `sessionId`, `name`, `stream`, and `owner`                |
+| Event          | When                                                                     | Data                                                                      |
+| -------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `task.started` | A call starts a task                                                     | `taskId`, `name`, `kind`, and `startedBy: { callId }`                     |
+| `call.started` | A call reaches its task, including a later call to a resumable task      | `callId` and `taskId`                                                     |
+| `call.settled` | A reply, return, failure, or cancel ends one call                        | `callId`, `outcome`, `outputTokens`, and `output`, `outputOf`, or `error` |
+| `task.ended`   | The task ends; agent and one-shot tasks end immediately on cancellation  | `taskId`, `outcome`, and `reason` or `error`                              |
+| `child.opened` | A workflow run, including an agent tool's, opens a session with an agent | `sessionId`, `name`, `stream`, and `owner`                                |
 
 `task.started` and `task.ended` come once per task. Each call the task serves has its own
 `call.started` and `call.settled`. Both belong to that call's turn, which can be a later turn for a

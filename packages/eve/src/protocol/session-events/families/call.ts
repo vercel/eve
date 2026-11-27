@@ -60,6 +60,8 @@ export interface CallRequestedData {
   readonly inputRef?: ValueReference;
   /** The model's input didn't validate; the call settles `failed` and never runs. */
   readonly inputError?: ErrorInfo;
+  /** Estimated tokens of the input as the model sent it. Absent when the input didn't validate. */
+  readonly inputTokens?: number;
 }
 
 /** What cleared a call to run. Absent when it needed no approval. */
@@ -99,6 +101,12 @@ export interface CallSettledData {
   readonly cause?: Cause;
   /** The call's label once it settled, from the tool. */
   readonly label?: string;
+  /**
+   * Estimated tokens of the output or error the model receives. For a call that runs as a task
+   * this estimates the raw task output, before the tool's `toModelOutput` and the cut applied
+   * when task results are delivered, so it can overstate what the model reads.
+   */
+  readonly outputTokens?: number;
 }
 
 /** A progress record previewing a call's input as the model writes it. */
@@ -140,6 +148,7 @@ export const callSchemas = {
         input: jsonValue.optional(),
         inputError: errorInfo.optional(),
         inputRef: valueReference.optional(),
+        inputTokens: z.number().int().nonnegative().optional(),
         owner,
       }),
     ),
@@ -155,6 +164,7 @@ export const callSchemas = {
         output: jsonValue.optional(),
         outputOf: z.object({ callId: id }).optional(),
         outputRef: valueReference.optional(),
+        outputTokens: z.number().int().nonnegative().optional(),
         reason: z.string().optional(),
         label: z.string().optional(),
       }),

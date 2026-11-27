@@ -22,7 +22,9 @@ import {
   routeAnswer,
   runnableCalls,
   settle,
+  settleTask,
 } from "#harness/session-machine/transitions.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 import { sessionEndedFacts } from "#harness/facts.js";
 import { authHookToken } from "#harness/authorization.js";
 import { callsBackFor, signInsEnded } from "#harness/hitl/sign-in-callbacks.js";
@@ -1357,3 +1359,25 @@ function committed(
 ): SessionEvent[] {
   return cascade(view.projection.view, decide(view).events);
 }
+
+describe("settling the calls of a task", () => {
+  it("estimates the output once, on the call that carries it, and the error on every call", () => {
+    const view = viewOf(runningCall());
+    const calls = [{ callId: "a" }, { callId: "b" }];
+    const done = settleTask(view, {
+      calls,
+      outcome: { output: { summary: "all green" }, status: "completed" },
+    }).events;
+    expect(done.map((event) => event.data)).toMatchObject([
+      { callId: "a", outputTokens: estimateTokens({ summary: "all green" }) },
+      { callId: "b", outputOf: { callId: "a" } },
+    ]);
+    expect(done[1]?.data).not.toHaveProperty("outputTokens");
+
+    const failed = settleTask(view, { calls, outcome: { error: "boom", status: "failed" } });
+    const tokens = estimateTokens("boom");
+    expect(
+      failed.events.map((event) => (event.data as { outputTokens?: number }).outputTokens),
+    ).toEqual([tokens, tokens]);
+  });
+});

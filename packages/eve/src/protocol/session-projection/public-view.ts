@@ -128,6 +128,8 @@ export function call(view: SessionView, callId: string): CallObservation | undef
     inputRef: row.inputRef,
     output: output?.output,
     outputRef: output?.outputRef,
+    inputTokens: row.inputTokens,
+    outputTokens: output?.outputTokens,
     outcome: row.outcome,
     reason: row.reason,
     clearedBy: row.clearedBy,

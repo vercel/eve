@@ -555,12 +555,17 @@ describe("the shared fold", () => {
           callId,
           capability: { kind: "tool", name: "read" },
           input: {},
+          inputTokens: 7,
           owner: { runId: "run_0" },
         },
         scope,
         type: "call.requested",
       },
-      { data: { callId, outcome: "completed", output }, scope, type: "call.settled" },
+      {
+        data: { callId, outcome: "completed", output, outputTokens: 5_000 },
+        scope,
+        type: "call.settled",
+      },
     ];
     const settledTurn: StoredLine[] = [
       ...turnLines(0, { opensSession: true }).slice(0, 2),
@@ -576,6 +581,7 @@ describe("the shared fold", () => {
     expect(kept.calls.small?.output).toBe("done");
     expect(kept.calls.large?.output).toBeUndefined();
     expect(kept.calls.large?.outputRef).toEqual({ mediaType: "application/json", size: 20_002 });
+    expect(kept.calls.large).toMatchObject({ inputTokens: 7, outputTokens: 5_000 });
     expect(kept.runs.run_0?.status).toBe("settled");
 
     const next = folded(

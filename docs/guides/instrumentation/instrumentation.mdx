@@ -72,6 +72,8 @@ A message that pauses for a person ends with `awaiting-input`, and the work afte
 
 Each call emits one `call.*` pair, and SDK callbacks don't add a second one. A subagent's `call.settled` includes its reported usage. A call that runs as a task names it as `taskId` on `call.settled`, including a call that continues an existing task.
 
+`call.requested` carries `inputTokens` and `call.settled` carries `outputTokens`. Both are estimates of the call's input and output size, because providers bill only per model step.
+
 The event's `scope` field holds the session and run IDs the event belongs to. `turnId` can be absent for compaction or direct calls. Treat `idempotencyKey` as opaque. `runId` and `attempt` identify a run; runtime-context resolvers receive them as `run: { id, attempt }`.
 
 eve rebuilds a thrown tool error from its saved record, so check `error.name`, not `instanceof`.

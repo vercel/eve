@@ -119,6 +119,7 @@ export interface CallRow extends Introduced, Ended {
   readonly input?: JsonValue;
   readonly inputRef?: ValueReference;
   readonly inputError?: ErrorInfo;
+  readonly inputTokens?: number;
   readonly status: "requested" | "running" | "settled";
   readonly clearedBy?: ClearedBy;
   readonly taskId?: string;
@@ -126,6 +127,7 @@ export interface CallRow extends Introduced, Ended {
   readonly output?: JsonValue;
   readonly outputRef?: ValueReference;
   readonly outputOf?: { readonly callId: string };
+  readonly outputTokens?: number;
   readonly error?: ErrorInfo;
   readonly reason?: string;
   readonly cause?: Cause;
