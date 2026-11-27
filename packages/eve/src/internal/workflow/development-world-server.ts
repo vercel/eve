@@ -6,18 +6,15 @@ import { listDevelopmentGenerationIds } from "#internal/nitro/dev-runtime-genera
 
 import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
 import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
-import type { ValidQueueName, World } from "#compiled/@workflow/world/index.js";
+import { reenqueueActiveRuns, type World } from "#compiled/@workflow/world/index.js";
 import { createWorld, type LocalWorld } from "#compiled/@workflow/world-local/index.js";
-import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
   displayLocalWorkflowWorldDataDirectory,
   resolveLocalWorkflowWorldDataDirectory,
 } from "#internal/workflow/local-world-data-directory.js";
+import { installEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
 import { applyLocalWorkflowWorldDeliveryTimeoutDefaults } from "#internal/workflow/local-world-delivery-timeouts.js";
-import {
-  localRecoveryMessage,
-  releaseOrphanedLocalSteps,
-} from "#internal/workflow/local-world-recovery.js";
+import { releaseOrphanedLocalSteps } from "#internal/workflow/local-world-recovery.js";
 import {
   decodeDevelopmentWorldValue,
   encodeDevelopmentWorldValue,
@@ -54,7 +51,6 @@ export function createParentDevelopmentWorkflowWorld(input: {
 }
 
 class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWorld {
-  readonly #agentName: string;
   readonly #appRoot: string;
   readonly #resolveActiveGenerationId: () => string;
   readonly #transportSecret: string;
@@ -80,15 +76,18 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       throw new Error("Development Workflow transport secret is too short to be trusted.");
     }
     this.#resume = input.resume === true;
-    this.#agentName = input.agentName;
     this.#appRoot = input.appRoot;
     this.#resolveActiveGenerationId = input.resolveActiveGenerationId;
     this.#transportSecret = input.transportSecret;
     applyLocalWorkflowWorldDeliveryTimeoutDefaults();
-    this.#world = createWorld({
-      dataDir: resolveLocalWorkflowWorldDataDirectory(input.appRoot),
-      recoverActiveRuns: false,
-    });
+    installEveWorkflowQueueNamespace(input.agentName);
+    this.#world = signWorldDeliveries(
+      createWorld({
+        dataDir: resolveLocalWorkflowWorldDataDirectory(input.appRoot),
+        recoverActiveRuns: false,
+      }),
+      input.transportSecret,
+    );
   }
 
   async start(): Promise<void> {
@@ -116,8 +115,6 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       const skippedGenerations = new Set<string>();
       await reenqueueActiveDevelopmentRuns({
         appRoot: this.#appRoot,
-        enqueue: this.#queue.bind(this),
-        prefix: deriveEveWorkflowQueuePrefix(this.#agentName),
         world: this.#world,
         canRecover: async (generationId) => {
           const availability = await this.#generationAvailability(generationId);
@@ -246,17 +243,6 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     }
   }
 
-  async #queue(...args: Parameters<World["queue"]>): ReturnType<World["queue"]> {
-    const [queueName, message, options] = args;
-    return await this.#world.queue(queueName, message, {
-      ...options,
-      headers: {
-        ...options?.headers,
-        [DEVELOPMENT_WORKFLOW_DELIVERY_HEADER]: this.#transportSecret,
-      },
-    });
-  }
-
   async #call(call: unknown): Promise<unknown> {
     if (!isDevelopmentWorldRequest(call)) {
       throw new Error("Development Workflow World call is malformed.");
@@ -269,7 +255,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       return this.#resolveActiveGenerationId();
     }
     if (call.operation === "queue") {
-      return await this.#queue(...(args as Parameters<World["queue"]>));
+      return await this.#world.queue(...(args as Parameters<World["queue"]>));
     }
     if (call.operation === "hooks.getByToken" || call.operation === "hooks.get") {
       if (!this.#started) throw new Error("Local Workflow World is still starting.");
@@ -313,6 +299,17 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   }
 }
 
+function signWorldDeliveries(world: LocalWorld, secret: string): LocalWorld {
+  return {
+    ...world,
+    queue: (queueName, message, options) =>
+      world.queue(queueName, message, {
+        ...options,
+        headers: { ...options?.headers, [DEVELOPMENT_WORKFLOW_DELIVERY_HEADER]: secret },
+      }),
+  };
+}
+
 const DEVELOPMENT_WORLD_OPERATION_SET: ReadonlySet<string> = new Set(DEVELOPMENT_WORLD_OPERATIONS);
 
 function isDevelopmentWorldRequest(value: unknown): value is DevelopmentWorldRequest {
@@ -331,21 +328,15 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 async function reenqueueActiveDevelopmentRuns(input: {
   readonly appRoot: string;
-  readonly enqueue: World["queue"];
   readonly canRecover: (generationId: string) => Promise<boolean>;
-  readonly prefix: string;
   readonly world: LocalWorld;
 }): Promise<void> {
-  for (const status of ["pending", "running"] as const) {
-    let cursor: string | undefined;
-    do {
+  const recoverableRuns: World["runs"] = {
+    ...input.world.runs,
+    list: (async (params) => {
       let page: Awaited<ReturnType<World["runs"]["list"]>>;
       try {
-        page = await input.world.runs.list({
-          pagination: { cursor },
-          resolveData: "none",
-          status,
-        });
+        page = await input.world.runs.list(params);
       } catch (error) {
         throw new Error(
           `Failed to read the app's active local Workflow runs. ` +
@@ -361,13 +352,10 @@ async function reenqueueActiveDevelopmentRuns(input: {
         input.world,
         recoverable.map((run) => run.runId),
       );
-      for (const run of recoverable) {
-        await input.enqueue(
-          `${input.prefix}${run.workflowName}` as ValidQueueName,
-          localRecoveryMessage(run),
-        );
-      }
-      cursor = page.hasMore ? (page.cursor ?? undefined) : undefined;
-    } while (cursor !== undefined);
-  }
+      return { ...page, data: recoverable };
+    }) as World["runs"]["list"],
+  };
+  await reenqueueActiveRuns(recoverableRuns, input.world.queue, "eve:dev", undefined, {
+    queueLost: true,
+  });
 }
