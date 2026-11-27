@@ -36,14 +36,8 @@ export async function readProjectInstructions(
   };
 }
 
-export function formatWorkspaceContext(
-  workingDirectory: string,
-  file: ProjectInstructionsFile | null,
-): string {
-  const cwdLine = `Current working directory: ${workingDirectory}`;
-  if (file === null) return cwdLine;
+export function formatProjectInstructions(file: ProjectInstructionsFile): string {
   return [
-    cwdLine,
     "Project-specific instructions and guidelines:",
     `<project_instructions path="${file.path}">\n${file.content}\n</project_instructions>`,
   ].join("\n\n");

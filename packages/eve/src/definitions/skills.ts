@@ -34,15 +34,17 @@ import {
   SECTION_ORDER,
 } from "./definition.js";
 
-export function modelSkillRootOf(container: Pick<ContextReader, "get">): string {
+export function owningSandboxProviderOf(container: Pick<ContextReader, "get">): string | undefined {
   const bundle = compiledBundleOf(container);
-  if (bundle === undefined) return MODEL_SKILL_ROOT;
+  if (bundle === undefined) return undefined;
   const registered = bundle.graph?.root?.sandboxRegistry?.sandbox;
   const sandbox =
     registered != null ? owningSandboxDefinition(registered) : bundle.resolvedAgent?.sandbox;
-  return sandbox?.kind === "independent" && sandbox.environment.provider === "host"
-    ? MODEL_HOST_SKILL_ROOT
-    : MODEL_SKILL_ROOT;
+  return sandbox?.kind === "independent" ? sandbox.environment.provider : undefined;
+}
+
+export function modelSkillRootOf(container: Pick<ContextReader, "get">): string {
+  return owningSandboxProviderOf(container) === "host" ? MODEL_HOST_SKILL_ROOT : MODEL_SKILL_ROOT;
 }
 
 export const skills: Definition = {
