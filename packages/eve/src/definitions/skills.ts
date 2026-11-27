@@ -17,7 +17,7 @@ import {
   removeSkillPackageFromSandbox,
   skillPackageRevision,
   stripSkillFrontmatter,
-  writeSkillPackageToSandbox,
+  writeSkillPackagesToSandbox,
 } from "#shared/skill-package.js";
 import { formatAvailableSkillsSection, skillFilePath } from "#execution/skills/instructions.js";
 import { announcementDigest } from "#harness/announcements.js";
@@ -225,22 +225,48 @@ export async function syncDynamicSkillFiles(ctx: ContextContainer): Promise<void
       return;
     }
     const sandbox = await open();
-    for (const name of stale) {
-      await removeSkillPackageFromSandbox({ name, sandbox });
-      delete next[name];
-    }
-    for (const name of pending) {
-      const skill = packages.get(name);
-      if (skill === undefined) continue;
-      delete next[name];
-      ctx.set(DynamicSkillSandboxKey, { ...next });
-      await removeSkillPackageFromSandbox({ name, sandbox });
-      await writeSkillPackageToSandbox({ sandbox, skill });
+    const pendingSkills = pending
+      .map((name) => packages.get(name))
+      .filter((skill): skill is MaterializableSkillPackage => skill !== undefined);
+    for (const { name } of pendingSkills) delete next[name];
+    if (pendingSkills.length > 0) ctx.set(DynamicSkillSandboxKey, { ...next });
+    const namesToRemove = [...stale, ...pendingSkills.map((skill) => skill.name)];
+    await removeSkillPackages(namesToRemove, sandbox);
+    for (const name of stale) delete next[name];
+    if (pendingSkills.length > 0) {
+      await writeSkillPackagesToSandbox({ sandbox, skills: pendingSkills });
       const current = sandboxIdentity(await access.captureState());
-      if (current !== null) next[name] = `${current}#${desired.get(name)}`;
+      if (current !== null) {
+        for (const { name } of pendingSkills) next[name] = `${current}#${desired.get(name)}`;
+      }
     }
     ctx.set(DynamicSkillSandboxKey, next);
   });
+}
+
+const SKILL_REMOVAL_CONCURRENCY = 8;
+
+async function removeSkillPackages(
+  names: readonly string[],
+  sandbox: Parameters<typeof removeSkillPackageFromSandbox>[0]["sandbox"],
+): Promise<void> {
+  let firstError: unknown;
+  let hasError = false;
+  for (let i = 0; i < names.length; i += SKILL_REMOVAL_CONCURRENCY) {
+    const results = await Promise.allSettled(
+      names
+        .slice(i, i + SKILL_REMOVAL_CONCURRENCY)
+        .map((name) => removeSkillPackageFromSandbox({ name, sandbox })),
+    );
+    for (const result of results) {
+      if (result.status === "rejected" && !hasError) {
+        firstError = result.reason;
+        hasError = true;
+      }
+    }
+    if (hasError) break;
+  }
+  if (hasError) throw firstError;
 }
 
 function skillId(resolver: ResolvedDynamicDefinition<"skill">): string {

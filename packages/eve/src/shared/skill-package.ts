@@ -76,21 +76,37 @@ export async function writeSkillPackageDirectory(input: {
   }
 }
 
+export async function writeSkillPackagesToSandbox(input: {
+  readonly sandbox: SandboxSession;
+  readonly skills: readonly MaterializableSkillPackage[];
+}): Promise<void> {
+  if (input.skills.length === 0) return;
+  const files = (
+    await Promise.all(
+      input.skills.map(
+        async (skill) =>
+          await Promise.all(
+            skill.files.map(async (file) => ({
+              content: file.content,
+              path: await resolveSandboxSkillWritePath({
+                name: skill.name,
+                relativePath: file.relativePath,
+                sandbox: input.sandbox,
+              }),
+            })),
+          ),
+      ),
+    )
+  ).flat();
+  if (files.length === 0) return;
+  await input.sandbox.writeFiles({ files });
+}
+
 export async function writeSkillPackageToSandbox(input: {
   readonly sandbox: SandboxSession;
   readonly skill: MaterializableSkillPackage;
 }): Promise<void> {
-  const files = await Promise.all(
-    input.skill.files.map(async (file) => ({
-      content: file.content,
-      path: await resolveSandboxSkillWritePath({
-        name: input.skill.name,
-        relativePath: file.relativePath,
-        sandbox: input.sandbox,
-      }),
-    })),
-  );
-  await input.sandbox.writeFiles({ files });
+  await writeSkillPackagesToSandbox({ sandbox: input.sandbox, skills: [input.skill] });
 }
 
 export async function removeSkillPackageFromSandbox(input: {
