@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import type { ConnectTokenParams } from "@vercel/connect";
@@ -996,6 +996,222 @@ test("a release breaks a guard a stopped sandbox left behind", async () => {
   }
 });
 
+const ENOSPC_MESSAGE = "No space left on device";
+
+function withShimDir(bin: string): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  const key = Object.keys(env).find((name) => name.toUpperCase() === "PATH") ?? "PATH";
+  env[key] = [bin, env[key]].filter(Boolean).join(delimiter);
+  return env;
+}
+
+function mkdirShim(root: string, body: (realMkdir: string) => string): NodeJS.ProcessEnv {
+  const realMkdir = execFileSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).trim();
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  const shim = join(bin, "mkdir");
+  writeFileSync(shim, `#!/bin/sh\n${body(realMkdir)}\n`);
+  chmodSync(shim, 0o755);
+  return withShimDir(bin);
+}
+
+function countingSandbox(lockPath: string, env?: NodeJS.ProcessEnv) {
+  const state = { attempts: 0 };
+  const sandbox: Pick<SandboxSession, "run"> = {
+    async run(input: Parameters<SandboxSession["run"]>[0]) {
+      state.attempts += 1;
+      return runLockCommand(input.command, lockPath, env);
+    },
+  };
+  return { state, sandbox: sandbox as SandboxSession };
+}
+
+for (const [name, setup] of [
+  ["a missing parent directory", (root: string) => join(root, "missing", "lease.lock")],
+  [
+    "a parent that is a file",
+    (root: string) => {
+      writeFileSync(join(root, "parent"), "");
+      return join(root, "parent", "lease.lock");
+    },
+  ],
+] as const) {
+  test(`a lease reports the operating system error when the lock directory fails on ${name}`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+    try {
+      const { state, sandbox } = countingSandbox(setup(root));
+      let ran = false;
+      await assert.rejects(
+        withSandboxLeaseLock(sandbox, "owner", async () => {
+          ran = true;
+        }),
+        (error: Error) =>
+          /^Could not lock this sandbox's GitHub credentials: .*mkdir/u.test(error.message) &&
+          !/still using its credentials/u.test(error.message),
+      );
+      assert.equal(state.attempts, 1);
+      assert.equal(ran, false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("a lease reports a full disk on the first attempt instead of waiting as if the lock were held", async () => {
+  const root = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  try {
+    const env = mkdirShim(
+      root,
+      () => `echo "mkdir: cannot create directory '$1': ${ENOSPC_MESSAGE}" >&2\nexit 1`,
+    );
+    const { state, sandbox } = countingSandbox(join(root, "lease.lock"), env);
+    await assert.rejects(
+      withSandboxLeaseLock(sandbox, "owner", async () => undefined),
+      new RegExp(
+        `^Error: Could not lock this sandbox's GitHub credentials: .*${ENOSPC_MESSAGE}`,
+        "u",
+      ),
+    );
+    assert.equal(state.attempts, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a lease that cannot write its owner file fails and leaves no lock behind", async () => {
+  const root = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(root, "lease.lock");
+  try {
+    const env = mkdirShim(root, (real) => `${real} "$@" && ${real} "$1/owner"`);
+    const { state, sandbox } = countingSandbox(lockPath, env);
+    let ran = false;
+    await assert.rejects(
+      withSandboxLeaseLock(sandbox, "owner", async () => {
+        ran = true;
+      }),
+      /Could not lock this sandbox's GitHub credentials: .*owner/u,
+    );
+    assert.equal(state.attempts, 1);
+    assert.equal(ran, false);
+    assert.equal(execFileSync("ls", ["-A", root], { encoding: "utf8" }), "bin\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a lease that cannot take the guard to break a stale lock reports the error and keeps the lock", async () => {
+  const root = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(root, "lease.lock");
+  try {
+    execFileSync("mkdir", [lockPath]);
+    execFileSync("sh", ["-c", `printf stopped > '${lockPath}/owner'`]);
+    execFileSync("touch", ["-t", "200001010000", lockPath]);
+    const env = mkdirShim(
+      root,
+      (real) =>
+        `case "$1" in *.guard) echo "mkdir: cannot create directory '$1': ${ENOSPC_MESSAGE}" >&2; exit 1;; esac\nexec ${real} "$@"`,
+    );
+    const { state, sandbox } = countingSandbox(lockPath, env);
+    await assert.rejects(
+      withSandboxLeaseLock(sandbox, "next", async () => undefined),
+      new RegExp(`Could not lock this sandbox's GitHub credentials: .*${ENOSPC_MESSAGE}`, "u"),
+    );
+    assert.equal(state.attempts, 1);
+    assert.equal(execFileSync("ls", ["-A", root], { encoding: "utf8" }), "bin\nlease.lock\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a lease that cannot remove an unremovable stale lock reports the error and releases the guard", async () => {
+  const root = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(root, "lease.lock");
+  try {
+    execFileSync("mkdir", [lockPath]);
+    execFileSync("sh", ["-c", `printf stopped > '${lockPath}/owner'`]);
+    execFileSync("touch", ["-t", "200001010000", lockPath]);
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "rm"),
+      '#!/bin/sh\necho "rm: cannot remove: Read-only file system" >&2\nexit 1\n',
+    );
+    chmodSync(join(bin, "rm"), 0o755);
+    const env = withShimDir(bin);
+    const { state, sandbox } = countingSandbox(lockPath, env);
+    await assert.rejects(
+      withSandboxLeaseLock(sandbox, "next", async () => undefined),
+      /Could not lock this sandbox's GitHub credentials: .*Read-only file system/u,
+    );
+    assert.equal(state.attempts, 1);
+    assert.equal(execFileSync("ls", ["-A", root], { encoding: "utf8" }), "bin\nlease.lock\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a release still cleans up and removes its lock when the guard cannot be created", async () => {
+  const root = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(root, "lease.lock");
+  try {
+    execFileSync("mkdir", [lockPath]);
+    execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
+    const env = mkdirShim(
+      root,
+      (real) =>
+        `case "$1" in *.guard) echo "mkdir: cannot create directory '$1': ${ENOSPC_MESSAGE}" >&2; exit 1;; esac\nexec ${real} "$@"`,
+    );
+    let calls = 0;
+    const sandbox: Pick<SandboxSession, "run"> = {
+      async run(input: Parameters<SandboxSession["run"]>[0]) {
+        calls += 1;
+        if (calls === 1) return { exitCode: 0, stdout: "", stderr: "" };
+        const result = await runLockCommand(input.command, lockPath, env);
+        if (calls === 2) beginRelease = result;
+        return result;
+      },
+    };
+    let beginRelease: { stdout: string; stderr: string } | undefined;
+    let cleaned = false;
+    const started = Date.now();
+    await withSandboxLeaseLock(sandbox as SandboxSession, "holder", async () => undefined, {
+      cleanup: async () => {
+        cleaned = true;
+      },
+    });
+    assert.equal(cleaned, true);
+    assert.ok(beginRelease?.stdout.startsWith("0 "), "release began without a guard");
+    assert.ok(beginRelease?.stderr.includes(ENOSPC_MESSAGE), "release hit the mkdir shim");
+    assert.ok(Date.now() - started < 1_500, "release does not retry the guard on a disk error");
+    assert.equal(execFileSync("ls", ["-A", root], { encoding: "utf8" }), "bin\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a lease breaks a guard that a stopped sandbox left as a plain file", async () => {
+  const root = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
+  const lockPath = join(root, "lease.lock");
+  try {
+    execFileSync("mkdir", [lockPath]);
+    execFileSync("sh", ["-c", `printf stopped > '${lockPath}/owner'`]);
+    execFileSync("touch", ["-t", "200001010000", lockPath]);
+    writeFileSync(`${lockPath}.guard`, "");
+    execFileSync("touch", ["-t", "200001010000", `${lockPath}.guard`]);
+    const sandbox: Pick<SandboxSession, "run"> = {
+      run: (input) => runLockCommand(input.command, lockPath),
+    };
+    let ran = false;
+    await withSandboxLeaseLock(sandbox as SandboxSession, "next", async () => {
+      ran = true;
+    });
+    assert.equal(ran, true);
+    assert.equal(execFileSync("ls", ["-A", root], { encoding: "utf8" }), "");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function heldLockSandbox(lockPath: string): SandboxSession {
   let calls = 0;
   const sandbox: Pick<SandboxSession, "run"> = {
@@ -1011,12 +1227,14 @@ function heldLockSandbox(lockPath: string): SandboxSession {
 async function runLockCommand(
   command: string,
   lockPath: string,
+  env?: NodeJS.ProcessEnv,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   try {
-    const { stdout, stderr } = await promisify(execFile)("sh", [
-      "-c",
-      command.replaceAll(LEASE_LOCK_PATH, lockPath),
-    ]);
+    const { stdout, stderr } = await promisify(execFile)(
+      "sh",
+      ["-c", command.replaceAll(LEASE_LOCK_PATH, lockPath)],
+      { env },
+    );
     return { exitCode: 0, stdout, stderr };
   } catch (error) {
     const failed = error as { code?: number; stdout?: string; stderr?: string };
