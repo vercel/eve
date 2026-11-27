@@ -7,7 +7,8 @@ import searchRegistry, {
   selectIntegrationPage,
   selectIntegrations,
   type CatalogEntry,
-} from "./extension/subagents/agent/tools/search_registry.js";
+} from "./extension/subagents/modify/tools/search_registry.js";
+import remoteSearchRegistry from "./remote/subagents/modify/tools/search_registry.js";
 
 const INDEX = {
   items: [
@@ -140,6 +141,14 @@ describe("parseRegistryIndex", () => {
       parseRegistryIndex({
         items: [
           {
+            name: "eve/self",
+            files: [{ target: "agent/extensions/self/extension.ts" }],
+          },
+          {
+            name: "acme/self",
+            files: [{ target: "agent/extensions/self.ts" }],
+          },
+          {
             name: "eve/self-modification",
             files: [
               { target: "agent/tools/unrelated.ts" },
@@ -160,6 +169,8 @@ describe("parseRegistryIndex", () => {
         selfModificationMount: entry.selfModificationMount,
       })),
     ).toEqual([
+      { address: "eve/self", selfModificationMount: true },
+      { address: "acme/self", selfModificationMount: true },
       { address: "eve/self-modification", selfModificationMount: true },
       { address: "acme/self-modification", selfModificationMount: true },
       { address: "extension/self-modification-tools", selfModificationMount: undefined },
@@ -368,12 +379,12 @@ describe("selfmod__search_registry", () => {
     });
   });
 
-  it("returns catalog rows with installed state from the source mount", async () => {
+  it("returns catalog rows with installed state from the local agent directory", async () => {
     stubFetch({ body: INDEX, ok: true });
 
     const result = await run(
       { category: "channel" },
-      ctx({ "/source/channels/slack.ts": "export default {}" }),
+      ctx({ "agent/channels/slack.ts": "export default {}" }),
     );
 
     expect(result).toEqual({
@@ -403,6 +414,23 @@ describe("selfmod__search_registry", () => {
         },
       ],
       total: 3,
+    });
+  });
+
+  it("checks the remote /source mount for installed state", async () => {
+    stubFetch({ body: INDEX, ok: true });
+
+    const result = await remoteSearchRegistry.execute(
+      { category: "channel" },
+      ctx({ "/source/channels/slack.ts": "export default {}" }),
+    );
+
+    expect(result).toMatchObject({
+      items: [
+        { address: "channel/slack", installed: true },
+        { address: "channel/discord", installed: false },
+        { address: "channel/linear" },
+      ],
     });
   });
 

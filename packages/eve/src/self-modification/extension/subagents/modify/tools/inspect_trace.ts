@@ -2,8 +2,7 @@ import { defineTool } from "eve/tools";
 
 import { analyzeLocalTrace } from "#tracing/local/trace-analysis.js";
 
-import type { ResolvedSelfModificationConfig } from "../../../../config.js";
-import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js";
+import { defineLocalOnlyDynamic } from "../../../local-only.js";
 import {
   boundedText,
   detailFields,
@@ -77,10 +76,6 @@ const inspectTraceTool = defineTool({
     };
   },
 });
-
-export function resolveInspectTraceTool(config: ResolvedSelfModificationConfig) {
-  return resolveLocalOnly(config, inspectTraceTool);
-}
 
 export default defineLocalOnlyDynamic(inspectTraceTool);
 

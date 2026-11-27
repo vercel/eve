@@ -47,14 +47,14 @@ function scaffold(): AgentInfoResult {
           ...info.agent.config,
           owner: {
             kind: "extension",
-            mountId: "extensions/self-modification",
-            namespace: "self-modification",
+            mountId: "extensions/self",
+            namespace: "self",
             packageName: "eve",
           },
-          name: "self-modification__agent",
-          entryPath: "subagents/agent/agent.ts",
-          rootPath: "/eve/self-modification",
-          nodeId: "self-modification__agent",
+          name: "self__modify",
+          entryPath: "subagents/modify/agent.ts",
+          rootPath: "/eve/self",
+          nodeId: "self__modify",
           parentNodeId: "__root__",
           summary: {
             channels: 0,
@@ -84,7 +84,7 @@ describe("initialPromptPlaceholder", () => {
             static: [
               {
                 ...info.subagents.local[0]!,
-                name: "self-modification__trace_analysis",
+                name: "self__trace_analysis",
                 description: "Inspect traces",
                 markdown: "Inspect traces",
               },
@@ -187,6 +187,46 @@ describe("initialPromptPlaceholder", () => {
         true,
       ),
     ).toBe("Send a message…");
+  });
+
+  it("recognizes preserved legacy self-modification mounts", () => {
+    const info = scaffold();
+    const legacy: AgentInfoResult = {
+      ...info,
+      subagents: {
+        total: 1,
+        local: [
+          {
+            ...info.subagents.local[0]!,
+            name: "self-modification__modify",
+            nodeId: "self-modification__modify",
+            owner: {
+              kind: "extension",
+              mountId: "extensions/self-modification",
+              namespace: "self-modification",
+              packageName: "eve",
+            },
+          },
+        ],
+      },
+    };
+    expect(initialPromptPlaceholder(legacy, true)).toBe(
+      process.platform === "win32"
+        ? "Send a message…"
+        : "Ask me to connect a channel, edit instructions, add a tool…",
+    );
+  });
+
+  it("stays neutral on Windows hosts where local self-modification is disabled", () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+    try {
+      expect(initialPromptPlaceholder(scaffold(), true)).toBe("Send a message…");
+    } finally {
+      if (originalPlatform !== undefined) {
+        Object.defineProperty(process, "platform", originalPlatform);
+      }
+    }
   });
 
   it.each([

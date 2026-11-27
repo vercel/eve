@@ -11,9 +11,12 @@ const MAX_LIMIT = 25;
 const MIN_RELATIVE_SCORE = 0.4;
 const FETCH_TIMEOUT_MS = 10_000;
 const CACHE_TTL_MS = 5 * 60_000;
-const AUTHORED_SOURCE_MOUNT = "/source";
+const DEFAULT_AUTHORED_ROOT = "agent";
 const AUTHORED_PREFIX = "agent/";
-const SELF_MODIFICATION_MOUNT = "agent/extensions/self-modification";
+const SELF_MODIFICATION_MOUNTS = [
+  "agent/extensions/self",
+  "agent/extensions/self-modification",
+] as const;
 
 const inputSchema = {
   type: "object",
@@ -139,8 +142,8 @@ function eveMetadata(entry: Record<string, unknown>): Record<string, unknown> {
 }
 
 function targetsSelfModificationMount(target: string): boolean {
-  return (
-    target === `${SELF_MODIFICATION_MOUNT}.ts` || target.startsWith(`${SELF_MODIFICATION_MOUNT}/`)
+  return SELF_MODIFICATION_MOUNTS.some(
+    (mount) => target === `${mount}.ts` || target.startsWith(`${mount}/`),
   );
 }
 
@@ -377,6 +380,7 @@ export async function loadRegistryIndex(input: {
 }
 
 async function annotateInstalled(input: {
+  readonly authoredRoot: string;
   readonly ctx: Pick<ToolContext, "getSandbox">;
   readonly entries: readonly CatalogEntry[];
   readonly rows: readonly FoundIntegration[];
@@ -399,7 +403,7 @@ async function annotateInstalled(input: {
     input.rows.map(async (row) => {
       const target = targets.get(row.address);
       if (target === undefined) return row;
-      const path = `${AUTHORED_SOURCE_MOUNT}/${target.slice(AUTHORED_PREFIX.length)}`;
+      const path = `${input.authoredRoot}/${target.slice(AUTHORED_PREFIX.length)}`;
       try {
         const content = await sandbox.readTextFile({ path });
         return { ...row, installed: content !== null };
@@ -410,62 +414,67 @@ async function annotateInstalled(input: {
   );
 }
 
-export default defineTool({
-  description:
-    "Search the eve registry for integrations this project can add: channels, MCP connections, extensions, memory providers, and observability. Read-only — it installs nothing. Call it before writing an integration by hand, then pass an exact item address (for example `channel/slack`) to registry_add.",
-  inputSchema,
-  outputSchema,
-  async execute(input, ctx) {
-    const errors: { message: string; registry: string }[] = [];
-    let url: string;
-    try {
-      url = resolveRegistryIndexUrl();
-    } catch (error) {
-      return {
-        errors: [{ message: errorMessage(error), registry: "eve" }],
-        hasMore: false,
-        items: [],
-        total: 0,
+export function createSearchRegistryTool(options: { readonly authoredRoot?: string } = {}) {
+  const authoredRoot = options.authoredRoot ?? DEFAULT_AUTHORED_ROOT;
+  return defineTool({
+    description:
+      "Search the eve registry for integrations this project can add: channels, MCP connections, extensions, memory providers, and observability. Read-only — it installs nothing. Call it before writing an integration by hand, then pass an exact item address (for example `channel/slack`) to registry_add.",
+    inputSchema,
+    outputSchema,
+    async execute(input, ctx) {
+      const errors: { message: string; registry: string }[] = [];
+      let url: string;
+      try {
+        url = resolveRegistryIndexUrl();
+      } catch (error) {
+        return {
+          errors: [{ message: errorMessage(error), registry: "eve" }],
+          hasMore: false,
+          items: [],
+          total: 0,
+        };
+      }
+
+      let entries: readonly CatalogEntry[] = [];
+      try {
+        entries = await loadRegistryIndex({ nowMs: Date.now(), signal: ctx.abortSignal, url });
+      } catch (error) {
+        errors.push({ message: errorMessage(error), registry: url });
+      }
+
+      const selection: {
+        category?: Category;
+        entries: readonly CatalogEntry[];
+        limit?: number;
+        offset?: number;
+        query?: string;
+      } = { entries: entries.filter((entry) => entry.selfModificationMount !== true) };
+      const category = typeof input.category === "string" ? input.category : undefined;
+      if (category !== undefined && isCategory(category)) selection.category = category;
+      if (typeof input.limit === "number") selection.limit = input.limit;
+      if (typeof input.offset === "number") selection.offset = input.offset;
+      if (typeof input.query === "string") selection.query = input.query;
+      const page = selectIntegrationPage(selection);
+
+      const result: {
+        errors: { message: string; registry: string }[];
+        hasMore: boolean;
+        items: readonly FoundIntegration[];
+        nextOffset?: number;
+        total: number;
+      } = {
+        errors,
+        hasMore: page.hasMore,
+        items: await annotateInstalled({ authoredRoot, ctx, entries, rows: page.items }),
+        total: page.total,
       };
-    }
+      if (page.nextOffset !== undefined) result.nextOffset = page.nextOffset;
+      return result;
+    },
+  });
+}
 
-    let entries: readonly CatalogEntry[] = [];
-    try {
-      entries = await loadRegistryIndex({ nowMs: Date.now(), signal: ctx.abortSignal, url });
-    } catch (error) {
-      errors.push({ message: errorMessage(error), registry: url });
-    }
-
-    const selection: {
-      category?: Category;
-      entries: readonly CatalogEntry[];
-      limit?: number;
-      offset?: number;
-      query?: string;
-    } = { entries: entries.filter((entry) => entry.selfModificationMount !== true) };
-    const category = typeof input.category === "string" ? input.category : undefined;
-    if (category !== undefined && isCategory(category)) selection.category = category;
-    if (typeof input.limit === "number") selection.limit = input.limit;
-    if (typeof input.offset === "number") selection.offset = input.offset;
-    if (typeof input.query === "string") selection.query = input.query;
-    const page = selectIntegrationPage(selection);
-
-    const result: {
-      errors: { message: string; registry: string }[];
-      hasMore: boolean;
-      items: readonly FoundIntegration[];
-      nextOffset?: number;
-      total: number;
-    } = {
-      errors,
-      hasMore: page.hasMore,
-      items: await annotateInstalled({ ctx, entries, rows: page.items }),
-      total: page.total,
-    };
-    if (page.nextOffset !== undefined) result.nextOffset = page.nextOffset;
-    return result;
-  },
-});
+export default createSearchRegistryTool();
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

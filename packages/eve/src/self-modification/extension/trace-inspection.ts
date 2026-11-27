@@ -1,6 +1,11 @@
+import { getLocalDevCapability } from "eve/local-dev";
 import type { ToolContext } from "eve/tools";
 
-import { parseLocalTraceSegment, type LocalTraceSpan } from "#tracing/local/trace-reader.js";
+import {
+  listLocalTraceSegments,
+  readLocalTraceSegment,
+  type LocalTraceSpan,
+} from "#tracing/local/trace-reader.js";
 
 export interface LocalTraceSpanSource {
   readonly segmentFile: string;
@@ -10,24 +15,25 @@ export interface LocalTraceSpanSource {
 export const TRACE_ID = /^[0-9a-f]{32}$/u;
 export const SPAN_ID = /^[0-9a-f]{16}$/u;
 
-const SEGMENT_FILE = /^[0-9a-f]{16}\.otlp\.json$/u;
 const MAX_SEGMENTS = 500;
-const MAX_SEGMENT_BYTES = 8 * 1024 * 1024;
+
+export function requireLocalTraceAppRoot(): string {
+  const capability = getLocalDevCapability();
+  if (capability === undefined) {
+    throw new Error("Local trace inspection requires eve dev facilities.");
+  }
+  return capability.appRoot;
+}
 
 export async function readTraceSources(
   traceId: string,
-  ctx: Pick<ToolContext, "abortSignal" | "getSandbox">,
+  ctx: Pick<ToolContext, "abortSignal">,
 ): Promise<LocalTraceSpanSource[]> {
-  const sandbox = await ctx.getSandbox();
-  const directory = `/traces/${traceId}/segments`;
-  const listed = await sandbox.run({ command: `ls -1 ${directory}` });
-  if (listed.exitCode !== 0) {
-    throw new Error(`Could not list local trace segments: ${listed.stderr}`);
+  const appRoot = requireLocalTraceAppRoot();
+  const files = await listLocalTraceSegments(appRoot, traceId);
+  if (files === undefined) {
+    throw new Error(`Could not list local trace segments for ${traceId}.`);
   }
-  const files = listed.stdout
-    .split(/\r?\n/u)
-    .filter((name) => SEGMENT_FILE.test(name))
-    .sort((left, right) => left.localeCompare(right));
   if (files.length > MAX_SEGMENTS) {
     throw new Error(`Trace has ${files.length} segments (maximum ${MAX_SEGMENTS}).`);
   }
@@ -35,9 +41,7 @@ export async function readTraceSources(
   const sources: LocalTraceSpanSource[] = [];
   for (const file of files) {
     if (ctx.abortSignal.aborted) throw new Error("Trace inspection was cancelled.");
-    const content = await sandbox.readTextFile({ path: `${directory}/${file}` });
-    if (content === null || content.length > MAX_SEGMENT_BYTES) continue;
-    for (const span of parseLocalTraceSegment(content, traceId)) {
+    for (const span of await readLocalTraceSegment(appRoot, traceId, file)) {
       sources.push({ segmentFile: file, span });
     }
   }

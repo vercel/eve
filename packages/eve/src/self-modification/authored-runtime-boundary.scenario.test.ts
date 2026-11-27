@@ -9,7 +9,7 @@ describe("self-modification authored runtime boundary", () => {
     "keeps runtime implementations out of the %s generation",
     async (entry) => {
       const code = await bundleAuthoredModuleForGeneration(
-        fileURLToPath(new URL(`./extension/subagents/agent/${entry}.ts`, import.meta.url)),
+        fileURLToPath(new URL(`./extension/subagents/modify/${entry}.ts`, import.meta.url)),
       );
 
       expect(code).not.toContain("node-liblzma");

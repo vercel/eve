@@ -31,8 +31,14 @@ describe("self-modification proposal capture", () => {
       ".turbo/cache/state.json",
       "node_modules/eve/index.js",
       "agent/subagents/self-modification/agent.ts",
+      "agent/extensions/self/extension.ts",
+      "agent/extensions/self.ts",
+      "agent/extensions/self.mjs",
       "agent/extensions/self-modification/extension.ts",
       "agent/extensions/self-modification.ts",
+      "agent/extensions/self-modification.mjs",
+      "agent/extensions/self-modification-remote/extension.ts",
+      "agent/extensions/self-modification-remote.ts",
       "agent/extensions/selfmod.ts",
     ]) {
       expect(() => assertAllowedChange({ mode: "100644", objectId: blob, path }, ".")).toThrow(

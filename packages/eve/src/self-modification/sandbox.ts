@@ -1,35 +1,34 @@
-import {
-  defineSandbox,
-  type RuntimeSandboxSession,
-  type SandboxSelectorContext,
-} from "#public/definitions/sandbox.js";
-import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
-import { bindSandboxEnvironment } from "#shared/sandbox-environment.js";
+import { getLocalDevCapability } from "eve/local-dev";
+
+import { defineSandbox } from "#public/definitions/sandbox.js";
+import { HostSandbox } from "#sandbox/providers/host.js";
+import { bindSandboxEnvironment, type SandboxSelector } from "#shared/sandbox-environment.js";
 
 import { resolveSelfModificationConfig, type SelfModificationConfig } from "./config.js";
-import { createSelfModificationFilesystem } from "./filesystem.js";
+import { createDisabledSelfModificationSandbox } from "./disabled-sandbox.js";
 import { isLocalSelfModificationEnabled } from "./mode.js";
 
 export interface SelfModificationSandboxOptions {
   readonly config?: SelfModificationConfig;
 }
 
-export interface SelfModificationSandbox {
-  (context: SandboxSelectorContext): Promise<RuntimeSandboxSession> | RuntimeSandboxSession;
-}
-
 export function defineSelfModificationSandbox(
   options: SelfModificationSandboxOptions = {},
-): SelfModificationSandbox {
-  const environment = isLocalSelfModificationEnabled(resolveSelfModificationConfig(options.config))
-    ? JustBashSandbox.environment({
-        experimental: { filesystem: createSelfModificationFilesystem },
-      })
-    : JustBashSandbox.environment();
+): SandboxSelector {
+  if (!isLocalSelfModificationEnabled(resolveSelfModificationConfig(options.config))) {
+    return createDisabledSelfModificationSandbox();
+  }
+  const environment = HostSandbox.environment();
   return bindSandboxEnvironment(
-    defineSandbox(() => environment.open()),
+    defineSandbox(() => {
+      const capability = getLocalDevCapability();
+      if (capability === undefined) {
+        throw new Error(
+          "Self-modification requires eve dev facilities for the authored source tree and watcher.",
+        );
+      }
+      return environment.open({ cwd: capability.appRoot });
+    }),
     environment,
   );
 }
-
-export default defineSelfModificationSandbox();

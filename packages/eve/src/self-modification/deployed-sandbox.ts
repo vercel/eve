@@ -1,5 +1,4 @@
 import { defineSandbox } from "#public/definitions/sandbox.js";
-import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
 import { bindSandboxEnvironment, type SandboxSelector } from "#shared/sandbox-environment.js";
 import { shellQuote } from "#shared/shell-quote.js";
@@ -12,6 +11,7 @@ import {
   resolveDeployedSelfModificationConfig,
   type DeployedSelfModificationConfig,
 } from "./remote/config.js";
+import { createDisabledSelfModificationSandbox } from "./disabled-sandbox.js";
 
 const VERCEL_SANDBOX_REQUIRED_MESSAGE =
   "Deployed self-modification requires deploying on Vercel, where Vercel Sandbox provides the runtime credential transforms that keep the GitHub token out of the sandbox. Deploy this agent to Vercel, or remove the eve/extensions/self-modification/remote extension mount from self-hosted deployments.";
@@ -21,11 +21,7 @@ export function defineDeployedSelfModificationSandbox(
   isDeployedOnVercel: () => boolean = () => Boolean(process.env.VERCEL),
 ): SandboxSelector {
   if (!isDeployedRuntime()) {
-    const environment = JustBashSandbox.environment();
-    return bindSandboxEnvironment(
-      defineSandbox(() => environment.open()),
-      environment,
-    );
+    return createDisabledSelfModificationSandbox();
   }
 
   const deployed = resolveDeployedSelfModificationConfig(config);

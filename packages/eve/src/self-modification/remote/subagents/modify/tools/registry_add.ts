@@ -5,7 +5,7 @@ import { classifyCatalogEntry } from "../../../../extension/classify-registry-it
 import {
   loadRegistryIndex,
   officialRegistryIndexUrl,
-} from "../../../../extension/subagents/agent/tools/search_registry.js";
+} from "../../../../extension/subagents/modify/tools/search_registry.js";
 import { readPreparedSelfModificationWorkspace } from "../../../../git-workspace.js";
 import { isDeployedRuntime } from "../../../../mode.js";
 import { withSelfModificationWorkspaceLock } from "../../../../workspace-lock.js";

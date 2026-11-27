@@ -4,7 +4,7 @@ import { isVercelDevelopmentUser } from "#runtime/connections/principal.js";
 import type { ResolvedSelfModificationConfig } from "./config.js";
 
 export function isLocalSelfModificationEnabled(config: ResolvedSelfModificationConfig): boolean {
-  return process.env.EVE_DEV === "1" && config.localEnabled;
+  return process.platform !== "win32" && process.env.EVE_DEV === "1" && config.localEnabled;
 }
 
 export function isLocalDeveloper(principal: SessionAuthContext | null): boolean {

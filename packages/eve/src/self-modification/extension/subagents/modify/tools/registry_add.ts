@@ -1,11 +1,10 @@
 import { getLocalDevCapability, type LocalDevCapability } from "eve/local-dev";
 import { defineTool } from "eve/tools";
 
-import type { ResolvedSelfModificationConfig } from "../../../../config.js";
 import { withSelfModificationWorkspaceLock } from "../../../../workspace-lock.js";
 import { classifyCatalogEntry } from "../../../classify-registry-item.js";
 import { runEveAdd, type SpawnLike } from "../../../eve-add.js";
-import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js";
+import { defineLocalOnlyDynamic } from "../../../local-only.js";
 import {
   loadRegistryIndex,
   resolveRegistryIndexUrl,
@@ -215,10 +214,6 @@ function localRegistryAddTool() {
       return await addLocalRegistryItem(address, { signal: ctx.abortSignal });
     },
   });
-}
-
-export function resolveRegistryAddTool(config: ResolvedSelfModificationConfig) {
-  return resolveLocalOnly(config, localRegistryAddTool());
 }
 
 export default defineLocalOnlyDynamic(localRegistryAddTool());
