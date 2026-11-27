@@ -18,16 +18,21 @@ const NO_SKILLS = "Available skills: none";
 
 export function formatAvailableSkillsSection(
   skills: readonly AvailableSkillDescription[],
+  options: { readonly skillRoot?: string } = {},
 ): string | null {
   if (skills.length === 0) {
     return null;
   }
 
+  const root = options.skillRoot ?? MODEL_SKILL_ROOT;
+  const fallback =
+    root === MODEL_SKILL_ROOT ? " (fallback `skills/<skill>/` when `$HOME` is unavailable)" : "";
+
   const lines = [
     "Available skills",
     `Load the minimal matching skills with ${SKILL_TOOL_NAME}({ name }) when named by the user or clearly matching the task, then follow their instructions. Do not claim a listed skill is inaccessible unless loading fails.`,
-    `Files live under \`${MODEL_SKILL_ROOT}/<skill>/\` (fallback \`skills/<skill>/\` when \`$HOME\` is unavailable); resolve sibling references relative to that \`SKILL.md\`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills; omitted static skills stay available.`,
-    ...skills.map(formatAvailableSkillLine),
+    `Files live under \`${root}/<skill>/\`${fallback}; resolve sibling references relative to that \`SKILL.md\`. Later dynamic announcements replace earlier dynamic entries and override same-named static skills; omitted static skills stay available.`,
+    ...skills.map((skill) => formatAvailableSkillLine(skill, root)),
   ];
 
   return lines.join("\n");
@@ -35,6 +40,7 @@ export function formatAvailableSkillsSection(
 
 export function dynamicSkillAnnouncements(
   dynamic: readonly CatalogSkill[],
+  options: { readonly skillRoot?: string } = {},
 ): Readonly<Record<string, Announcement>> {
   const text =
     formatAvailableSkillsSection(
@@ -45,6 +51,7 @@ export function dynamicSkillAnnouncements(
           hasFiles: path !== undefined,
           name,
         })),
+      options,
     ) ?? NO_SKILLS;
   return { [ANNOUNCEMENT_KEY]: { initial: NO_SKILLS, value: text, render: () => text } };
 }
@@ -134,12 +141,12 @@ function loadedSkills(
   return loaded;
 }
 
-function formatAvailableSkillLine(skill: AvailableSkillDescription): string {
+function formatAvailableSkillLine(skill: AvailableSkillDescription, root: string): string {
   const prefix = `- ${skill.name}: ${skill.description}`;
   if (skill.hasFiles === false) return prefix;
-  return `${prefix} (path: ${skillFilePath(skill.name)})`;
+  return `${prefix} (path: ${skillFilePath(skill.name, root)})`;
 }
 
-export function skillFilePath(name: string): string {
-  return `${MODEL_SKILL_ROOT}/${name}/SKILL.md`;
+export function skillFilePath(name: string, root: string = MODEL_SKILL_ROOT): string {
+  return `${root}/${name}/SKILL.md`;
 }

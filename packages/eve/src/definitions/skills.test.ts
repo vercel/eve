@@ -15,6 +15,9 @@ import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { evaluateValues } from "#definitions/step.js";
 import { installDefinitions, restoreDefinitions } from "./kernel.js";
+import { DefaultSandbox } from "#sandbox/providers/default.js";
+import { HostSandbox } from "#sandbox/providers/host.js";
+import { modelSkillRootOf } from "./skills.js";
 import { forgetSessionLive } from "#definitions/state.js";
 
 function sandbox(id: string) {
@@ -391,5 +394,41 @@ describe("dynamic skill files after a change", () => {
     await step(ctx, next, () => evaluateValues(ctx, { conversation: [] }));
 
     expect(next.removed).toEqual([]);
+  });
+
+  it("advertises $EVE_SKILLS_DIR for HostSandbox agents and their inheriting subagents, and $HOME/.agents/skills otherwise", () => {
+    const hostEnv = HostSandbox.environment();
+    const defaultEnv = DefaultSandbox.environment();
+    const containerWith = (bundle: object) => {
+      const ctx = new ContextContainer();
+      ctx.set(SessionAgentKey, fromCompiledBundle(bundle as never));
+      return ctx;
+    };
+
+    const hostRoot = containerWith({
+      graph: { root: { sandboxRegistry: { sandbox: null } } },
+      resolvedAgent: { sandbox: { environment: hostEnv, kind: "independent" } },
+    });
+    const defaultRoot = containerWith({
+      graph: {},
+      resolvedAgent: { sandbox: { environment: defaultEnv, kind: "independent" } },
+    });
+    const hostSubagent = containerWith({
+      graph: {
+        root: {
+          sandboxRegistry: {
+            sandbox: {
+              definition: { kind: "parent" },
+              inheritance: { definition: { environment: hostEnv, kind: "independent" } },
+            },
+          },
+        },
+      },
+      resolvedAgent: { sandbox: { kind: "parent" } },
+    });
+
+    expect(modelSkillRootOf(hostRoot)).toBe("$EVE_SKILLS_DIR");
+    expect(modelSkillRootOf(hostSubagent)).toBe("$EVE_SKILLS_DIR");
+    expect(modelSkillRootOf(defaultRoot)).toBe("$HOME/.agents/skills");
   });
 });

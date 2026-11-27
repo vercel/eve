@@ -21,7 +21,9 @@ import {
 } from "#shared/skill-package.js";
 import { formatAvailableSkillsSection, skillFilePath } from "#execution/skills/instructions.js";
 import { announcementDigest } from "#harness/announcements.js";
+import { owningSandboxDefinition } from "#runtime/sandbox/registry.js";
 import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
+import { MODEL_HOST_SKILL_ROOT, MODEL_SKILL_ROOT } from "#shared/skill-paths.js";
 import { slotsOf, slotValueOf } from "#definitions/state.js";
 import { namedEntries, type EntryKind } from "./named.js";
 import {
@@ -32,11 +34,25 @@ import {
   SECTION_ORDER,
 } from "./definition.js";
 
+export function owningSandboxProviderOf(container: Pick<ContextReader, "get">): string | undefined {
+  const bundle = compiledBundleOf(container);
+  if (bundle === undefined) return undefined;
+  const registered = bundle.graph?.root?.sandboxRegistry?.sandbox;
+  const sandbox =
+    registered != null ? owningSandboxDefinition(registered) : bundle.resolvedAgent?.sandbox;
+  return sandbox?.kind === "independent" ? sandbox.environment.provider : undefined;
+}
+
+export function modelSkillRootOf(container: Pick<ContextReader, "get">): string {
+  return owningSandboxProviderOf(container) === "host" ? MODEL_HOST_SKILL_ROOT : MODEL_SKILL_ROOT;
+}
+
 export const skills: Definition = {
   contribute: ({ container }) => {
     const bundle = compiledBundleOf(container);
     const own = bundle?.resolvedAgent.skills ?? [];
     const nodeId = bundle?.nodeId ?? null;
+    const skillRoot = modelSkillRootOf(container);
     return {
       tools: () => ({
         skills: new Map(
@@ -47,7 +63,7 @@ export const skills: Definition = {
               description: skill.description,
               markdown: skill.content,
               name: skill.name,
-              path: skillFilePath(skill.name),
+              path: skillFilePath(skill.name, skillRoot),
               provenance:
                 skill.owner === undefined
                   ? undefined
@@ -65,6 +81,7 @@ export const skills: Definition = {
           const names = new Set(own.map(({ name }) => name));
           const listed = skillsSection(
             [...(await draft.tools()).skills.values()].filter(({ name }) => names.has(name)),
+            skillRoot,
           );
           return [...(await draft.system()), ...(listed === undefined ? [] : [listed])];
         },
@@ -92,11 +109,13 @@ function skillsSection(
     readonly description: string;
     readonly deferred?: boolean;
   }[],
+  skillRoot: string,
 ): Section | undefined {
   const listed = formatAvailableSkillsSection(
     skills
       .filter((skill) => skill.deferred !== true)
       .map(({ description, name }) => ({ description, name })),
+    { skillRoot },
   );
   return listed === null
     ? undefined
@@ -107,38 +126,44 @@ export function skillDefinition(resolver: ResolvedDynamicDefinition<"skill">): D
   const id = skillId(resolver);
   const evaluate = authoredEvaluate(resolver.evaluate);
   return {
-    contribute: (ctx) => ({
-      tools: async () => {
-        const kept = await ctx.keep(async (evaluation) => {
-          const skills = namedEntries(resolver, await evaluate(evaluation), SKILLS).map(
-            ({ entry, name }) =>
-              normalizeSkillPackage({ ...(entry as SkillPackageDefinition), name }),
+    contribute: (ctx) => {
+      const skillRoot = modelSkillRootOf(ctx.container);
+      return {
+        tools: async () => {
+          const kept = await ctx.keep(async (evaluation) => {
+            const skills = namedEntries(resolver, await evaluate(evaluation), SKILLS).map(
+              ({ entry, name }) =>
+                normalizeSkillPackage({ ...(entry as SkillPackageDefinition), name }),
+            );
+            if (skills.length === 0) return null;
+            const withFiles = skills.filter((skill) => skill.files.length > 1);
+            return {
+              value: parseJsonValue(skills.map(toDurableSkill)),
+              ...(withFiles.length > 0 && { live: withFiles }),
+            };
+          });
+          const own = slotValueOf<readonly DurableDynamicSkillMetadata[] | null>(
+            kept?.value ?? null,
           );
-          if (skills.length === 0) return null;
-          const withFiles = skills.filter((skill) => skill.files.length > 1);
           return {
-            value: parseJsonValue(skills.map(toDurableSkill)),
-            ...(withFiles.length > 0 && { live: withFiles }),
+            skills: new Map(
+              (own ?? []).map((skill) => [
+                skill.name,
+                {
+                  deferred: skill.deferred === true,
+                  description: skill.description,
+                  markdown: stripSkillFrontmatter(skill.markdown),
+                  name: skill.name,
+                  path:
+                    skill.revision === undefined ? undefined : skillFilePath(skill.name, skillRoot),
+                  source: id,
+                },
+              ]),
+            ),
           };
-        });
-        const own = slotValueOf<readonly DurableDynamicSkillMetadata[] | null>(kept?.value ?? null);
-        return {
-          skills: new Map(
-            (own ?? []).map((skill) => [
-              skill.name,
-              {
-                deferred: skill.deferred === true,
-                description: skill.description,
-                markdown: stripSkillFrontmatter(skill.markdown),
-                name: skill.name,
-                path: skill.revision === undefined ? undefined : skillFilePath(skill.name),
-                source: id,
-              },
-            ]),
-          ),
-        };
-      },
-    }),
+        },
+      };
+    },
     id,
     install: syncDynamicSkillFiles,
     label: resolver.logicalPath,
