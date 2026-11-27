@@ -2,7 +2,7 @@ import { createGateway, gateway } from "ai";
 
 import type { VideoExtensionConfig, VideoModelLike } from "./types.ts";
 
-export const DEFAULT_VIDEO_MODEL = "bytedance/seedance-2.5-flash";
+export const DEFAULT_VIDEO_MODEL = "spacexai/grok-imagine-video";
 
 const idOf = (x: string | VideoModelLike) => {
   if (typeof x === "string") {

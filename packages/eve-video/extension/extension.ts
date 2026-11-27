@@ -15,7 +15,7 @@ const modelInputSchema = z.union([
 /** Adds video generation to an eve agent: a `generate` workflow tool backed by AI SDK and AI Gateway video models, provider-agnostic storage, and model-facing guidance. */
 export default defineExtension({
   config: z.object({
-    /** Video model ID or v4/v3 model instance (defaults to `"bytedance/seedance-2.5-flash"`). */
+    /** Video model ID or v4/v3 model instance (defaults to `"spacexai/grok-imagine-video"`). */
     model: modelInputSchema.optional(),
     /** Storage adapter for generated videos, or `false` to disable external storage. */
     storage: z

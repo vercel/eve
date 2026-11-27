@@ -19,7 +19,7 @@ Add a mount file at `agent/extensions/video.ts`:
 import video from "@eve/video";
 
 export default video({
-  // Omit all fields to use bytedance/seedance-2.5-flash, webhook: "auto", and automatic storage.
+  // Omit all fields to use spacexai/grok-imagine-video, webhook: "auto", and automatic storage.
 });
 ```
 
@@ -36,7 +36,7 @@ Each `<mount>__generate` call runs as a `defineWorkflowTool({ task })` workflow 
 
 ## Choose a video model
 
-Omit `model` to use `"bytedance/seedance-2.5-flash"`, which supports text-to-video, `start`/`end` frames, `references`, audio, video editing, and video extension out of the box. Configure `model`, `gateway`, `defaults`, and `providerOptions` on the mount to choose a different model or tune default parameters:
+Omit `model` to use `"spacexai/grok-imagine-video"`, which supports text-to-video, image-to-video, `references`, audio, video editing, and video extension out of the box. Configure `model`, `gateway`, `defaults`, and `providerOptions` on the mount to choose a different model or tune default parameters:
 
 ```ts title="agent/extensions/video.ts"
 import video from "@eve/video";
@@ -69,8 +69,8 @@ To edit or extend a video produced earlier in the same session, call `<mount>__g
 
 `video` cannot be combined with `start` or `end`, and `extend: true` requires `video`. `@eve/video` automatically translates `video` and `extend` to the active provider's native API:
 
-- **`bytedance/seedance-2.5-flash` and `bytedance/seedance-2.5` (default):** prepends `video` as the first entry of `inputReferences` (before any additional `references`) and omits `aspectRatio` (including from `defaults`) on extensions as well as edits.
-- **`spacexai/grok-imagine-video` (and direct xAI models):** forwards `video` via `providerOptions.xai.videoUrl` and sets `mode: "extend-video"` when `extend: true`. On edit, `resolution` is also omitted because Grok rejects it. Local bytes are auto-staged to a public `https://` URL when public HTTPS storage is configured; otherwise pass an `https://` URL.
+- **`spacexai/grok-imagine-video` (default, and direct xAI models):** forwards `video` via `providerOptions.xai.videoUrl` and sets `mode: "extend-video"` when `extend: true`. On edit, `resolution` is also omitted because Grok rejects it. Local bytes are auto-staged to a public `https://` URL when public HTTPS storage is configured; otherwise pass an `https://` URL.
+- **`bytedance/seedance-2.5` and `bytedance/seedance-2.5-flash`:** prepends `video` as the first entry of `inputReferences` (before any additional `references`) and omits `aspectRatio` (including from `defaults`) on extensions as well as edits.
 - **`bfl/flux-3-video`, `topaz/*`, and other models:** prepends `video` as the first entry of `inputReferences` with explicit `mediaType`, staging large local inputs to public HTTPS storage on AI Gateway async models.
 - **Generation-only models (such as Google Veo):** iterate by generating a new take with a refined `prompt`, optionally reusing `seed`, `start`, `end`, or image `references`.
 
@@ -221,7 +221,7 @@ export default slackChannel({
 
 | Option            | Type                                                                          | Default                                                                    | Description                                                                                                                                                              |
 | ----------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `model`           | `string \| VideoModelLike`                                                    | `"bytedance/seedance-2.5-flash"`                                           | Gateway model ID or AI SDK v4/v3 `VideoModel` instance.                                                                                                                  |
+| `model`           | `string \| VideoModelLike`                                                    | `"spacexai/grok-imagine-video"`                                            | Gateway model ID or AI SDK v4/v3 `VideoModel` instance.                                                                                                                  |
 | `storage`         | `VideoStorage \| false`                                                       | Auto-selected                                                              | External storage adapter, or `false` to disable automatic storage selection.                                                                                             |
 | `gateway`         | `{ apiKey?: string; baseURL?: string; headers?: Record<string, string> }`     | Default AI Gateway credentials                                             | Custom Vercel AI Gateway connection options for string model IDs.                                                                                                        |
 | `defaults`        | `{ aspectRatio?, resolution?, duration?, audio?, fps? }`                      | None                                                                       | Default generation parameters applied when a tool call omits them.                                                                                                       |

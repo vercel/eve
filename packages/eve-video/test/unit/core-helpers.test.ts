@@ -216,8 +216,8 @@ describe("model resolution, webhook verification, and in-memory storage", () => 
     ];
     for (const bad of badModels) eq(Mod.isVideoModelLike(bad), false);
 
-    eq(Mod.DEFAULT_VIDEO_MODEL, "bytedance/seedance-2.5-flash");
-    eq(rc({}).modelId, "bytedance/seedance-2.5-flash");
+    eq(Mod.DEFAULT_VIDEO_MODEL, "spacexai/grok-imagine-video");
+    eq(rc({}).modelId, "spacexai/grok-imagine-video");
     eq(rc({ model: fast }).model, fast);
     eq(Mod.resolveJobModel({ model: fast }, "p/fast").model, fast);
     thr(() => rc({ model: "   " }), /non-empty string/);
