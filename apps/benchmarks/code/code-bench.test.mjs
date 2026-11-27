@@ -7,7 +7,6 @@ import test from "node:test";
 import { snapshotFromReport } from "../../../.github/scripts/eve-code-docs-snapshot.mjs";
 import { loadTaskFromDir } from "./datasets.ts";
 import { parseRewardText } from "./docker.ts";
-import { taskContainerEnvironment } from "./eve-code-app/agent/lib/container-sandbox.mjs";
 import { summarizeEvents } from "./harnesses/eve-runner.mjs";
 import {
   buildOpencodeConfig,
@@ -16,106 +15,6 @@ import {
   parsePiJsonl,
 } from "./harnesses/peer-runner.mjs";
 import { buildReport, renderMarkdownReport } from "./report.ts";
-
-async function readAllText(stream) {
-  const reader = stream.getReader();
-  const chunks = [];
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(Buffer.from(value));
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
-test("container sandbox omits close() so concurrent handles never SIGKILL sibling commands", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "code-bench-sandbox-"));
-  const storagePath = await mkdtemp(join(tmpdir(), "code-bench-storage-"));
-  t.after(async () => {
-    await rm(root, { recursive: true, force: true });
-    await rm(storagePath, { recursive: true, force: true });
-  });
-
-  const env = taskContainerEnvironment({ root });
-  const ctx = { session: { id: "sess-concurrent-test" }, storagePath };
-  const started = await env.start(ctx, undefined, { version: 1, files: [] });
-  const resumed = await env.resume(ctx);
-
-  assert.equal(started.connection.close, undefined);
-  assert.equal(resumed.close, undefined);
-
-  const longProc = await started.connection.spawn({
-    command: "sleep 0.4; printf 'survived\\n'",
-    workingDirectory: root,
-    env: {},
-  });
-  const quickProc = await resumed.spawn({
-    command: "printf 'quick\\n'",
-    workingDirectory: root,
-    env: {},
-  });
-
-  const quickExit = await quickProc.wait();
-  assert.equal(quickExit.exitCode, 0);
-  assert.equal((await readAllText(quickProc.stdout)).trim(), "quick");
-
-  const longExit = await longProc.wait();
-  assert.equal(longExit.exitCode, 0);
-  assert.equal((await readAllText(longProc.stdout)).trim(), "survived");
-
-  await env.onSessionEnd(ctx, started.state);
-});
-
-test("container sandbox supports stdin, per-command abort, and onSessionEnd cleanup", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "code-bench-sandbox-stdin-"));
-  const storagePath = await mkdtemp(join(tmpdir(), "code-bench-storage-stdin-"));
-  t.after(async () => {
-    await rm(root, { recursive: true, force: true });
-    await rm(storagePath, { recursive: true, force: true });
-  });
-
-  const env = taskContainerEnvironment({ root });
-  const ctx = { session: { id: "sess-abort-test" }, storagePath };
-  const { connection, state } = await env.start(ctx, undefined, { version: 1, files: [] });
-
-  const echoProc = await connection.spawn({
-    command: "cat",
-    workingDirectory: root,
-    env: {},
-    stdin: true,
-  });
-  const writer = echoProc.stdin.getWriter();
-  await writer.write(new TextEncoder().encode("hello-stdin\n"));
-  await writer.close();
-  assert.equal((await echoProc.wait()).exitCode, 0);
-  assert.equal((await readAllText(echoProc.stdout)).trim(), "hello-stdin");
-
-  const controller = new AbortController();
-  const abortedProc = await connection.spawn({
-    command: "sleep 30",
-    workingDirectory: root,
-    env: {},
-    signal: controller.signal,
-  });
-  const survivorProc = await connection.spawn({
-    command: "sleep 0.2; printf 'still-alive\\n'",
-    workingDirectory: root,
-    env: {},
-  });
-  controller.abort(new Error("stop one"));
-  await assert.rejects(abortedProc.wait(), /stop one/u);
-  assert.equal((await survivorProc.wait()).exitCode, 0);
-  assert.equal((await readAllText(survivorProc.stdout)).trim(), "still-alive");
-
-  const leftover = await connection.spawn({
-    command: "sleep 30",
-    workingDirectory: root,
-    env: {},
-  });
-  await env.onSessionEnd(ctx, state);
-  const leftoverExit = await leftover.wait();
-  assert.notEqual(leftoverExit.exitCode, 0);
-});
 
 test("loadTaskFromDir applies DeepSWE timeout cap, neutral git identity, and collect hooks", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "code-bench-task-"));

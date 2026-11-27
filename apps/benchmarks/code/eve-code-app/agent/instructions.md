@@ -1,1 +1,1 @@
-The task's working directory is /workspace.
+Complete the coding task in the current working directory.

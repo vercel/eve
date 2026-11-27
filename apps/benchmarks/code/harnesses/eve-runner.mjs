@@ -6,24 +6,6 @@ import { join } from "node:path";
 import { finished } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 
-const WITHHELD_TASK_ENV = new Set([
-  "AI_GATEWAY_API_KEY",
-  "OPENAI_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "VERCEL_OIDC_TOKEN",
-  "EVE_BENCH_TOKEN",
-  "EVE_DEV",
-]);
-
-function snapshotTaskEnv(env) {
-  return Object.fromEntries(
-    Object.entries(env).filter(
-      ([key, value]) =>
-        value !== undefined && !WITHHELD_TASK_ENV.has(key) && !key.startsWith("CODE_BENCH_"),
-    ),
-  );
-}
-
 export function summarizeEvents(streamEvents) {
   let inputTokens = 0;
   let outputTokens = 0;
@@ -122,7 +104,6 @@ function startProductionServer({
   host,
   port,
   token,
-  taskEnv,
   model,
   reasoning,
   workdir,
@@ -139,9 +120,7 @@ function startProductionServer({
     NITRO_PORT: String(port),
     PORT: String(port),
     EVE_BENCH_TOKEN: token,
-    CODE_BENCH_TASK_CONTAINER: "1",
     CODE_BENCH_TASK_WORKDIR: workdir,
-    CODE_BENCH_TASK_ENV: taskEnv,
     EVE_CODE_BENCH_MODEL: model,
     EVE_CODE_BENCH_REASONING: reasoning,
   };
@@ -203,7 +182,6 @@ async function stopServerGracefully(child) {
 
 async function main() {
   const { Client } = await import("eve/client");
-  const taskEnv = JSON.stringify(snapshotTaskEnv(process.env));
   const installDir = process.env.CODE_BENCH_INSTALL_DIR || "/installed-agent";
   const projectDir = join(installDir, "app");
   const instructionPath = process.env.CODE_BENCH_INSTRUCTION || "/task/instruction.md";
@@ -239,7 +217,6 @@ async function main() {
       host,
       port,
       token,
-      taskEnv,
       model,
       reasoning,
       workdir,

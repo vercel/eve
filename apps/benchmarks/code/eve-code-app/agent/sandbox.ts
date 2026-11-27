@@ -1,31 +1,21 @@
 import { defineSandbox } from "eve/sandbox";
-import { defineSandboxProvider, SandboxSessionGoneError } from "eve/sandbox/provider";
+import { HostSandbox } from "eve/sandbox/host";
 
-import {
-  TASK_CONTAINER_PROVIDER_NAME,
-  taskContainerEnvironment,
-} from "./lib/container-sandbox.mjs";
+const unsetHarnessEnv = Object.fromEntries(
+  Object.keys(process.env)
+    .filter((key) => key.startsWith("CODE_BENCH_") || key.startsWith("EVE_CODE_BENCH_"))
+    .map((key) => [key, undefined]),
+);
 
-const TaskContainerSandbox = defineSandboxProvider({
-  name: TASK_CONTAINER_PROVIDER_NAME,
-  stateProtocolVersion: 1,
-  environment(options) {
-    const implementation = taskContainerEnvironment(options);
-    return {
-      ...implementation,
-      async resume(...args) {
-        try {
-          return await implementation.resume(...args);
-        } catch (error) {
-          if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-            throw new SandboxSessionGoneError("The benchmark task container no longer exists");
-          }
-          throw error;
-        }
-      },
-    };
+export const environment = HostSandbox.environment({
+  env: {
+    ...unsetHarnessEnv,
+    EVE_BENCH_TOKEN: undefined,
   },
 });
 
-export const environment = TaskContainerSandbox.environment();
-export default defineSandbox(() => environment.open());
+export default defineSandbox(() =>
+  environment.open({
+    cwd: process.env.CODE_BENCH_TASK_WORKDIR,
+  }),
+);
