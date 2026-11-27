@@ -4,8 +4,9 @@ import { defineJsonSchema } from "#tools/schema.js";
 export const AGENT_TOOL_NAME = "agent";
 
 export const AGENT_TOOL_DESCRIPTION = [
-  "Delegate a focused subtask to a fresh copy of yourself sharing your tools and sandbox.",
-  "Start independent calls together before waiting, give parallel writers non-overlapping scopes, and specify the goal, expected output, and whether it may edit files.",
+  "Delegate an independent, self-contained subtask to a fresh copy of yourself sharing your tools and sandbox.",
+  "Prefer doing routine file reads, targeted edits, and test runs directly; delegate only when isolated exploration or genuinely independent work saves effort.",
+  "Specify the goal, expected output, and whether it may edit files (if so, give it a non-overlapping scope).",
 ].join(" ");
 
 export const SUBAGENT_TOOL_INPUT_SCHEMA = defineJsonSchema<AgentToolInput>({
