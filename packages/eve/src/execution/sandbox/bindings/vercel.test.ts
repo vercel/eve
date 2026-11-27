@@ -1333,6 +1333,136 @@ describe("createVercelSandbox", () => {
       expect(SandboxSessionGoneError.is(error)).toBe(true);
     });
 
+    it("skips base-runtime setup when resuming a running prepared eve-base sandbox without shadowing mounts", async () => {
+      for (const scenario of [
+        { createOptions: {}, mounts: undefined },
+        {
+          createOptions: {},
+          mounts: { "/data": { drive: "team-drive", mode: "read-write" } },
+        },
+        { createOptions: { image: VERCEL_EVE_GIT_SANDBOX_IMAGE }, mounts: undefined },
+      ]) {
+        const running = Object.assign(
+          createMockSandbox({
+            name: sandboxName,
+            sourceSnapshotId: "prepared-snapshot",
+            status: "running",
+          }),
+          { ...(scenario.mounts !== undefined && { mounts: scenario.mounts }) },
+        );
+        const sandboxModule = { Sandbox: { create: vi.fn(), get: vi.fn(async () => running) } };
+        const provider = createTestVercelSandbox({
+          createOptions: scenario.createOptions,
+          loadSandboxModule: async () => sandboxModule as never,
+        });
+
+        await provider.openSession({
+          appRoot: "/tmp/test-app-root",
+          existing: { sandboxName, version: 3 },
+          prepared: { snapshotId: "prepared-snapshot" },
+          sandboxName: "session_running",
+        });
+
+        expect(running.runCommand).not.toHaveBeenCalled();
+      }
+    });
+
+    it.each(["stopped", "pending", "stopping", "snapshotting"] as const)(
+      "still runs base-runtime setup when resuming a %s sandbox",
+      async (status) => {
+        const sandbox = createMockSandbox({
+          name: sandboxName,
+          sourceSnapshotId: "prepared-snapshot",
+          status,
+        });
+        const sandboxModule = { Sandbox: { create: vi.fn(), get: vi.fn(async () => sandbox) } };
+        const provider = createTestVercelSandbox({
+          loadSandboxModule: async () => sandboxModule as never,
+        });
+
+        await provider.openSession({
+          appRoot: "/tmp/test-app-root",
+          existing: { sandboxName, version: 3 },
+          prepared: { snapshotId: "prepared-snapshot" },
+          sandboxName: `session_${status}`,
+        });
+
+        expect(sandbox.runCommand).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it("still runs base-runtime setup when resuming a running custom-image, custom-source, template-less, mismatched-snapshot, or shadowing-mount sandbox", async () => {
+      for (const scenario of [
+        {
+          createOptions: { image: "custom/image:latest" },
+          prepared: { snapshotId: "snap" },
+          sourceSnapshotId: "snap",
+        },
+        {
+          createOptions: { source: { type: "git" as const, url: "https://example.com/repo.git" } },
+          prepared: { snapshotId: "snap" },
+          sourceSnapshotId: "snap",
+        },
+        {
+          createOptions: { source: { type: "snapshot" as const, snapshotId: "user-snap" } },
+          prepared: { snapshotId: "snap" },
+          sourceSnapshotId: "snap",
+        },
+        { createOptions: {}, prepared: {}, sourceSnapshotId: undefined },
+        {
+          createOptions: {},
+          prepared: { snapshotId: "new-deploy-snap" },
+          sourceSnapshotId: "earlier-deploy-snap",
+        },
+        {
+          createOptions: { mounts: { "/workspace": { drive: "d", mode: "read-write" as const } } },
+          prepared: { snapshotId: "snap" },
+          sourceSnapshotId: "snap",
+        },
+        {
+          createOptions: {},
+          mounts: { "/": { drive: "d", mode: "read-write" } },
+          prepared: { snapshotId: "snap" },
+          sourceSnapshotId: "snap",
+        },
+        {
+          createOptions: {},
+          mounts: { "/dev": { drive: "d", mode: "read-write" } },
+          prepared: { snapshotId: "snap" },
+          sourceSnapshotId: "snap",
+        },
+        {
+          createOptions: {},
+          mounts: { "/data/../workspace": { drive: "d", mode: "read-write" } },
+          prepared: { snapshotId: "snap" },
+          sourceSnapshotId: "snap",
+        },
+      ]) {
+        const running = Object.assign(
+          createMockSandbox({
+            name: sandboxName,
+            sourceSnapshotId: scenario.sourceSnapshotId,
+            status: "running",
+          }),
+          { ...(scenario.mounts !== undefined && { mounts: scenario.mounts }) },
+        );
+        const sandboxModule = { Sandbox: { create: vi.fn(), get: vi.fn(async () => running) } };
+        const provider = createTestVercelSandbox({
+          createOptions: scenario.createOptions,
+          loadSandboxModule: async () => sandboxModule as never,
+        });
+
+        await provider.openSession({
+          appRoot: "/tmp/test-app-root",
+          existing: { sandboxName, version: 3 },
+          prepared: scenario.prepared,
+          sandboxName: "session_guarded",
+        });
+
+        expect(running.runCommand).toHaveBeenCalledTimes(1);
+      }
+    });
+
     it.each([
       ["a stopped sandbox", 410],
       ["an internal error", 500],
