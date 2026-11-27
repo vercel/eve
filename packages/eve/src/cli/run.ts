@@ -59,7 +59,7 @@ interface CliRuntimeDependencies {
   printApplicationInfo(
     logger: CliLogger,
     appRoot: string,
-    options?: { json?: boolean },
+    options?: { fresh?: boolean; json?: boolean },
   ): Promise<void>;
   runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void>;
   runEvalCommand(
@@ -357,7 +357,8 @@ export function createCliProgram(
   agentCommand(program.command("info"), applicationContext)
     .description("Print resolved application information.")
     .option("--json", "Output as JSON")
-    .action(async (options: { json?: boolean }) => {
+    .option("--fresh", "Recompile instead of reusing the last result")
+    .action(async (options: { fresh?: boolean; json?: boolean }) => {
       const printApplicationInfo =
         runtime.printApplicationInfo ?? (await loadPrintApplicationInfo());
       await printApplicationInfo(logger, applicationContext.root, options);
