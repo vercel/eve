@@ -13,21 +13,67 @@ export const LEASE_WAIT_MS = 60_000;
 const POLL_MS = 250;
 const BUSY_EXIT_CODE = 75;
 
+const EXISTS_CHECK = `exists() { [ -e "$1" ] || [ -L "$1" ]; }`;
+
+const TRY_MKDIR = [
+  `try_mkdir() {`,
+  `  err=$(LC_ALL=C mkdir "$1" 2>&1) && return 0`,
+  `  if exists "$1"; then return ${BUSY_EXIT_CODE}; fi`,
+  `  case $err in *"File exists"*) return ${BUSY_EXIT_CODE};; esac`,
+  `  printf '%s\\n' "$err" >&2`,
+  `  return 1`,
+  `}`,
+].join("\n");
+
+const AGE = [
+  `age() {`,
+  `  ts=$(date -r "$1" +%s 2>&1) || {`,
+  `    if exists "$1"; then printf '%s\\n' "$ts" >&2; return 1; fi`,
+  `    echo 0; return 0`,
+  `  }`,
+  `  echo $(( $(date +%s) - ts ))`,
+  `}`,
+].join("\n");
+
+const SHELL_HELPERS = [EXISTS_CHECK, TRY_MKDIR, AGE].join("\n");
+
 function acquireCommand(owner: string): string {
   const lock = shellQuote(LEASE_LOCK_PATH);
   const guard = shellQuote(GUARD_PATH);
   const id = shellQuote(owner);
   return [
-    `if mkdir ${lock} 2>/dev/null; then printf '%s' ${id} > ${lock}/owner; exit 0; fi`,
-    `age() { now=$(date +%s); echo $(( now - $(date -r "$1" +%s 2>/dev/null || echo "$now") )); }`,
-    `[ "$(age ${lock})" -ge ${STALE_AFTER_SECONDS} ] || exit ${BUSY_EXIT_CODE}`,
-    `if ! mkdir ${guard} 2>/dev/null; then`,
-    `  [ "$(age ${guard})" -ge ${GUARD_STALE_AFTER_SECONDS} ] && rmdir ${guard} 2>/dev/null`,
+    SHELL_HELPERS,
+    `write_owner() {`,
+    `  if ! err=$( (printf '%s' ${id} > ${lock}/owner) 2>&1 ); then`,
+    `    rm -rf ${lock}`,
+    `    printf '%s\\n' "$err" >&2`,
+    `    return 1`,
+    `  fi`,
+    `}`,
+    `try_mkdir ${lock}; rc=$?`,
+    `if [ "$rc" -eq 0 ]; then write_owner || exit 1; exit 0; fi`,
+    `[ "$rc" -eq ${BUSY_EXIT_CODE} ] || exit "$rc"`,
+    `held_for=$(age ${lock}) || exit 1`,
+    `[ "$held_for" -ge ${STALE_AFTER_SECONDS} ] || exit ${BUSY_EXIT_CODE}`,
+    `try_mkdir ${guard}; rc=$?`,
+    `if [ "$rc" -ne 0 ]; then`,
+    `  [ "$rc" -eq ${BUSY_EXIT_CODE} ] || exit "$rc"`,
+    `  guard_for=$(age ${guard}) || exit 1`,
+    `  if [ "$guard_for" -ge ${GUARD_STALE_AFTER_SECONDS} ]; then rm -rf ${guard} || exit 1; fi`,
     `  exit ${BUSY_EXIT_CODE}`,
     `fi`,
-    `[ "$(age ${lock})" -ge ${STALE_AFTER_SECONDS} ] && rm -rf ${lock}`,
     `status=${BUSY_EXIT_CODE}`,
-    `if mkdir ${lock} 2>/dev/null; then printf '%s' ${id} > ${lock}/owner; status=0; fi`,
+    `if held_for=$(age ${lock}); then`,
+    `  status=0`,
+    `  if [ "$held_for" -ge ${STALE_AFTER_SECONDS} ]; then rm -rf ${lock} || status=1; fi`,
+    `else`,
+    `  status=1`,
+    `fi`,
+    `if [ "$status" -eq 0 ]; then`,
+    `  try_mkdir ${lock}; rc=$?`,
+    `  status=$rc`,
+    `  if [ "$rc" -eq 0 ]; then write_owner; status=$?; fi`,
+    `fi`,
     `rmdir ${guard}`,
     `exit "$status"`,
   ].join("\n");
@@ -41,15 +87,18 @@ function beginReleaseCommand(owner: string): string {
   const guard = shellQuote(GUARD_PATH);
   const id = shellQuote(owner);
   return [
-    `age() { now=$(date +%s); echo $(( now - $(date -r "$1" +%s 2>/dev/null || echo "$now") )); }`,
+    SHELL_HELPERS,
     `guarded=0`,
     `for _ in $(seq 20); do`,
-    `  if mkdir ${guard} 2>/dev/null; then guarded=1; break; fi`,
-    `  [ "$(age ${guard})" -ge ${GUARD_STALE_AFTER_SECONDS} ] && rmdir ${guard} 2>/dev/null`,
+    `  try_mkdir ${guard}; rc=$?`,
+    `  if [ "$rc" -eq 0 ]; then guarded=1; break; fi`,
+    `  [ "$rc" -eq ${BUSY_EXIT_CODE} ] || break`,
+    `  guard_for=$(age ${guard}) || break`,
+    `  [ "$guard_for" -ge ${GUARD_STALE_AFTER_SECONDS} ] && rm -rf ${guard}`,
     `  sleep 0.1`,
     `done`,
     `fresh=0`,
-    `[ "$(age ${lock})" -lt ${FRESH_BELOW_SECONDS} ] && fresh=1`,
+    `if held_for=$(age ${lock}); then [ "$held_for" -lt ${FRESH_BELOW_SECONDS} ] && fresh=1; fi`,
     `held=0`,
     `if [ "$(cat ${lock}/owner 2>/dev/null)" = ${id} ]; then held=1; fi`,
     `printf '%s %s %s' "$guarded" "$held" "$fresh"`,
