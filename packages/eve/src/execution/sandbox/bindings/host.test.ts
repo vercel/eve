@@ -55,6 +55,7 @@ describe("HostSandbox environment and preparation", () => {
         HOST: "127.0.0.1",
         NITRO_HOST: "127.0.0.1",
         NITRO_PORT: "3024",
+        NODE_ENV: "production",
         OPENAI_API_KEY: "secret-oai",
         PATH: "/opt/conda/envs/testbed/bin:/usr/bin",
         PORT: "3024",
@@ -80,6 +81,7 @@ describe("HostSandbox environment and preparation", () => {
     const resolved = resolveHostEnvironment({
       baseEnv: {
         HOST_KEEP: "base",
+        HOST_RUNTIME_UNSET: "remove-at-open",
         HOST_UNSET: "remove-me",
         NODE_ENV: "production",
         OPENAI_API_KEY: "base-key",
@@ -91,12 +93,13 @@ describe("HostSandbox environment and preparation", () => {
         AI_AGENT: "custom-agent",
         HOST_UNSET: undefined,
         LAYERED: "env",
+        NODE_ENV: "production",
         OPENAI_API_KEY: "explicit-key",
       },
       inheritEnv: true,
       runtimeEnv: {
+        HOST_RUNTIME_UNSET: null,
         LAYERED: "runtime",
-        NODE_ENV: null,
         SESSION_VAR: "ok",
       },
       skillsDir: "/tmp/eve-skills",
@@ -107,6 +110,7 @@ describe("HostSandbox environment and preparation", () => {
       EVE_SKILLS_DIR: "/tmp/eve-skills",
       HOST_KEEP: "base",
       LAYERED: "call",
+      NODE_ENV: "production",
       OPENAI_API_KEY: "explicit-key",
       SESSION_VAR: "ok",
     });
