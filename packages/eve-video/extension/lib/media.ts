@@ -13,7 +13,7 @@ const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const MPEG_SYNC = new Set([0xfb, 0xf3, 0xf2, 0xe3, 0xfa]);
 const STILL_ISOBMFF = new Set("avif avis heic heix hevc hevx mif1 msf1".split(" "));
 const EXT_TYPES: Record<string, string> = Object.fromEntries(
-  ".mp4=video/mp4 .webm=video/webm .mov=video/quicktime .png=image/png .jpg=image/jpeg .jpeg=image/jpeg .webp=image/webp .gif=image/gif .mp3=audio/mpeg .wav=audio/wav .ogg=audio/ogg .flac=audio/flac .m4a=audio/mp4"
+  ".mp4=video/mp4 .webm=video/webm .mov=video/quicktime .png=image/png .jpg=image/jpeg .jpeg=image/jpeg .webp=image/webp .gif=image/gif .svg=image/svg+xml .mp3=audio/mpeg .wav=audio/wav .ogg=audio/ogg .flac=audio/flac .m4a=audio/mp4"
     .split(" ")
     .map((p) => p.split("=")),
 );

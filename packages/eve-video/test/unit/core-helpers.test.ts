@@ -218,6 +218,19 @@ describe("model resolution, webhook verification, and in-memory storage", () => 
 
     eq(Mod.DEFAULT_VIDEO_MODEL, "spacexai/grok-imagine-video");
     eq(rc({}).modelId, "spacexai/grok-imagine-video");
+    assert.match(Mod.formatConfiguredModelGuidance({}), /480p or 720p only.*1–15s.*1–10s/);
+    assert.match(
+      Mod.formatConfiguredModelGuidance({
+        model: "bytedance/seedance-2.5",
+        defaults: { duration: 6, resolution: "1080p", aspectRatio: "16:9", audio: true },
+        limits: { maxDurationSeconds: 12, maxVideosPerCall: 2 },
+      }),
+      /bytedance\/seedance-2\.5[\s\S]*480p, 720p, or 1080p[\s\S]*duration=6s, aspectRatio=16:9, resolution=1080p, audio=true[\s\S]*max duration 12s, max 2 video\(s\) per call/,
+    );
+    assert.match(
+      Mod.formatConfiguredModelGuidance({ model: "acme/custom-video" }),
+      /Active model: `acme\/custom-video`\./,
+    );
     eq(rc({ model: fast }).model, fast);
     eq(Mod.resolveJobModel({ model: fast }, "p/fast").model, fast);
     thr(() => rc({ model: "   " }), /non-empty string/);

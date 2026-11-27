@@ -201,6 +201,10 @@ export async function submitToolVideoJob(
   ): Promise<ResolvedMedia> => {
     const trimmed = raw.trim();
     const checkKind = (mt: string, target: string) => {
+      if (media.normalizeMediaType(mt) === "image/svg+xml")
+        throw new Error(
+          `SVG images are not supported by video models for ${target}; convert SVG to PNG, JPEG, WebP, or GIF first.`,
+        );
       const k = media.mediaKind(mt);
       if (k === "other" || !allowed.includes(k))
         throw new Error(`Unsupported media type "${mt}" for ${target}.`);
@@ -260,7 +264,11 @@ export async function submitToolVideoJob(
         `Media "${trimmed}" (${totalInputBytes + data.byteLength} total bytes) exceeds maximum allowed size of ${maxIn} bytes.`,
       );
     const mediaType = media.detectMediaType(data) ?? usableType(declared);
-    if (!mediaType) throw new Error(`Unsupported or unrecognized media file format: ${trimmed}`);
+    if (!mediaType) {
+      if (media.mediaTypeForPath(trimmed) === "image/svg+xml")
+        checkKind("image/svg+xml", `"${trimmed}"`);
+      throw new Error(`Unsupported or unrecognized media file format: ${trimmed}`);
+    }
     checkKind(mediaType, `"${trimmed}"`);
     totalInputBytes += data.byteLength;
     const entry: ResolvedMedia = { slot, data, mediaType, ...(frameType && { frameType }) };

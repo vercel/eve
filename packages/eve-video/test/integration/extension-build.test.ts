@@ -48,6 +48,10 @@ describe("@eve/video built package and consumer eve build", () => {
     assert.equal(typeof manifest.formatVersion, "number");
     assert.equal(typeof manifest.builtWithEve, "string");
     assert.match(await rf("dist/extension/instructions.md"), /video `generate` tool/);
+    assert.match(
+      await rf("dist/extension/instructions/model.mjs"),
+      /formatConfiguredModelGuidance/,
+    );
     assert.match(await rf("NOTICE"), /Vercel/);
     assert.match(await rf("dist/extension/tools/generate.mjs"), /["']use workflow["']/);
 

@@ -4,6 +4,61 @@ import type { VideoExtensionConfig, VideoModelLike } from "./types.ts";
 
 export const DEFAULT_VIDEO_MODEL = "spacexai/grok-imagine-video";
 
+const MODEL_GUIDANCE: readonly [RegExp, string][] = [
+  [
+    /(?:^|\/)grok-imagine-video-1\.5(?:$|-)/i,
+    "Resolutions: 480p, 720p, or 1080p. Text-to-video and `start` image-to-video only (no native video edit or extend).",
+  ],
+  [
+    /(?:^|\/)grok-imagine-video(?:$|-)/i,
+    "Resolutions: 480p or 720p only (do not pass 1080p). Duration: 1–15s for text/image-to-video, or 1–10s when passing `references` or `extend: true` (extends a 2–15s clip by 2–10s). Supports `start`, image `references` (up to 7), in-place `video` edits (omit duration, aspectRatio, and resolution), and `extend: true`; does not support `end` frame.",
+  ],
+  [
+    /(?:^|\/)seedance-2\.5-flash(?:$|-)/i,
+    "Resolutions: 480p or 720p only (do not pass 1080p). Duration: 4–30s (omitted on in-place edits). Supports `start`/`end` frames, image/video/audio `references`, in-place `video` edits, and `extend: true`.",
+  ],
+  [
+    /(?:^|\/)seedance-2\.5(?:$|-)/i,
+    "Resolutions: 480p, 720p, or 1080p. Duration: 4–30s (omitted on in-place edits). Supports `start`/`end` frames, image/video/audio `references`, in-place `video` edits, and `extend: true`.",
+  ],
+  [
+    /(?:^|\/)veo-3\.1.*lite/i,
+    "Resolutions: 720p or 1080p. Generation-only (no native video-to-video edit or extend).",
+  ],
+  [
+    /(?:^|\/)veo-/i,
+    "Resolutions: 720p, 1080p, or 4k. Generation-only (no native video-to-video edit or extend).",
+  ],
+  [
+    /(?:^|\/)flux-3-video/i,
+    "Duration: 5–20s. Supports `start`/`end` frames and `extend: true`; do not combine `video` with `start`, `end`, or `references`.",
+  ],
+  [
+    /(?:^|\/)wan-v3\.0/i,
+    "Resolutions: 720p or 1080p. Supports `start`/`end` frames and image/video/audio `references`.",
+  ],
+];
+
+export function formatConfiguredModelGuidance(config: VideoExtensionConfig): string {
+  const modelId = describeDefaultModel(config);
+  const lines = ["## Active video model", "", `Active model: \`${modelId}\`.`];
+  const note = MODEL_GUIDANCE.find(([re]) => re.test(modelId))?.[1];
+  if (note) lines.push(`- ${note}`);
+  const defs: string[] = [];
+  if (config.defaults?.duration !== undefined) defs.push(`duration=${config.defaults.duration}s`);
+  if (config.defaults?.aspectRatio) defs.push(`aspectRatio=${config.defaults.aspectRatio}`);
+  if (config.defaults?.resolution) defs.push(`resolution=${config.defaults.resolution}`);
+  if (config.defaults?.audio !== undefined) defs.push(`audio=${config.defaults.audio}`);
+  if (defs.length) lines.push(`- Configured defaults: ${defs.join(", ")}.`);
+  const caps: string[] = [];
+  if (config.limits?.maxDurationSeconds !== undefined)
+    caps.push(`max duration ${config.limits.maxDurationSeconds}s`);
+  if (config.limits?.maxVideosPerCall !== undefined)
+    caps.push(`max ${config.limits.maxVideosPerCall} video(s) per call`);
+  if (caps.length) lines.push(`- Configured limits: ${caps.join(", ")}.`);
+  return lines.join("\n");
+}
+
 const idOf = (x: string | VideoModelLike) => {
   if (typeof x === "string") {
     if (!x.trim()) throw new Error("Video model ID must be a non-empty string.");

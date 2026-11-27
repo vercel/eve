@@ -232,6 +232,7 @@ describe("pre-flight gating before paid submission", () => {
     const storage = inMemory();
     const sb = mkSb({
       "in/frame.png": H.PNG_BYTES,
+      "in/logo.svg": new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>'),
       "in/empty.png": new Uint8Array(0),
       "in/big.png": new Uint8Array(64).fill(0x89),
       "in/text.bin": new TextEncoder().encode("not media"),
@@ -248,6 +249,8 @@ describe("pre-flight gating before paid submission", () => {
       [{ start: "in/frame.png" }, {}, /requires an agent sandbox/],
       [{ extend: true }, {}, /requires "video"/],
       [{ video: SRC, start: "https://a.test/f.png" }, {}, /cannot be combined/],
+      [{ references: ["https://eve.dev/logo.svg"] }, {}, /SVG images are not supported/],
+      [{ start: "in/logo.svg" }, {}, /SVG images are not supported/, sb],
       [{ start: "in/empty.png" }, {}, /Media file is empty/, sb],
       [{ start: "in/big.png" }, { limits: { maxInputBytes: 16 } }, /exceeds maximum/, sb],
       [{ start: "in/text.bin" }, {}, /unrecognized media/, sb],
