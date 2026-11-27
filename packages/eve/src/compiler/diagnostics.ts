@@ -66,6 +66,21 @@ export function createChannelRouteShadowedDiagnostic(input: {
   };
 }
 
+export const COMPILE_TOOL_INPUT_SCHEMA_INVALID = "compile/tool-input-schema-invalid";
+
+export function createToolInputSchemaInvalidDiagnostic(input: {
+  readonly nodeId: string;
+  readonly problem: string;
+  readonly source: AgentSourceDescriptor;
+}): CompilerDiagnostic {
+  return {
+    code: COMPILE_TOOL_INPUT_SCHEMA_INVALID,
+    message: `Tool "${input.source.logicalPath}" has an invalid inputSchema: ${input.problem}, so eve can't validate the tool's input.`,
+    severity: "error",
+    sources: [toDiagnosticSource(input.nodeId, input.source)],
+  };
+}
+
 export function summarizeCompilerDiagnostics(
   diagnostics: readonly CompilerDiagnostic[],
 ): DiscoverDiagnosticsSummary {
@@ -76,6 +91,12 @@ export function summarizeCompilerDiagnostics(
     else warnings += 1;
   }
   return { errors, warnings };
+}
+
+export function formatDiagnosticSources(diagnostic: CompilerDiagnostic): string {
+  return diagnostic.sources
+    .map((source) => source.sourcePath ?? source.logicalPath ?? source.sourceId ?? source.nodeId)
+    .join(", ");
 }
 
 function toDiagnosticSource(

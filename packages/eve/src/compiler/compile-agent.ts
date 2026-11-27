@@ -13,12 +13,17 @@ import {
 } from "#compiler/artifacts.js";
 import { type CompileMetadata } from "#compiler/artifact-contract.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
-import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
+import {
+  formatDiagnosticSources,
+  summarizeCompilerDiagnostics,
+  type CompilerDiagnostic,
+} from "#compiler/diagnostics.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 
 interface CompileAgentInput {
   developmentExtensions?: DevelopmentExtensionSelection;
+  reportWarnings?: boolean;
   source?: ProjectSource;
   startPath?: string;
 }
@@ -64,7 +69,11 @@ export async function compileAgent(input: CompileAgentInput = {}): Promise<Compi
     writeRoot: artifactsRoot,
   });
 
-  return finishAgentCompilation(compileResult, CompileAgentError.fromDurableArtifacts);
+  return finishAgentCompilation(
+    compileResult,
+    CompileAgentError.fromDurableArtifacts,
+    input.reportWarnings ?? true,
+  );
 }
 
 export async function compileAgentInWorkspace(input: {
@@ -85,7 +94,11 @@ export async function compileAgentInWorkspace(input: {
   );
 
   return {
-    compileResult: finishAgentCompilation(compileResult, CompileAgentError.fromTransientArtifacts),
+    compileResult: finishAgentCompilation(
+      compileResult,
+      CompileAgentError.fromTransientArtifacts,
+      true,
+    ),
     moduleGraph,
   };
 }
@@ -142,12 +155,13 @@ async function writeAgentCompilation(
 function finishAgentCompilation(
   result: CompileAgentResult,
   createError: (result: CompileAgentResult) => CompileAgentError,
+  reportWarnings: boolean,
 ): CompileAgentResult {
   if (result.diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
     throw createError(result);
   }
 
-  reportDiscoverWarnings(result.diagnostics);
+  if (reportWarnings) reportDiscoverWarnings(result.diagnostics);
 
   return result;
 }
@@ -184,12 +198,6 @@ function formatCompileAgentErrorLines(diagnostics: readonly CompilerDiagnostic[]
   }
 
   return lines;
-}
-
-function formatDiagnosticSources(diagnostic: CompilerDiagnostic): string {
-  return diagnostic.sources
-    .map((source) => source.sourcePath ?? source.logicalPath ?? source.sourceId ?? source.nodeId)
-    .join(", ");
 }
 
 function formatDiagnosticSeverity(severity: DiscoverDiagnostic["severity"]): string {

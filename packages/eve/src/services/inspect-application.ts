@@ -5,6 +5,7 @@ import {
 } from "#compiler/compile-agent.js";
 import { DiscoveryProjectResolutionError } from "#discover/project.js";
 import { type ApplicationInfo, getApplicationInfo } from "#internal/application/paths.js";
+import { toErrorMessage } from "#shared/errors.js";
 import {
   EVE_SESSION_ROUTE_PATH,
   EVE_SESSION_ROUTE_PATTERN,
@@ -19,16 +20,18 @@ export interface ApplicationInspectionMessaging {
 
 export interface ApplicationInspection {
   readonly application: ApplicationInfo;
+  readonly compileError?: string;
   readonly compiledState: CompileAgentResult | null;
   readonly messaging: ApplicationInspectionMessaging;
 }
 
 export async function inspectApplication(appRoot: string): Promise<ApplicationInspection> {
-  const compiledState = await loadCompiledApplicationState(appRoot);
+  const { compileError, compiledState } = await loadCompiledApplicationState(appRoot);
   const application = getApplicationInfo(compiledState?.project.appRoot ?? appRoot);
 
   return {
     application,
+    ...(compileError !== undefined && { compileError }),
     compiledState,
     messaging: {
       createSessionRoutePath: EVE_SESSION_ROUTE_PATH,
@@ -38,20 +41,31 @@ export async function inspectApplication(appRoot: string): Promise<ApplicationIn
   };
 }
 
-async function loadCompiledApplicationState(appRoot: string): Promise<CompileAgentResult | null> {
+async function loadCompiledApplicationState(appRoot: string): Promise<{
+  readonly compileError?: string;
+  readonly compiledState: CompileAgentResult | null;
+}> {
   try {
-    return await compileAgent({
-      startPath: appRoot,
-    });
+    return { compiledState: await compileAgent({ reportWarnings: false, startPath: appRoot }) };
   } catch (error) {
     if (error instanceof CompileAgentError) {
-      return error.result;
+      return { compiledState: error.result };
     }
 
     if (error instanceof DiscoveryProjectResolutionError) {
-      return null;
+      return { compiledState: null };
     }
 
-    throw error;
+    return { compileError: formatErrorWithCauses(error), compiledState: null };
   }
+}
+
+function formatErrorWithCauses(error: unknown): string {
+  const lines = [toErrorMessage(error)];
+  let cause = error instanceof Error ? error.cause : undefined;
+  for (let depth = 0; cause !== undefined && depth < 5; depth += 1) {
+    lines.push(`Caused by: ${toErrorMessage(cause)}`);
+    cause = cause instanceof Error ? cause.cause : undefined;
+  }
+  return lines.join("\n");
 }

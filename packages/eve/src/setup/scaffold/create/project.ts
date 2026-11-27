@@ -277,7 +277,7 @@ Use a bounded authoring loop:
 
 1. Read the relevant page and inspect only files you will modify or need to imitate.
 2. Stop discovery once the file location, imports, and definition shape are clear. Implement the smallest complete behavior the user requested.
-3. Run one narrow verification. Expand investigation only when it fails or the request needs project-specific details.
+3. Run one narrow verification. Start with \`eve info\`: it loads every agent file without starting a server, lists each problem with its file, and exits 1 when the agent won't compile. Expand investigation only when it fails or the request needs project-specific details.
 
 Follow links or inspect public types only when the routed page leaves the task unanswered. Do not recursively glob \`node_modules\`, enumerate the entire docs tree, or read unrelated scaffold files when the direct path is known. Package-manager links can hide files from recursive glob tools even though direct reads work.
 

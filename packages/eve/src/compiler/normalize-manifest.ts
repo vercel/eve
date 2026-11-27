@@ -67,6 +67,7 @@ import {
   normalizeSubagentConfig,
 } from "#compiler/normalize-subagent.js";
 import { compileToolEntry } from "#compiler/normalize-tool.js";
+import { findJsonSchemaValidatorProblem } from "#tools/schema.js";
 import {
   finalizeNodeSourceState,
   type ComposedNodeSourceGraph,
@@ -89,7 +90,11 @@ import {
   withDiagnosticsSummary,
   withExtensionNamespace,
 } from "#compiler/normalize-manifest-helpers.js";
-import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
+import {
+  createToolInputSchemaInvalidDiagnostic,
+  summarizeCompilerDiagnostics,
+  type CompilerDiagnostic,
+} from "#compiler/diagnostics.js";
 import {
   listApplicationModulePaths,
   projectAgentSources,
@@ -632,6 +637,20 @@ class AgentGraphCompiler {
             selectedSourceIds.delete(candidate.sourceId);
           } else if (result.kind === "tool") {
             tools.push(result.definition);
+            const schemaProblem =
+              candidate.owner.kind === "application" &&
+              result.definition.modelInputSchema !== undefined
+                ? findJsonSchemaValidatorProblem(result.definition.modelInputSchema)
+                : undefined;
+            if (schemaProblem !== undefined) {
+              this.diagnostics.push(
+                createToolInputSchemaInvalidDiagnostic({
+                  nodeId: input.nodeId,
+                  problem: schemaProblem,
+                  source: candidate,
+                }),
+              );
+            }
             if (result.definition.hasExecute) {
               state.evaluation.requireRuntimeEntry(candidate.sourceId);
             }

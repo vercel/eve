@@ -24,6 +24,7 @@ import { compileAgentManifestWithModuleGraph } from "#compiler/normalize-manifes
 import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import { materializeWorkspaceResources } from "#compiler/workspace-resources.js";
+import { toErrorMessage } from "#shared/errors.js";
 import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared-artifacts.js";
 
 const COMPILER_DIAGNOSTICS_ARTIFACT_KIND = "eve-compiler-diagnostics";
@@ -179,6 +180,8 @@ export async function writeCompilerArtifacts(
     developmentExtensions: input.developmentExtensions,
     diagnostics,
     modelCatalog,
+  }).catch((error: unknown) => {
+    throw withDiscoveryErrors(error, input.diagnostics);
   });
   const compiledManifest = await materializeWorkspaceResources({
     compileDirectoryPath: paths.compileDirectoryPath,
@@ -231,6 +234,21 @@ export async function writeCompilerArtifacts(
     moduleMapSource,
     paths,
   };
+}
+
+function withDiscoveryErrors(error: unknown, diagnostics: readonly DiscoverDiagnostic[]): unknown {
+  const discoveryErrors = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
+  if (discoveryErrors.length === 0) return error;
+  return new Error(
+    [
+      `Discovery failed with ${discoveryErrors.length} error(s):`,
+      ...discoveryErrors.map(
+        (diagnostic) => `- ${diagnostic.message}\n  source: ${diagnostic.sourcePath}`,
+      ),
+      `Compilation then stopped: ${toErrorMessage(error)}`,
+    ].join("\n"),
+    { cause: error },
+  );
 }
 
 function createModelMetadataUnavailableDiagnostic(modelMetadataPath: string): CompilerDiagnostic {

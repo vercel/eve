@@ -169,6 +169,39 @@ describe("compileAgentManifest source graph", () => {
     expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
   });
 
+  it("reports an authored tool whose JSON Schema eve cannot validate", async () => {
+    const diagnostics: CompilerDiagnostic[] = [];
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/weather.ts",
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Gets weather.",
+            execute: () => ({ ok: true }),
+            inputSchema: {
+              type: "object",
+              properties: {
+                city: { type: "string", enum: ["Paris", "Tokyo"] },
+                note: { type: "text" },
+              },
+              required: ["city"],
+            },
+          }),
+        }),
+      },
+    ]);
+
+    await compileAgentManifest(manifest(), { diagnostics, sourceRegistries: [sourceRegistry] });
+
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        code: "compile/tool-input-schema-invalid",
+        message: expect.stringContaining('unsupported type "text"'),
+        severity: "error",
+      }),
+    ]);
+  });
+
   it("rejects an agent.ts plain object that did not come from defineAgent()", async () => {
     const sourceRegistry = registry([
       {
