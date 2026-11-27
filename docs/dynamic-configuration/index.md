@@ -16,19 +16,19 @@ The module's top-level code runs at build time and at runtime, so keep caller-sp
 
 Every dynamic function receives:
 
-| Field                     | Contents                                                                                                                                             |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ctx.session`             | Session ID, authenticated caller and initiator, and optional schedule and predecessor.                                                               |
-| `ctx.session.parent`      | In a delegated session: the parent session, its turn, the call that opened this session, and `rootSessionId`. Absent in a root session.              |
-| `ctx.channel`             | Channel kind, continuation token, and metadata. Narrow typed metadata with `isChannel`.                                                              |
-| `ctx.conversation`        | Where the conversation happens: its audience and, when the channel reports one, its [space](/docs/channels#spaces).                                  |
-| `ctx.view`                | Read-only view of the session so far. Read it with selectors from `eve/events`, such as `turns(ctx.view)`.                                           |
-| `ctx.turn`                | Latest turn, with its ID, input, and status; `null` before the first turn.                                                                           |
-| `ctx.now`                 | Time of the latest recorded session event, as a `Date`.                                                                                              |
-| `ctx.model.id`            | Selected model ID. Unavailable inside the `model` field, before the model is chosen.                                                                 |
-| `await ctx.messages()`    | The conversation so far, assembled only when you call it.                                                                                            |
-| `await ctx.memo(key, fn)` | A saved JSON result for a key.                                                                                                                       |
-| `await ctx.getSandbox()`  | The session's sandbox, started on first use. Unavailable inside the `model` field. Call it inside a memo; see [Read the sandbox](#read-the-sandbox). |
+| Field                     | Contents                                                                                                                                                                                                                                                                                                    |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ctx.session`             | Session ID, authenticated caller and initiator, and optional schedule and predecessor.                                                                                                                                                                                                                      |
+| `ctx.session.parent`      | In a delegated session: the parent session, its turn, the call that opened this session, and `rootSessionId`. Absent in a root session.                                                                                                                                                                     |
+| `ctx.channel`             | Channel kind, continuation token, and metadata. Narrow typed metadata with `isChannel`.                                                                                                                                                                                                                     |
+| `ctx.conversation`        | Where the conversation happens: its audience and, when the channel reports one, its [space](/docs/channels#spaces).                                                                                                                                                                                         |
+| `ctx.view`                | Read-only view of the session so far. Read it with selectors from `eve/events`, such as `turns(ctx.view)`.                                                                                                                                                                                                  |
+| `ctx.turn`                | Latest turn, with its ID, input, and status; `null` before the first turn.                                                                                                                                                                                                                                  |
+| `ctx.now`                 | Time of the latest recorded session event, as a `Date`. It changes between model calls, so keep it out of names, descriptions, schemas and system instructions; send the time as a user-role instruction from a turn-keyed memo ([prompt caching](/docs/instructions#history-controls-and-prompt-caching)). |
+| `ctx.model.id`            | Selected model ID. Unavailable inside the `model` field, before the model is chosen.                                                                                                                                                                                                                        |
+| `await ctx.messages()`    | The conversation so far, assembled only when you call it.                                                                                                                                                                                                                                                   |
+| `await ctx.memo(key, fn)` | A saved JSON result for a key.                                                                                                                                                                                                                                                                              |
+| `await ctx.getSandbox()`  | The session's sandbox, started on first use. Unavailable inside the `model` field. Call it inside a memo; see [Read the sandbox](#read-the-sandbox).                                                                                                                                                        |
 
 For session state inside a dynamic function, query `ctx.view` with selectors from `eve/events` instead of reconstructing it yourself. See [Session views & selectors](/docs/concepts/session-views-and-selectors).
 
@@ -223,7 +223,7 @@ A workflow can't read the variables around it, so a `defineWorkflowTool()` creat
 
 ### Author replayable callbacks
 
-Build callbacks and schemas with ordinary code. Save observations in memos when a fresh process must rebuild from the same data, because values fetched outside a memo are fetched again. Avoid `Math.random()`, `Date.now()` and `ctx.now` in declarations (names, descriptions, schemas and instructions) unless memoized: each changes between model calls and breaks the prompt cache.
+Build callbacks and schemas with ordinary code. Save observations in memos when a fresh process must rebuild from the same data, because values fetched outside a memo are fetched again. Avoid `Math.random()` and `Date.now()` in declarations unless memoized; use `ctx.now` for commit time.
 
 ### Create dynamic tools in a package
 
