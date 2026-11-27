@@ -368,3 +368,50 @@ it("allocates a fresh local reply hook after a forwarding failure kills the prev
   expect(mocks.admitted).toEqual(["reply-0", "reply-1"]);
   await sessions.close();
 });
+
+it("retires the reusable local hook when a concurrent send settles it so a later send does not hang", async () => {
+  const { sessions } = serveRun();
+  const reviewer = sessions.open("reviewer");
+  const first = await reviewer.send("first");
+  const secondSend = reviewer.send("second");
+  await landNewestFirst();
+  const second = await secondSend;
+
+  endChildTurn("combined reply");
+  await expect(Promise.all([first.result(), second.result()])).resolves.toMatchObject([
+    { reply: "combined reply", status: "completed" },
+    { reply: "combined reply", status: "completed" },
+  ]);
+
+  const thirdSend = reviewer.send("third");
+  await landNewestFirst();
+  const third = await thirdSend;
+  endChildTurn("third reply");
+  await expect(third.result()).resolves.toMatchObject({
+    reply: "third reply",
+    status: "completed",
+  });
+  expect(mocks.admitted).toEqual(["reply-0", "reply-1", "reply-2"]);
+  await sessions.close();
+});
+
+it("retires the reusable local hook when delivery fails so a subsequent send does not hang", async () => {
+  const { sendAgentSessionMessageStep } = await import("#execution/agent-sessions/steps.js");
+  const { sessions } = serveRun();
+  const reviewer = sessions.open("reviewer");
+
+  const first = await reviewer.send("first");
+  endChildTurn("first reply");
+  await expect(first.result()).resolves.toMatchObject({ reply: "first reply" });
+
+  vi.mocked(sendAgentSessionMessageStep).mockRejectedValueOnce(new Error("delivery blip"));
+  await expect(reviewer.send("failed")).rejects.toThrow("delivery blip");
+
+  const nextSend = reviewer.send("after blip");
+  await landNewestFirst();
+  const next = await nextSend;
+  endChildTurn("recovered reply");
+  await expect(next.result()).resolves.toMatchObject({ reply: "recovered reply" });
+  expect(mocks.admitted).toEqual(["reply-0", "reply-1"]);
+  await sessions.close();
+});

@@ -129,7 +129,15 @@ class RunAgentSession implements AgentSession {
     } catch (error) {
       const index = this.#awaited.indexOf(reply);
       if (index >= 0) this.#awaited.splice(index, 1);
-      if (!reply.reusable) await releaseHook(reply.hook);
+      if (reply.reusable) {
+        if (this.#localHook === reply.hook) {
+          this.#localHook = undefined;
+          this.#localIterator = undefined;
+        }
+        await releaseHook(reply.hook);
+      } else if (this.#disposableHooks.delete(reply.hook)) {
+        await releaseHook(reply.hook);
+      }
       throw error;
     }
     if (options.signal !== undefined) this.#cancelTurnOnAbort(reply, options.signal);
@@ -282,7 +290,9 @@ class RunAgentSession implements AgentSession {
     if (index < 0) return;
     for (const settled of this.#awaited.splice(0, index + 1)) {
       settled.settle(end);
-      if (!settled.reusable && this.#disposableHooks.delete(settled.hook)) {
+      if (settled.reusable) {
+        if (settled !== reply) this.#resetLocalHook(settled.hook);
+      } else if (this.#disposableHooks.delete(settled.hook)) {
         void releaseHook(settled.hook);
       }
     }
