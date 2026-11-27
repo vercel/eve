@@ -388,7 +388,7 @@ test("workflow names and concurrency preserve independent authorized harness run
   );
   assert.match(workflow, /push:\n\s+branches: \[main\]/u);
   assert.match(workflow, /--attempts "\$\{\{ needs\.request\.outputs\.attempts \}\}"/u);
-  assert.match(workflow, /--concurrency 16/u);
+  assert.match(workflow, /--concurrency 24/u);
   assert.match(workflow, /ref: \$\{\{ needs\.request\.outputs\.sha \}\}/u);
 });
 

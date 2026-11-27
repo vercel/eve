@@ -1,12 +1,12 @@
 export type DatasetName = "deepswe-lean" | "swe-lean";
+
 export type HarnessName = "eve-code" | "opencode" | "pi" | "fx";
-export type ReasoningLevel = "low" | "medium" | "high";
+
 export type ExecutionMode = "local" | "vercel-sandbox";
 
-export const SUPPORTED_DATASETS: readonly DatasetName[] = ["deepswe-lean", "swe-lean"];
-export const SUPPORTED_HARNESSES: readonly HarnessName[] = ["eve-code", "opencode", "pi", "fx"];
+export type LinuxArch = "x64" | "arm64";
 
-export interface TaskCollectHook {
+export interface CollectHook {
   readonly command: string;
   readonly timeoutSec: number;
 }
@@ -15,19 +15,20 @@ export interface TaskSpec {
   readonly name: string;
   readonly dataset: DatasetName;
   readonly dir: string;
-  readonly instruction: string;
-  readonly dockerImage: string;
+  readonly instructionPath: string;
+  readonly testsDir: string;
+  readonly environmentDir: string;
+  readonly dockerImage?: string;
   readonly agentTimeoutSec: number;
   readonly verifierTimeoutSec: number;
   readonly separateVerifier: boolean;
-  readonly collectHooks: readonly TaskCollectHook[];
-  readonly artifacts: readonly string[];
-  readonly env: Readonly<Record<string, string>>;
   readonly cpus: number;
   readonly memoryMb: number;
+  readonly env: Readonly<Record<string, string>>;
+  readonly collectHooks: readonly CollectHook[];
 }
 
-export interface TrialUsage {
+export interface TokenUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cachedTokens: number;
@@ -37,12 +38,18 @@ export interface TrialUsage {
 export interface TrialOverhead {
   readonly firstStepInputTokens?: number;
   readonly modelSteps?: number;
-  readonly toolCalls?: Readonly<Record<string, number>>;
+  readonly toolCalls?: number | Readonly<Record<string, number>>;
 }
 
-export interface StepOutcome {
+export interface AgentOutcome {
+  readonly status: "completed" | "failed" | "timeout";
+  readonly exitCode: number;
+  readonly durationMs: number;
+}
+
+export interface VerifierOutcome {
   readonly status: "completed" | "failed" | "timeout" | "skipped";
-  readonly exitCode: number | null;
+  readonly exitCode: number;
   readonly durationMs: number;
 }
 
@@ -52,9 +59,9 @@ export interface TrialResult {
   readonly harness: HarnessName;
   readonly model: string;
   readonly reward: number | null;
-  readonly agent: StepOutcome;
-  readonly verifier: StepOutcome;
-  readonly usage?: TrialUsage;
+  readonly agent: AgentOutcome;
+  readonly verifier: VerifierOutcome;
+  readonly usage?: TokenUsage;
   readonly overhead?: TrialOverhead;
   readonly error?: string;
   readonly startedAt: string;
@@ -64,20 +71,8 @@ export interface TrialResult {
 export interface HarnessBundle {
   readonly harness: HarnessName;
   readonly version: string;
-  readonly dir: string;
-  readonly archDirs?: Readonly<Record<"x64" | "arm64", string>>;
-  readonly command: (ctx: HarnessRunContext) => string;
-  readonly env: (ctx: HarnessRunContext) => Record<string, string>;
-}
-
-export interface HarnessRunContext {
-  readonly installDir: string;
-  readonly instructionPath: string;
-  readonly logsDir: string;
-  readonly taskWorkdir: string;
-  readonly model: string;
-  readonly reasoning: ReasoningLevel;
-  readonly agentTimeoutMs: number;
+  readonly dir?: string;
+  readonly archDirs?: Readonly<Record<LinuxArch, string>>;
 }
 
 export interface ConfidenceInterval {
@@ -107,7 +102,7 @@ export interface BenchmarkRunOptions {
   readonly dataset: DatasetName;
   readonly harnesses: readonly HarnessName[];
   readonly model: string;
-  readonly reasoning: ReasoningLevel;
+  readonly reasoning: string;
   readonly attempts: number;
   readonly concurrency: number;
   readonly execution: ExecutionMode;
@@ -115,17 +110,19 @@ export interface BenchmarkRunOptions {
   readonly taskFilter?: string;
   readonly sourceSha?: string;
   readonly runUrl?: string;
-  readonly vcpus?: number;
 }
 
-export type PrebuiltBundleManifest = Partial<
-  Record<
-    HarnessName,
-    {
-      readonly harness: HarnessName;
-      readonly version: string;
-      readonly bundleRelDir: string;
-      readonly archRelDirs?: Readonly<{ readonly x64: string; readonly arm64: string }>;
-    }
-  >
->;
+export interface PrebuiltBundleEntry {
+  readonly harness: HarnessName;
+  readonly version: string;
+  readonly bundleRelDir?: string;
+  readonly archRelDirs?: Partial<Record<LinuxArch, string>>;
+}
+
+export interface PrebuiltBundleManifest {
+  readonly nodeRelDirs: Partial<Record<LinuxArch, string>>;
+  readonly bundles: Partial<Record<HarnessName, PrebuiltBundleEntry>>;
+}
+
+export const SUPPORTED_HARNESSES: readonly HarnessName[] = ["eve-code", "opencode", "pi", "fx"];
+export const SUPPORTED_DATASETS: readonly DatasetName[] = ["swe-lean", "deepswe-lean"];

@@ -1,7 +1,7 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { DATASET_SOURCES } from "./datasets.ts";
+import { DATASET_LOCKS } from "./datasets.ts";
 import type {
   BenchmarkRunOptions,
   ConfidenceInterval,
@@ -20,7 +20,6 @@ function quantile(sorted: readonly number[], p: number): number {
   return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (idx - lo);
 }
 
-/** Deterministic PRNG (mulberry32) so bootstrap CIs are reproducible across reruns. */
 function seededRandom(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
@@ -31,7 +30,7 @@ function seededRandom(seed: number): () => number {
   };
 }
 
-export function bootstrapResolveRate(
+function bootstrapResolveRate(
   trialsByTask: readonly (readonly number[])[],
   resamples = 2000,
 ): ConfidenceInterval {
@@ -42,14 +41,14 @@ export function bootstrapResolveRate(
 
   const rand = seededRandom(0x5eed1234);
   const samples: number[] = [];
-  for (let i = 0; i < resamples; i++) {
+  for (let i = 0; i < resamples; i += 1) {
     let resolved = 0;
     let total = 0;
-    for (let j = 0; j < trialsByTask.length; j++) {
+    for (let j = 0; j < trialsByTask.length; j += 1) {
       const bucket = trialsByTask[Math.floor(rand() * trialsByTask.length)]!;
       for (const value of bucket) {
         resolved += value;
-        total++;
+        total += 1;
       }
     }
     samples.push(total > 0 ? resolved / total : 0);
@@ -62,10 +61,10 @@ export function bootstrapResolveRate(
   };
 }
 
-export function scoreHarness(
+function scoreHarness(
   harness: HarnessName,
   version: string,
-  tasks: readonly TaskSpec[],
+  tasks: readonly Pick<TaskSpec, "name">[],
   trials: readonly TrialResult[],
 ): HarnessScore {
   const byTask = tasks.map((task) =>
@@ -124,12 +123,12 @@ export function scoreHarness(
 
 export function buildReport(input: {
   readonly options: BenchmarkRunOptions;
-  readonly tasks: readonly TaskSpec[];
+  readonly tasks: readonly Pick<TaskSpec, "name">[];
   readonly trials: readonly TrialResult[];
   readonly versions: Readonly<Partial<Record<HarnessName, string>>>;
 }) {
   const { options, tasks, trials, versions } = input;
-  const source = DATASET_SOURCES[options.dataset];
+  const source = DATASET_LOCKS[options.dataset];
   const expectedTrialsPerHarness = tasks.length * options.attempts;
 
   const harnessResults = options.harnesses.map((harness) => {
@@ -227,13 +226,15 @@ export function renderMarkdownReport(report: ReturnType<typeof buildReport>): {
     `- Model: \`${manifest.model}\` (reasoning: \`${manifest.reasoning}\`)`,
     `- Dataset: \`${manifest.dataset.name}@${manifest.dataset.version}\` (${manifest.tasks.length} tasks × ${manifest.attempts} attempts)`,
     `- Status: **${report.status}**`,
-    ...(manifest.source ? [`- Source: \`${manifest.source.slice(0, 10)}\``] : []),
+  ];
+  if (manifest.source) lines.push(`- Source: \`${manifest.source.slice(0, 10)}\``);
+  lines.push(
     "",
     "## Summary",
     "",
     "| Harness | Version | Resolved | Rate (95% CI) | Latency p50 / p90 | Input / Output | Cache | Median steps |",
     "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
-  ];
+  );
 
   for (const s of scores) {
     const pct = `${Math.round(s.resolveRate.estimate * 100)}%`;
@@ -275,40 +276,4 @@ export async function writeReportFiles(
     writeFile(join(outputDir, "report.md"), reportMd),
     writeFile(join(outputDir, "comment.md"), commentMd),
   ]);
-}
-
-export async function publishPrComment(input: {
-  readonly commentPath: string;
-  readonly token: string;
-  readonly repository: string;
-  readonly prNumber: number;
-}): Promise<void> {
-  const body = await readFile(input.commentPath, "utf8");
-  const marker = body.split("\n", 1)[0] ?? "";
-  const headers = {
-    Authorization: `Bearer ${input.token}`,
-    Accept: "application/vnd.github+json",
-    "Content-Type": "application/json",
-    "User-Agent": "eve-code-bench",
-  };
-  const baseUrl = `https://api.github.com/repos/${input.repository}`;
-  const listRes = await fetch(`${baseUrl}/issues/${input.prNumber}/comments?per_page=100`, {
-    headers,
-  });
-  if (!listRes.ok) {
-    throw new Error(`Failed to list PR comments: ${listRes.status} ${await listRes.text()}`);
-  }
-  const comments = (await listRes.json()) as Array<{ id: number; body?: string }>;
-  const existing = marker.startsWith("<!-- eve-code-bench:")
-    ? comments.find((c) => typeof c.body === "string" && c.body.startsWith(marker))
-    : undefined;
-
-  const url = existing
-    ? `${baseUrl}/issues/comments/${existing.id}`
-    : `${baseUrl}/issues/${input.prNumber}/comments`;
-  const method = existing ? "PATCH" : "POST";
-  const updateRes = await fetch(url, { method, headers, body: JSON.stringify({ body }) });
-  if (!updateRes.ok) {
-    throw new Error(`Failed to publish PR comment: ${updateRes.status} ${await updateRes.text()}`);
-  }
 }

@@ -5,8 +5,10 @@ import { fileURLToPath } from "node:url";
 import { loadDatasetTasks } from "./datasets.ts";
 import { runDockerTrial } from "./docker.ts";
 import { prepareEveCodeHarness } from "./harnesses/eve-code.ts";
+import { ensureNodeRuntime } from "./harnesses/node-runtime.ts";
 import { preparePeerHarness } from "./harnesses/peers.ts";
-import { buildReport, publishPrComment, writeReportFiles } from "./report.ts";
+import { forwardCredentials, runTrialPool } from "./pool.ts";
+import { buildReport, writeReportFiles } from "./report.ts";
 import {
   SUPPORTED_DATASETS,
   SUPPORTED_HARNESSES,
@@ -15,158 +17,125 @@ import {
   type ExecutionMode,
   type HarnessBundle,
   type HarnessName,
+  type LinuxArch,
   type PrebuiltBundleManifest,
-  type ReasoningLevel,
-  type TrialResult,
 } from "./types.ts";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_CACHE_DIR = resolve(here, "../.cache/code-bench");
+const THIS_DIR = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_CACHE_DIR = resolve(THIS_DIR, "../.cache/code-bench");
 
-function parseArgs(argv: readonly string[]): Record<string, string | boolean> {
-  const args: Record<string, string | boolean> = {};
-  for (let i = 0; i < argv.length; i++) {
-    const token = argv[i]!;
-    if (!token.startsWith("--")) continue;
-    const key = token.slice(2);
+interface ParsedArgs {
+  readonly flags: Record<string, string | boolean>;
+}
+
+function parseArgs(argv: readonly string[]): ParsedArgs {
+  const flags: Record<string, string | boolean> = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]!;
+    if (!arg.startsWith("--")) continue;
+    const eq = arg.indexOf("=");
+    if (eq > 0) {
+      flags[arg.slice(2, eq)] = arg.slice(eq + 1);
+      continue;
+    }
+    const key = arg.slice(2);
     const next = argv[i + 1];
-    if (next === undefined || next.startsWith("--")) {
-      args[key] = true;
+    if (next && !next.startsWith("--")) {
+      flags[key] = next;
+      i += 1;
     } else {
-      args[key] = next;
-      i++;
+      flags[key] = true;
     }
   }
-  return args;
+  return { flags };
 }
 
-function asString(args: Record<string, string | boolean>, key: string, fallback?: string): string {
-  const value = args[key];
-  if (typeof value === "string" && value.length > 0) return value;
-  if (fallback !== undefined) return fallback;
-  throw new Error(`Missing required argument --${key}`);
+function strFlag(flags: ParsedArgs["flags"], key: string, fallback?: string): string | undefined {
+  const val = flags[key];
+  return typeof val === "string" && val.length > 0 ? val : fallback;
 }
 
-function parseDataset(value: string): DatasetName {
+function numFlag(flags: ParsedArgs["flags"], key: string, fallback: number): number {
+  const raw = strFlag(flags, key);
+  if (!raw) return fallback;
+  const num = Number(raw);
+  if (!Number.isFinite(num) || num <= 0) {
+    throw new Error(`Invalid numeric value for --${key}: ${raw}`);
+  }
+  return Math.floor(num);
+}
+
+function parseDataset(raw: string | undefined): DatasetName {
+  const value = raw ?? "swe-lean";
   if ((SUPPORTED_DATASETS as readonly string[]).includes(value)) return value as DatasetName;
-  throw new Error(
-    `Unsupported --dataset "${value}". Expected one of: ${SUPPORTED_DATASETS.join(", ")}`,
-  );
+  throw new Error(`Unsupported --dataset "${value}". Supported: ${SUPPORTED_DATASETS.join(", ")}`);
 }
 
-function parseHarnesses(value: string): HarnessName[] {
-  const list = [...new Set(value.split(/[ ,]+/u).filter(Boolean))];
-  if (list.length === 0) throw new Error("--harness must name at least one harness");
-  for (const name of list) {
-    if (!(SUPPORTED_HARNESSES as readonly string[]).includes(name)) {
+function parseHarnesses(raw: string | undefined): HarnessName[] {
+  const list = (raw ?? "eve-code")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (list.length === 0) throw new Error("At least one harness is required.");
+  const seen = new Set<HarnessName>();
+  for (const item of list) {
+    if (!(SUPPORTED_HARNESSES as readonly string[]).includes(item)) {
       throw new Error(
-        `Unsupported harness "${name}". Expected one of: ${SUPPORTED_HARNESSES.join(", ")}`,
+        `Unsupported harness "${item}". Supported: ${SUPPORTED_HARNESSES.join(", ")}`,
       );
     }
+    seen.add(item as HarnessName);
   }
-  return list as HarnessName[];
+  return [...seen];
 }
 
-function parseReasoning(value: string): ReasoningLevel {
-  if (value === "low" || value === "medium" || value === "high") return value;
-  throw new Error(`Unsupported --reasoning "${value}". Expected low, medium, or high.`);
-}
-
-function parseExecution(value: string): ExecutionMode {
-  if (value === "local" || value === "vercel-sandbox") return value;
-  throw new Error(`Unsupported --execution "${value}". Expected local or vercel-sandbox.`);
-}
-
-function forwardCredentials(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const key of ["AI_GATEWAY_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]) {
-    if (process.env[key]) env[key] = process.env[key]!;
-  }
-  return env;
-}
-
-async function prepareHarness(
-  harness: HarnessName,
-  options: {
-    readonly cacheDir: string;
-    readonly model: string;
-    readonly reasoning: ReasoningLevel;
-  },
-): Promise<HarnessBundle> {
-  if (harness === "eve-code") {
-    return await prepareEveCodeHarness(options);
-  }
-  return await preparePeerHarness({ harness, ...options });
-}
-
-function bundleFromManifest(
+function resolveRelDirs(
   cacheDir: string,
-  entry: PrebuiltBundleManifest[HarnessName],
-): HarnessBundle {
-  if (!entry) throw new Error("Missing prebuilt bundle manifest entry");
-  const dir = join(cacheDir, entry.bundleRelDir);
-  const archDirs = entry.archRelDirs
-    ? {
-        x64: join(cacheDir, entry.archRelDirs.x64),
-        arm64: join(cacheDir, entry.archRelDirs.arm64),
-      }
-    : undefined;
-  if (entry.harness === "eve-code") {
-    return {
-      harness: "eve-code",
-      version: entry.version,
-      dir,
-      archDirs,
-      command: (ctx) => `exec '${ctx.installDir}/arch/node' '${ctx.installDir}/app/runner.mjs'`,
-      env: (ctx) => ({
-        EVE_PROJECT_DIR: `${ctx.installDir}/app`,
-        EVE_INSTRUCTION_PATH: ctx.instructionPath,
-        EVE_AGENT_LOGS_DIR: ctx.logsDir,
-        CODE_BENCH_TASK_CONTAINER: "1",
-        CODE_BENCH_TASK_WORKDIR: ctx.taskWorkdir,
-        EVE_CODE_BENCH_MODEL: ctx.model,
-        EVE_AGENT_TIMEOUT_MS: String(ctx.agentTimeoutMs),
-      }),
-    };
-  }
-  return {
-    harness: entry.harness,
-    version: entry.version,
-    dir,
-    archDirs,
-    command: (ctx) => `exec '${ctx.installDir}/arch/node' '${ctx.installDir}/runner.mjs'`,
-    env: (ctx) => ({
-      CODE_BENCH_INSTALL_DIR: ctx.installDir,
-      CODE_BENCH_INSTRUCTION_PATH: ctx.instructionPath,
-      CODE_BENCH_LOGS_DIR: ctx.logsDir,
-      CODE_BENCH_MODEL: ctx.model,
-      CODE_BENCH_REASONING: ctx.reasoning,
-      CODE_BENCH_TIMEOUT_MS: String(ctx.agentTimeoutMs),
-    }),
-  };
+  relDirs: Partial<Record<LinuxArch, string>> | undefined,
+): Record<LinuxArch, string> | undefined {
+  if (!relDirs) return undefined;
+  const out = {} as Record<LinuxArch, string>;
+  if (relDirs.x64) out.x64 = join(cacheDir, relDirs.x64);
+  if (relDirs.arm64) out.arm64 = join(cacheDir, relDirs.arm64);
+  return out;
 }
 
-async function runWorkerMode(args: Record<string, string | boolean>): Promise<void> {
-  const dataset = parseDataset(asString(args, "dataset"));
-  const harness = parseHarnesses(asString(args, "harness"))[0]!;
-  const taskName = asString(args, "task");
-  const attempt = Number(asString(args, "attempt", "1"));
-  const model = asString(args, "model");
-  const reasoning = parseReasoning(asString(args, "reasoning", "high"));
-  const cacheDir = resolve(asString(args, "cache-dir"));
-  const outputDir = resolve(asString(args, "output"));
+async function runWorkerMode(flags: ParsedArgs["flags"]): Promise<void> {
+  const dataset = parseDataset(strFlag(flags, "dataset"));
+  const harnesses = parseHarnesses(strFlag(flags, "harness"));
+  const harness = harnesses[0]!;
+  const taskFilter = strFlag(flags, "task");
+  const attempt = numFlag(flags, "attempt", 1);
+  const model = strFlag(flags, "model") ?? "anthropic/claude-sonnet-5.5";
+  const reasoning = strFlag(flags, "reasoning") ?? "high";
+  const cacheDir = resolve(strFlag(flags, "cache") ?? DEFAULT_CACHE_DIR);
+  const outputDir = resolve(strFlag(flags, "output") ?? "/tmp/trial-out");
 
-  const tasks = await loadDatasetTasks(dataset, cacheDir, taskName);
-  const task = tasks[0]!;
   const manifest = JSON.parse(
     await readFile(join(cacheDir, "bundles.json"), "utf8"),
   ) as PrebuiltBundleManifest;
-  const bundle = bundleFromManifest(cacheDir, manifest[harness]);
+  const entry = manifest.bundles[harness];
+  if (!entry) throw new Error(`Bundle manifest missing harness ${harness}`);
+
+  const nodeDirs = resolveRelDirs(cacheDir, manifest.nodeRelDirs);
+  if (!nodeDirs) throw new Error("Bundle manifest missing nodeRelDirs");
+
+  const bundle: HarnessBundle = {
+    harness: entry.harness,
+    version: entry.version,
+    dir: entry.bundleRelDir ? join(cacheDir, entry.bundleRelDir) : undefined,
+    archDirs: resolveRelDirs(cacheDir, entry.archRelDirs),
+  };
+
+  const tasks = await loadDatasetTasks(dataset, cacheDir, taskFilter);
+  const task = tasks[0];
+  if (!task) throw new Error(`Task not found: ${taskFilter}`);
 
   await runDockerTrial({
     task,
     attempt,
     bundle,
+    nodeDirs,
     model,
     reasoning,
     trialDir: outputDir,
@@ -174,104 +143,62 @@ async function runWorkerMode(args: Record<string, string | boolean>): Promise<vo
   });
 }
 
-async function runLocalTrials(input: {
-  readonly options: BenchmarkRunOptions;
-  readonly tasks: Awaited<ReturnType<typeof loadDatasetTasks>>;
-  readonly bundles: ReadonlyMap<HarnessName, HarnessBundle>;
-}): Promise<TrialResult[]> {
-  const { options, tasks, bundles } = input;
-  const forwardEnv = forwardCredentials();
-  const queue: Array<{ harness: HarnessName; task: (typeof tasks)[number]; attempt: number }> = [];
-  for (const harness of options.harnesses) {
-    for (const task of tasks) {
-      for (let attempt = 1; attempt <= options.attempts; attempt++) {
-        queue.push({ harness, task, attempt });
-      }
-    }
+async function clearPreviousOutputs(outputDir: string): Promise<void> {
+  await mkdir(outputDir, { recursive: true });
+  for (const name of ["trials", "report.json", "report.md", "comment.md"]) {
+    await rm(join(outputDir, name), { recursive: true, force: true });
   }
-
-  const results: TrialResult[] = [];
-  let nextIdx = 0;
-  let done = 0;
-  const total = queue.length;
-
-  const worker = async () => {
-    while (nextIdx < queue.length) {
-      const job = queue[nextIdx++]!;
-      const bundle = bundles.get(job.harness)!;
-      const trialDir = join(
-        options.outputDir,
-        "trials",
-        job.harness,
-        job.task.name,
-        String(job.attempt),
-      );
-      const result = await runDockerTrial({
-        task: job.task,
-        attempt: job.attempt,
-        bundle,
-        model: options.model,
-        reasoning: options.reasoning,
-        trialDir,
-        forwardEnv,
-      });
-      results.push(result);
-      done++;
-      const mark =
-        result.reward === 1
-          ? "resolved"
-          : result.reward === 0
-            ? "reward 0"
-            : `error (${result.error ?? "no reward"})`;
-      console.log(
-        `[${done}/${total}] ${job.harness}/${job.task.name}#${job.attempt}  ${mark}  ${Math.round(result.agent.durationMs / 1000)}s`,
-      );
-    }
-  };
-
-  await Promise.all(
-    Array.from({ length: Math.min(options.concurrency, queue.length) }, () => worker()),
-  );
-  return results;
 }
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
-  if (args.worker === true) {
-    await runWorkerMode(args);
+  const { flags } = parseArgs(process.argv.slice(2));
+
+  if (flags.help) {
+    console.log(
+      [
+        "Usage: pnpm --filter @eve-internal/benchmarks code-bench [options]",
+        "",
+        "  --dataset <swe-lean|deepswe-lean>         Dataset to run (default: swe-lean)",
+        "  --harness <eve-code,opencode,pi,fx>       Comma-separated harnesses (default: eve-code)",
+        "  --model <provider/model>                  Model ID (default: anthropic/claude-sonnet-5.5)",
+        "  --reasoning <none|low|medium|high|xhigh>  Reasoning effort (default: high)",
+        "  --attempts <n>                            Attempts per task (default: 3)",
+        "  --concurrency <n>                         Parallel trials (default: 4)",
+        "  --execution <local|vercel-sandbox>        Execution backend (default: local)",
+        "  --task <name[,name]>                      Filter to specific task(s)",
+        "  --output <dir>                            Output directory (default: benchmark-results)",
+        "  --cache <dir>                             Cache directory",
+        "  --source-sha <sha>                        Source commit SHA for report metadata",
+        "  --run-url <url>                           CI run URL for report metadata",
+      ].join("\n"),
+    );
     return;
   }
 
-  if (args["publish-comment"] === true) {
-    const prNumber = Number(asString(args, "pr"));
-    await publishPrComment({
-      commentPath: resolve(asString(args, "comment")),
-      token: process.env.GITHUB_TOKEN ?? "",
-      repository: asString(args, "repository", process.env.GITHUB_REPOSITORY),
-      prNumber,
-    });
+  if (flags.worker) {
+    await runWorkerMode(flags);
     return;
   }
 
-  const dataset = parseDataset(asString(args, "dataset", "deepswe-lean"));
-  const harnesses = parseHarnesses(asString(args, "harness", "eve-code,opencode,pi,fx"));
-  const model = asString(args, "model", "anthropic/claude-sonnet-5.5");
-  const reasoning = parseReasoning(
-    asString(args, "reasoning", dataset === "deepswe-lean" ? "high" : "low"),
-  );
-  const attempts = Number(asString(args, "attempts", dataset === "deepswe-lean" ? "3" : "5"));
-  const concurrency = Number(asString(args, "concurrency", "4"));
-  const execution = parseExecution(asString(args, "execution", "local"));
-  const outputDir = resolve(asString(args, "output", "benchmark-results"));
-  const cacheDir = resolve(asString(args, "cache-dir", DEFAULT_CACHE_DIR));
-  const taskFilter = typeof args.task === "string" ? args.task : undefined;
-  const sourceSha = typeof args.sha === "string" ? args.sha : (process.env.GITHUB_SHA ?? undefined);
+  const dataset = parseDataset(strFlag(flags, "dataset"));
+  const harnesses = parseHarnesses(strFlag(flags, "harness"));
+  const model = strFlag(flags, "model") ?? "anthropic/claude-sonnet-5.5";
+  const reasoning = strFlag(flags, "reasoning") ?? (dataset === "swe-lean" ? "low" : "high");
+  const attempts = numFlag(flags, "attempts", dataset === "swe-lean" ? 5 : 3);
+  const concurrency = numFlag(flags, "concurrency", 4);
+  const execution = (strFlag(flags, "execution") ?? "local") as ExecutionMode;
+  if (execution !== "local" && execution !== "vercel-sandbox") {
+    throw new Error(`Unsupported --execution "${execution}". Use "local" or "vercel-sandbox".`);
+  }
+  const outputDir = resolve(strFlag(flags, "output") ?? "benchmark-results");
+  const cacheDir = resolve(strFlag(flags, "cache") ?? DEFAULT_CACHE_DIR);
+  const taskFilter = strFlag(flags, "task");
+  const sourceSha = strFlag(flags, "sha") ?? strFlag(flags, "source-sha") ?? process.env.GITHUB_SHA;
   const runUrl =
-    typeof args["run-url"] === "string"
-      ? args["run-url"]
-      : process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
-        ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
-        : undefined;
+    strFlag(flags, "run-url") ??
+    (process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
+      ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
+      : undefined);
 
   const options: BenchmarkRunOptions = {
     dataset,
@@ -287,41 +214,78 @@ async function main(): Promise<void> {
     runUrl,
   };
 
-  await rm(outputDir, { recursive: true, force: true });
-  await mkdir(outputDir, { recursive: true });
-  await mkdir(cacheDir, { recursive: true });
-
   console.log(
-    `[code-bench] dataset=${dataset} harnesses=${harnesses.join(",")} model=${model} reasoning=${reasoning} attempts=${attempts} execution=${execution}`,
+    `Loading ${dataset} tasks and preparing ${harnesses.join(", ")} for ${model} (reasoning=${reasoning})...`,
   );
-  const tasks = await loadDatasetTasks(dataset, cacheDir, taskFilter);
+  const [tasks, nodeDirs] = await Promise.all([
+    loadDatasetTasks(dataset, cacheDir, taskFilter),
+    ensureNodeRuntime(cacheDir),
+  ]);
+
   const bundles = new Map<HarnessName, HarnessBundle>();
-  const versions: Partial<Record<HarnessName, string>> = {};
   for (const harness of harnesses) {
-    const bundle = await prepareHarness(harness, { cacheDir, model, reasoning });
-    bundles.set(harness, bundle);
+    if (harness === "eve-code") {
+      bundles.set(harness, await prepareEveCodeHarness({ cacheDir, model, reasoning }));
+    } else {
+      bundles.set(harness, await preparePeerHarness({ harness, cacheDir }));
+    }
+  }
+
+  const versions: Partial<Record<HarnessName, string>> = {};
+  for (const [harness, bundle] of bundles) {
     versions[harness] = bundle.version;
   }
 
-  const trials =
-    execution === "vercel-sandbox"
-      ? await (
-          await import("./vercel-sandbox.ts")
-        ).runOnVercelSandboxes({
-          options,
-          tasks,
-          bundles,
-          cacheDir,
-        })
-      : await runLocalTrials({ options, tasks, bundles });
+  await clearPreviousOutputs(outputDir);
 
+  let writeChain = Promise.resolve();
+  const persistProgress = (completed: readonly import("./types.ts").TrialResult[]) => {
+    const snapshot = [...completed];
+    writeChain = writeChain
+      .then(() =>
+        writeReportFiles(outputDir, buildReport({ options, tasks, trials: snapshot, versions })),
+      )
+      .catch(() => {});
+    return writeChain;
+  };
+
+  let trials;
+  if (execution === "vercel-sandbox") {
+    const { runOnVercelSandboxes } = await import("./vercel-sandbox.ts");
+    trials = await runOnVercelSandboxes({
+      runOptions: options,
+      tasks,
+      cacheDir,
+      nodeDirs,
+      bundles,
+      onTrialComplete: persistProgress,
+    });
+  } else {
+    const forwardEnv = forwardCredentials();
+    trials = await runTrialPool({
+      runOptions: options,
+      tasks,
+      onTrialComplete: persistProgress,
+      execute: (job) =>
+        runDockerTrial({
+          task: job.task,
+          attempt: job.attempt,
+          bundle: bundles.get(job.harness)!,
+          nodeDirs,
+          model: options.model,
+          reasoning: options.reasoning,
+          trialDir: job.trialDir,
+          forwardEnv,
+        }),
+    });
+  }
+
+  await writeChain;
   const report = buildReport({ options, tasks, trials, versions });
   await writeReportFiles(outputDir, report);
-  console.log(`[code-bench] Done (${report.status}). Report written to ${outputDir}`);
-  if (report.status === "incomplete") {
-    const failed = trials.filter((t) => t.reward === null);
-    console.error(`[code-bench] ${failed.length} trial(s) did not produce a reward.`);
-    process.exitCode = 1;
+  console.log(`Report written to ${join(outputDir, "report.md")}`);
+  if (trials.length > 0 && trials.every((t) => t.reward === null)) {
+    throw new Error("All benchmark trials failed without producing a verifier reward.");
   }
 }
 

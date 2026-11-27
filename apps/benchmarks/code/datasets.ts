@@ -1,316 +1,287 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import type { DatasetName, TaskCollectHook, TaskSpec } from "./types.ts";
+import { exists } from "./harnesses/node-runtime.ts";
+import type { CollectHook, DatasetName, TaskSpec } from "./types.ts";
 
-const exec = promisify(execFile);
+const execFileAsync = promisify(execFile);
 
-export interface DatasetSource {
+interface DatasetLock {
   readonly name: DatasetName;
   readonly version: string;
   readonly repoUrl: string;
   readonly commit: string;
-  readonly taskPrefix: string;
-  readonly tasks: readonly string[];
-  readonly defaultAgentTimeoutSec: number;
-  readonly injectNeutralGitIdentity: boolean;
+  readonly taskPaths: readonly string[];
+  readonly maxAgentTimeoutSec?: number;
+  readonly defaultEnv?: Readonly<Record<string, string>>;
 }
 
-export const DATASET_SOURCES: Readonly<Record<DatasetName, DatasetSource>> = {
-  "deepswe-lean": {
-    name: "deepswe-lean",
-    version: "v1",
-    repoUrl: "https://github.com/datacurve-ai/deep-swe.git",
-    commit: "0b9fabbb63b9104d678fe965e1632f2dd9eaa2ea",
-    taskPrefix: "tasks",
-    tasks: [
-      "dateutil-rfc5545-timezone-interop",
-      "tengo-destructuring-bindings",
-      "testem-per-launcher-reports",
-      "anko-typed-variable-bindings",
-      "sql-formatter-bigquery-pipe-formatting",
-      "sqlite-utils-safe-import-checkpoints",
-      "go-genai-streamed-function-args",
-      "prometheus-typed-label-sorting",
-      "cliffy-config-file-parsing",
-      "returns-validated-error-accumulation",
-      "bandit-incremental-cache-control",
-      "mnamer-daemon-watch-lifecycle",
-    ],
-    defaultAgentTimeoutSec: 1200,
-    injectNeutralGitIdentity: true,
-  },
+export const DATASET_LOCKS: Readonly<Record<DatasetName, DatasetLock>> = {
   "swe-lean": {
     name: "swe-lean",
     version: "v4",
     repoUrl: "https://github.com/harbor-framework/terminal-bench-2-1.git",
     commit: "320a8be8b625ee8eb46481f7a397648d7d085775",
-    taskPrefix: "",
-    tasks: [
+    taskPaths: [
       "cancel-async-tasks",
       "git-multibranch",
       "sanitize-git-repo",
       "log-summary-date-ranges",
     ],
-    defaultAgentTimeoutSec: 600,
-    injectNeutralGitIdentity: false,
+  },
+  "deepswe-lean": {
+    name: "deepswe-lean",
+    version: "v1",
+    repoUrl: "https://github.com/datacurve-ai/deep-swe.git",
+    commit: "0b9fabbb63b9104d678fe965e1632f2dd9eaa2ea",
+    taskPaths: [
+      "tasks/dateutil-rfc5545-timezone-interop",
+      "tasks/tengo-destructuring-bindings",
+      "tasks/testem-per-launcher-reports",
+      "tasks/anko-typed-variable-bindings",
+      "tasks/sql-formatter-bigquery-pipe-formatting",
+      "tasks/sqlite-utils-safe-import-checkpoints",
+      "tasks/go-genai-streamed-function-args",
+      "tasks/prometheus-typed-label-sorting",
+      "tasks/cliffy-config-file-parsing",
+      "tasks/returns-validated-error-accumulation",
+      "tasks/bandit-incremental-cache-control",
+      "tasks/mnamer-daemon-watch-lifecycle",
+    ],
+    maxAgentTimeoutSec: 1200,
+    defaultEnv: {
+      GIT_AUTHOR_NAME: "eve-bench",
+      GIT_AUTHOR_EMAIL: "eve-bench@localhost",
+      GIT_COMMITTER_NAME: "eve-bench",
+      GIT_COMMITTER_EMAIL: "eve-bench@localhost",
+    },
   },
 };
 
-const NEUTRAL_GIT_ENV: Readonly<Record<string, string>> = {
-  GIT_AUTHOR_NAME: "code-bench",
-  GIT_AUTHOR_EMAIL: "code-bench@localhost",
-  GIT_COMMITTER_NAME: "code-bench",
-  GIT_COMMITTER_EMAIL: "code-bench@localhost",
-};
+type TomlValue = string | number | boolean | TomlTable | TomlTable[];
+type TomlTable = { [key: string]: TomlValue };
 
-/**
- * Minimal TOML parser covering the subset used by Harbor / DeepSWE `task.toml` files:
- * `[section]`, `[[array.of.tables]]`, strings, numbers, booleans, and string arrays.
- */
-export function parseTaskToml(source: string): Record<string, unknown> {
-  const root: Record<string, unknown> = {};
-  let current: Record<string, unknown> = root;
+function parseTaskToml(source: string): TomlTable {
+  const root: TomlTable = {};
+  let current: TomlTable = root;
   const lines = source.split(/\r?\n/u);
+  let i = 0;
 
-  for (let i = 0; i < lines.length; i++) {
-    const raw = stripComment(lines[i] ?? "").trim();
-    if (!raw) continue;
+  while (i < lines.length) {
+    const rawLine = stripTomlComment(lines[i] ?? "").trim();
+    i += 1;
+    if (!rawLine) continue;
 
-    if (raw.startsWith("[[") && raw.endsWith("]]")) {
-      const path = raw.slice(2, -2).trim().split(".");
+    if (rawLine.startsWith("[[") && rawLine.endsWith("]]")) {
+      const path = rawLine.slice(2, -2).trim().split(".");
       current = ensureArrayTable(root, path);
       continue;
     }
-    if (raw.startsWith("[") && raw.endsWith("]")) {
-      const path = raw.slice(1, -1).trim().split(".");
+
+    if (rawLine.startsWith("[") && rawLine.endsWith("]")) {
+      const path = rawLine.slice(1, -1).trim().split(".");
       current = ensureTable(root, path);
       continue;
     }
 
-    const eq = raw.indexOf("=");
-    if (eq === -1) continue;
-    const key = raw.slice(0, eq).trim().replace(/^"|"$/gu, "");
-    let valueText = raw.slice(eq + 1).trim();
+    const eqIndex = rawLine.indexOf("=");
+    if (eqIndex <= 0) continue;
 
-    while (valueText.startsWith("[") && !isBalancedBrackets(valueText) && i + 1 < lines.length) {
-      i++;
-      valueText += ` ${stripComment(lines[i] ?? "").trim()}`;
+    const key = rawLine
+      .slice(0, eqIndex)
+      .trim()
+      .replace(/^["']|["']$/gu, "");
+    let valueStr = rawLine.slice(eqIndex + 1).trim();
+
+    if (valueStr.startsWith("[")) {
+      while (!isBalancedBrackets(valueStr) && i < lines.length) {
+        valueStr += " " + stripTomlComment(lines[i] ?? "").trim();
+        i += 1;
+      }
+      continue;
     }
 
-    current[key] = parseTomlValue(valueText);
+    const parsed = parseScalarTomlValue(valueStr);
+    if (parsed !== undefined) current[key] = parsed;
   }
+
   return root;
 }
 
-function stripComment(line: string): string {
-  let inQuotes = false;
-  let quote = "";
+function stripTomlComment(line: string): string {
+  let inSingle = false;
+  let inDouble = false;
   let escaped = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]!;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
     if (escaped) {
       escaped = false;
       continue;
     }
-    if (inQuotes) {
-      if (ch === "\\" && quote === '"') escaped = true;
-      else if (ch === quote) inQuotes = false;
+    if (inDouble && ch === "\\") {
+      escaped = true;
       continue;
     }
-    if (ch === '"' || ch === "'") {
-      inQuotes = true;
-      quote = ch;
-    } else if (ch === "#") {
-      return line.slice(0, i);
-    }
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle) inDouble = !inDouble;
+    else if (ch === "#" && !inSingle && !inDouble) return line.slice(0, i);
   }
   return line;
 }
 
-function isBalancedBrackets(text: string): boolean {
+function isBalancedBrackets(input: string): boolean {
   let depth = 0;
-  let inQuotes = false;
+  let inSingle = false;
+  let inDouble = false;
   let escaped = false;
-  for (const ch of text) {
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
     if (escaped) {
       escaped = false;
       continue;
     }
-    if (inQuotes) {
-      if (ch === "\\") escaped = true;
-      else if (ch === '"') inQuotes = false;
+    if (inDouble && ch === "\\") {
+      escaped = true;
       continue;
     }
-    if (ch === '"') inQuotes = true;
-    else if (ch === "[") depth++;
-    else if (ch === "]") depth--;
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle) inDouble = !inDouble;
+    else if (!inSingle && !inDouble) {
+      if (ch === "[") depth += 1;
+      else if (ch === "]") depth -= 1;
+    }
   }
   return depth <= 0;
 }
 
-function parseTomlValue(raw: string): unknown {
-  if (raw === "true") return true;
-  if (raw === "false") return false;
-  if (/^-?\d+(?:\.\d+)?$/u.test(raw)) return Number(raw);
-  if (raw.startsWith('"') && raw.endsWith('"')) {
-    return JSON.parse(raw);
+function parseScalarTomlValue(raw: string): string | number | boolean | undefined {
+  const value = raw.trim();
+  if (value === "true") return true;
+  if (value === "false") return false;
+  if (value.startsWith('"') && value.endsWith('"')) {
+    return JSON.parse(value) as string;
   }
-  if (raw.startsWith("'") && raw.endsWith("'")) {
-    return raw.slice(1, -1);
+  if (value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1);
   }
-  if (raw.startsWith("[") && raw.endsWith("]")) {
-    const inner = raw.slice(1, -1).trim();
-    if (!inner) return [];
-    const items: unknown[] = [];
-    let token = "";
-    let inQuotes = false;
-    let escaped = false;
-    for (const ch of inner) {
-      if (escaped) {
-        token += ch;
-        escaped = false;
-        continue;
-      }
-      if (inQuotes) {
-        token += ch;
-        if (ch === "\\") escaped = true;
-        else if (ch === '"') inQuotes = false;
-        continue;
-      }
-      if (ch === '"') {
-        inQuotes = true;
-        token += ch;
-      } else if (ch === ",") {
-        if (token.trim()) items.push(parseTomlValue(token.trim()));
-        token = "";
-      } else {
-        token += ch;
-      }
-    }
-    if (token.trim()) items.push(parseTomlValue(token.trim()));
-    return items;
+  if (/^[+-]?\d+(?:\.\d+)?$/u.test(value)) {
+    return Number(value);
   }
-  return raw;
+  return undefined;
 }
 
-function ensureTable(
-  root: Record<string, unknown>,
-  path: readonly string[],
-): Record<string, unknown> {
+function ensureTable(root: TomlTable, path: readonly string[]): TomlTable {
   let cursor = root;
   for (const part of path) {
-    const existing = cursor[part];
-    if (typeof existing !== "object" || existing === null || Array.isArray(existing)) {
-      cursor[part] = {};
+    const key = part.trim().replace(/^["']|["']$/gu, "");
+    const existing = cursor[key];
+    if (existing && typeof existing === "object" && !Array.isArray(existing)) {
+      cursor = existing;
+    } else {
+      const next: TomlTable = {};
+      cursor[key] = next;
+      cursor = next;
     }
-    cursor = cursor[part] as Record<string, unknown>;
   }
   return cursor;
 }
 
-function ensureArrayTable(
-  root: Record<string, unknown>,
-  path: readonly string[],
-): Record<string, unknown> {
+function ensureArrayTable(root: TomlTable, path: readonly string[]): TomlTable {
   const parent = ensureTable(root, path.slice(0, -1));
-  const key = path.at(-1)!;
-  if (!Array.isArray(parent[key])) parent[key] = [];
-  const next: Record<string, unknown> = {};
-  (parent[key] as unknown[]).push(next);
-  return next;
+  const key = path[path.length - 1]!.trim().replace(/^["']|["']$/gu, "");
+  const existing = parent[key];
+  const list: TomlTable[] = Array.isArray(existing) ? existing : [];
+  if (!Array.isArray(existing)) parent[key] = list;
+  const entry: TomlTable = {};
+  list.push(entry);
+  return entry;
 }
 
-async function ensureDatasetCheckout(source: DatasetSource, cacheDir: string): Promise<string> {
-  const repoDir = join(cacheDir, "datasets", `${source.name}-${source.commit.slice(0, 12)}`);
-  const marker = join(repoDir, ".synced");
-  const exists = await stat(marker).then(
-    () => true,
-    () => false,
-  );
-  if (exists) return repoDir;
+function asTable(value: TomlValue | undefined): TomlTable {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function asNumber(value: TomlValue | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+async function ensureDatasetCheckout(dataset: DatasetName, cacheDir: string): Promise<string> {
+  const lock = DATASET_LOCKS[dataset];
+  const repoDir = join(cacheDir, "datasets", `${dataset}-${lock.commit.slice(0, 12)}`);
+  const marker = join(repoDir, ".ready");
+  if (await exists(marker)) {
+    return repoDir;
+  }
 
   await mkdir(repoDir, { recursive: true });
-  await exec("git", ["init", "--quiet"], { cwd: repoDir });
-  await exec("git", ["remote", "remove", "origin"], { cwd: repoDir }).catch(() => {});
-  await exec("git", ["remote", "add", "origin", source.repoUrl], { cwd: repoDir });
-  await exec("git", ["fetch", "--quiet", "--depth=1", "origin", source.commit], {
-    cwd: repoDir,
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  await exec("git", ["checkout", "--quiet", "--detach", "FETCH_HEAD"], { cwd: repoDir });
-  const { stdout } = await exec("git", ["rev-parse", "HEAD"], { cwd: repoDir });
-  if (stdout.trim() !== source.commit) {
-    throw new Error(
-      `Dataset ${source.name} checked out ${stdout.trim()}, expected ${source.commit}`,
-    );
+  const git = (args: readonly string[]) =>
+    execFileAsync("git", [...args], { cwd: repoDir, maxBuffer: 16 * 1024 * 1024 });
+
+  if (!(await exists(join(repoDir, ".git")))) {
+    await git(["init", "-q"]);
+    await git(["remote", "add", "origin", lock.repoUrl]);
   }
-  const { writeFile } = await import("node:fs/promises");
-  await writeFile(marker, `${source.commit}\n`);
+  await git(["fetch", "--depth", "1", "origin", lock.commit]);
+  await git(["checkout", "--force", "FETCH_HEAD"]);
+  await writeFile(marker, `${lock.commit}\n`);
   return repoDir;
 }
 
-export async function loadTaskFromDir(
-  dataset: DatasetName,
-  taskName: string,
-  dir: string,
-): Promise<TaskSpec> {
-  const source = DATASET_SOURCES[dataset];
-  const [tomlRaw, instruction] = await Promise.all([
-    readFile(join(dir, "task.toml"), "utf8"),
-    readFile(join(dir, "instruction.md"), "utf8"),
-  ]);
-  const parsed = parseTaskToml(tomlRaw);
-  const environment = (parsed.environment ?? {}) as Record<string, unknown>;
-  const agent = (parsed.agent ?? {}) as Record<string, unknown>;
-  const verifier = (parsed.verifier ?? {}) as Record<string, unknown>;
+export async function loadTaskFromDir(dataset: DatasetName, taskDir: string): Promise<TaskSpec> {
+  const lock = DATASET_LOCKS[dataset];
+  const name = taskDir.split("/").filter(Boolean).pop()!;
+  const tomlPath = join(taskDir, "task.toml");
+  const parsed = parseTaskToml(await readFile(tomlPath, "utf8"));
 
-  const rawAgentTimeout =
-    typeof agent.timeout_sec === "number" ? agent.timeout_sec : source.defaultAgentTimeoutSec;
-  const agentTimeoutSec = Math.min(rawAgentTimeout, source.defaultAgentTimeoutSec);
-  const verifierTimeoutSec = typeof verifier.timeout_sec === "number" ? verifier.timeout_sec : 600;
-  const dockerImage = typeof environment.docker_image === "string" ? environment.docker_image : "";
-  const envTable = (environment.env ?? {}) as Record<string, unknown>;
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(envTable)) {
-    if (typeof value === "string") env[key] = value;
-  }
-  if (source.injectNeutralGitIdentity) {
-    Object.assign(env, NEUTRAL_GIT_ENV);
+  const agentTable = asTable(parsed.agent);
+  const verifierTable = asTable(parsed.verifier);
+  const envTable = asTable(parsed.environment);
+  const envVarsTable = asTable(envTable.env);
+
+  const rawAgentTimeout = asNumber(agentTable.timeout_sec, 600);
+  const agentTimeoutSec =
+    lock.maxAgentTimeoutSec !== undefined
+      ? Math.min(rawAgentTimeout, lock.maxAgentTimeoutSec)
+      : rawAgentTimeout;
+  const verifierTimeoutSec = asNumber(verifierTable.timeout_sec, 600);
+  const separateVerifier = verifierTable.environment_mode === "separate";
+
+  const env: Record<string, string> = { ...lock.defaultEnv };
+  for (const [key, val] of Object.entries(envVarsTable)) {
+    if (typeof val === "string") env[key] = val;
   }
 
-  const collectHooks: TaskCollectHook[] = Array.isArray(verifier.collect)
-    ? verifier.collect
-        .filter(
-          (entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null,
-        )
-        .map((entry) => ({
-          command: String(entry.command ?? ""),
-          timeoutSec: typeof entry.timeout_sec === "number" ? entry.timeout_sec : 300,
-        }))
-        .filter((entry) => entry.command.length > 0)
-    : [];
+  const collectHooks: CollectHook[] = [];
+  if (Array.isArray(verifierTable.collect)) {
+    for (const item of verifierTable.collect) {
+      if (item && typeof item === "object" && typeof item.command === "string") {
+        collectHooks.push({
+          command: item.command,
+          timeoutSec: asNumber(item.timeout_sec, 300),
+        });
+      }
+    }
+  }
 
-  const artifacts = Array.isArray(parsed.artifacts)
-    ? parsed.artifacts.filter((item): item is string => typeof item === "string")
-    : [];
+  const dockerImage = typeof envTable.docker_image === "string" ? envTable.docker_image : undefined;
 
   return {
-    name: taskName,
+    name,
     dataset,
-    dir,
-    instruction,
+    dir: taskDir,
+    instructionPath: join(taskDir, "instruction.md"),
+    testsDir: join(taskDir, "tests"),
+    environmentDir: join(taskDir, "environment"),
     dockerImage,
     agentTimeoutSec,
     verifierTimeoutSec,
-    separateVerifier: verifier.environment_mode === "separate",
-    collectHooks,
-    artifacts,
+    separateVerifier,
+    cpus: Math.max(1, Math.round(asNumber(envTable.cpus, 2))),
+    memoryMb: Math.max(512, Math.round(asNumber(envTable.memory_mb, 4096))),
     env,
-    cpus: typeof environment.cpus === "number" ? environment.cpus : 2,
-    memoryMb: typeof environment.memory_mb === "number" ? environment.memory_mb : 4096,
+    collectHooks,
   };
 }
 
@@ -319,22 +290,27 @@ export async function loadDatasetTasks(
   cacheDir: string,
   taskFilter?: string,
 ): Promise<TaskSpec[]> {
-  const source = DATASET_SOURCES[dataset];
-  const selected = taskFilter
-    ? source.tasks.filter((name) => name === taskFilter)
-    : [...source.tasks];
-  if (selected.length === 0) {
-    throw new Error(
-      `Task "${taskFilter}" is not in ${dataset}. Available: ${source.tasks.join(", ")}`,
-    );
+  const lock = DATASET_LOCKS[dataset];
+  const repoDir = await ensureDatasetCheckout(dataset, cacheDir);
+  const wanted = taskFilter
+    ? new Set(
+        taskFilter
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      )
+    : null;
+
+  const tasks: TaskSpec[] = [];
+  for (const relPath of lock.taskPaths) {
+    const taskDir = join(repoDir, relPath);
+    const task = await loadTaskFromDir(dataset, taskDir);
+    if (wanted && !wanted.has(task.name)) continue;
+    tasks.push(task);
   }
-  const repoDir = await ensureDatasetCheckout(source, cacheDir);
-  return await Promise.all(
-    selected.map((name) => {
-      const taskDir = source.taskPrefix
-        ? join(repoDir, source.taskPrefix, name)
-        : join(repoDir, name);
-      return loadTaskFromDir(dataset, name, taskDir);
-    }),
-  );
+
+  if (wanted && tasks.length === 0) {
+    throw new Error(`Task filter "${taskFilter}" matched no tasks in ${dataset}.`);
+  }
+  return tasks;
 }

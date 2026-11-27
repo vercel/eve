@@ -1,60 +1,68 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { finished } from "node:stream/promises";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import type {
+  AgentOutcome,
   HarnessBundle,
-  HarnessRunContext,
-  ReasoningLevel,
-  StepOutcome,
+  LinuxArch,
   TaskSpec,
+  TokenUsage,
   TrialOverhead,
   TrialResult,
-  TrialUsage,
+  VerifierOutcome,
 } from "./types.ts";
 
-const exec = promisify(execFile);
+const execFileAsync = promisify(execFile);
 
 const INSTALL_DIR = "/installed-agent";
-const LOGS_DIR = "/logs";
+const TASK_DIR = "/task";
 const TESTS_DIR = "/tests";
+const LOGS_DIR = "/logs";
+const PEER_RUNNER_SRC = join(dirname(fileURLToPath(import.meta.url)), "harnesses/peer-runner.mjs");
 
-async function dockerRun(args: readonly string[], timeoutMs = 120_000): Promise<string> {
-  const { stdout } = await exec("docker", [...args], {
-    timeout: timeoutMs,
-    maxBuffer: 32 * 1024 * 1024,
-  });
-  return stdout;
+const dockerCmd = (args: readonly string[], timeoutMs = 120_000) =>
+  execFileAsync("docker", [...args], { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 });
+
+async function killContainerPidFile(container: string, pidFile: string): Promise<void> {
+  const script = `pid=$(cat '${pidFile}' 2>/dev/null); if [ -n "$pid" ]; then kill -TERM -- -"$pid" "$pid" 2>/dev/null || true; sleep 1; kill -KILL -- -"$pid" "$pid" 2>/dev/null || true; fi; rm -f '${pidFile}'`;
+  await dockerCmd(["exec", container, "sh", "-c", script], 15_000).catch(() => {});
 }
 
-async function execInContainer(
-  containerId: string,
-  command: string,
-  options: {
-    readonly cwd?: string;
-    readonly env?: Readonly<Record<string, string>>;
-    readonly timeoutMs: number;
-    readonly logPath?: string;
-  },
-): Promise<StepOutcome> {
+async function execInContainer(options: {
+  readonly container: string;
+  readonly command: string;
+  readonly env?: Readonly<Record<string, string>>;
+  readonly timeoutMs: number;
+  readonly logPath?: string;
+}): Promise<{ exitCode: number; timedOut: boolean; durationMs: number }> {
   const startedAt = Date.now();
-  const args = ["exec"];
-  if (options.cwd) args.push("-w", options.cwd);
-  for (const [key, value] of Object.entries(options.env ?? {})) {
-    args.push("-e", `${key}=${value}`);
-  }
-  args.push(containerId, "sh", "-c", command);
+  const pidFile = `/tmp/.code-bench-pid-${randomUUID().slice(0, 8)}`;
+  const args = [
+    "exec",
+    ...Object.entries(options.env ?? {}).flatMap(([k, v]) => ["-e", `${k}=${v}`]),
+  ];
+  const wrapped = `echo $$ > '${pidFile}'; trap 'rm -f "${pidFile}"' EXIT; ${options.command}`;
+  args.push(
+    options.container,
+    "sh",
+    "-c",
+    `if command -v setsid >/dev/null 2>&1; then exec setsid sh -c "$1"; else exec sh -c "$1"; fi`,
+    "code-bench",
+    wrapped,
+  );
 
-  const logStream = options.logPath
-    ? createWriteStream(options.logPath, { flags: "a" })
-    : undefined;
+  const logStream = options.logPath ? createWriteStream(options.logPath) : null;
+  logStream?.on("error", () => {});
   const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
   if (logStream) {
-    child.stdout.pipe(logStream);
-    child.stderr.pipe(logStream);
+    child.stdout.pipe(logStream, { end: false });
+    child.stderr.pipe(logStream, { end: false });
   } else {
     child.stdout.resume();
     child.stderr.resume();
@@ -63,233 +71,265 @@ async function execInContainer(
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    child.kill("SIGKILL");
+    void killContainerPidFile(options.container, pidFile).finally(() => child.kill("SIGKILL"));
   }, options.timeoutMs);
 
-  const exitCode = await new Promise<number | null>((resolveExit) => {
-    child.once("close", (code) => resolveExit(code));
+  const exitCode = await new Promise<number>((resolve) => {
+    child.once("close", (code) => resolve(code ?? 1));
+    child.once("error", () => resolve(1));
   });
   clearTimeout(timer);
-  logStream?.end();
-
-  const durationMs = Date.now() - startedAt;
-  if (timedOut) return { status: "timeout", exitCode, durationMs };
-  return { status: exitCode === 0 ? "completed" : "failed", exitCode, durationMs };
-}
-
-async function copyIntoContainer(containerId: string, src: string, dest: string): Promise<void> {
-  await dockerRun(["cp", src, `${containerId}:${dest}`], 120_000);
-}
-
-async function copyFromContainer(containerId: string, src: string, dest: string): Promise<boolean> {
-  try {
-    await mkdir(dirname(dest), { recursive: true });
-    await dockerRun(["cp", `${containerId}:${src}`, dest], 120_000);
-    return true;
-  } catch {
-    return false;
+  if (timedOut) await killContainerPidFile(options.container, pidFile);
+  if (logStream) {
+    logStream.end();
+    await finished(logStream).catch(() => {});
   }
+  return { exitCode: timedOut ? 124 : exitCode, timedOut, durationMs: Date.now() - startedAt };
 }
 
-async function resolveContainerArch(containerId: string): Promise<"x64" | "arm64"> {
-  const out = (await dockerRun(["exec", containerId, "uname", "-m"], 15_000)).trim();
-  return out === "aarch64" || out === "arm64" ? "arm64" : "x64";
-}
+const copyInto = (src: string, container: string, dest: string) =>
+  dockerCmd(["cp", src, `${container}:${dest}`], 120_000);
 
-async function resolveContainerWorkdir(containerId: string): Promise<string> {
-  const out = (
-    await dockerRun(["inspect", "--format", "{{.Config.WorkingDir}}", containerId], 15_000)
-  ).trim();
-  return out || "/app";
-}
+const copyFrom = (container: string, src: string, dest: string) =>
+  dockerCmd(["cp", `${container}:${src}`, dest], 120_000).then(
+    () => true,
+    () => false,
+  );
 
-async function resolveTaskImage(task: TaskSpec): Promise<string> {
+async function ensureTaskImage(task: TaskSpec): Promise<{ image: string; builtLocally: boolean }> {
   if (task.dockerImage) {
-    await dockerRun(["pull", "--quiet", task.dockerImage], 15 * 60 * 1000);
-    return task.dockerImage;
+    await dockerCmd(["pull", task.dockerImage], 600_000);
+    return { image: task.dockerImage, builtLocally: false };
   }
   const tag = `code-bench-${task.name}:${randomUUID().slice(0, 8)}`;
-  await dockerRun(["build", "--quiet", "-t", tag, join(task.dir, "environment")], 15 * 60 * 1000);
-  return tag;
+  await dockerCmd(["build", "-t", tag, task.environmentDir], 600_000);
+  return { image: tag, builtLocally: true };
 }
 
 async function startContainer(
-  image: string,
   task: TaskSpec,
-  options: { readonly networkDisabled?: boolean } = {},
+  image: string,
+  networkNone: boolean,
 ): Promise<string> {
-  const args = ["run", "-d", "--init", `--cpus=${task.cpus}`, `--memory=${task.memoryMb}m`];
-  if (options.networkDisabled) args.push("--network=none");
-  for (const [key, value] of Object.entries(task.env)) {
-    args.push("-e", `${key}=${value}`);
-  }
-  args.push(image, "sh", "-c", "trap 'exit 0' TERM INT; sleep infinity & wait");
-  return (await dockerRun(args, 60_000)).trim();
+  const args = [
+    "run",
+    "-d",
+    "--init",
+    "--entrypoint",
+    "",
+    "--cpus",
+    String(task.cpus),
+    "--memory",
+    `${task.memoryMb}m`,
+    ...(networkNone ? ["--network", "none"] : []),
+    image,
+    "sh",
+    "-c",
+    "trap 'exit 0' TERM INT; while :; do sleep 3600 & wait $!; done",
+  ];
+  return (await dockerCmd(args, 60_000)).stdout.trim();
 }
 
-async function removeContainer(containerId: string | undefined): Promise<void> {
-  if (!containerId) return;
-  await dockerRun(["rm", "-f", containerId], 30_000).catch(() => {});
+export function parseRewardText(raw: string): { reward: number | null; error?: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { reward: null, error: "verifier wrote empty reward.txt" };
+  const num = Number(trimmed);
+  if (!Number.isFinite(num))
+    return { reward: null, error: `verifier wrote non-numeric reward.txt: ${trimmed}` };
+  if (num < 0) return { reward: null, error: `verifier exited with crash sentinel (${num})` };
+  if (num > 1) return { reward: null, error: `verifier wrote out-of-range reward (${num})` };
+  return { reward: num };
 }
 
-async function readReward(verifierDir: string): Promise<number | null> {
-  const jsonPath = join(verifierDir, "reward.json");
+async function readReward(verifierDir: string): Promise<{ reward: number | null; error?: string }> {
   try {
-    const parsed = JSON.parse(await readFile(jsonPath, "utf8")) as { reward?: unknown };
-    if (typeof parsed.reward === "number" && Number.isFinite(parsed.reward)) {
-      return parsed.reward;
+    return parseRewardText(await readFile(join(verifierDir, "reward.txt"), "utf8"));
+  } catch {}
+  try {
+    const raw = JSON.parse(await readFile(join(verifierDir, "reward.json"), "utf8")) as {
+      reward?: unknown;
+    };
+    if (typeof raw.reward === "number" && Number.isFinite(raw.reward)) {
+      return parseRewardText(String(raw.reward));
     }
   } catch {}
-  const txtPath = join(verifierDir, "reward.txt");
-  try {
-    const num = Number((await readFile(txtPath, "utf8")).trim());
-    if (Number.isFinite(num)) return num;
-  } catch {}
-  return null;
+  return { reward: null };
 }
 
 async function readAgentTelemetry(agentDir: string): Promise<{
-  readonly usage?: TrialUsage;
-  readonly overhead?: TrialOverhead;
-  readonly status?: StepOutcome["status"];
-  readonly durationMs?: number;
+  usage?: TokenUsage;
+  overhead?: TrialOverhead;
+  status?: AgentOutcome["status"];
+  error?: string;
 }> {
   try {
-    const raw = JSON.parse(await readFile(join(agentDir, "result.json"), "utf8")) as {
-      usage?: TrialUsage;
-      overhead?: TrialOverhead;
-      status?: StepOutcome["status"];
-      durationMs?: number;
+    const parsed = JSON.parse(await readFile(join(agentDir, "result.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    return {
+      usage: parsed.usage as TokenUsage | undefined,
+      overhead: parsed.overhead as TrialOverhead | undefined,
+      status: parsed.status as AgentOutcome["status"] | undefined,
+      error: typeof parsed.error === "string" ? parsed.error : undefined,
     };
-    return raw;
   } catch {
     return {};
   }
 }
 
-export async function runDockerTrial(input: {
+export async function runDockerTrial(options: {
   readonly task: TaskSpec;
   readonly attempt: number;
   readonly bundle: HarnessBundle;
+  readonly nodeDirs: Readonly<Record<LinuxArch, string>>;
   readonly model: string;
-  readonly reasoning: ReasoningLevel;
+  readonly reasoning: string;
   readonly trialDir: string;
   readonly forwardEnv: Readonly<Record<string, string>>;
 }): Promise<TrialResult> {
-  const { task, attempt, bundle, model, reasoning, trialDir, forwardEnv } = input;
+  const { task, attempt, bundle, nodeDirs, model, reasoning, trialDir, forwardEnv } = options;
   const startedAt = new Date().toISOString();
+  const agentLogsLocal = join(trialDir, "agent");
+  const verifierLogsLocal = join(trialDir, "verifier");
   await mkdir(trialDir, { recursive: true });
 
-  let agentContainer: string | undefined;
-  let verifierContainer: string | undefined;
-  let agent: StepOutcome = { status: "skipped", exitCode: null, durationMs: 0 };
-  let verifier: StepOutcome = { status: "skipped", exitCode: null, durationMs: 0 };
+  let agentContainer: string | null = null;
+  let verifierContainer: string | null = null;
+  let builtImage: string | null = null;
+  let agent: AgentOutcome = { status: "failed", exitCode: 1, durationMs: 0 };
+  let verifier: VerifierOutcome = { status: "skipped", exitCode: 1, durationMs: 0 };
   let reward: number | null = null;
   let error: string | undefined;
 
   try {
-    const image = await resolveTaskImage(task);
-    agentContainer = await startContainer(image, task);
-    const workdir = await resolveContainerWorkdir(agentContainer);
-    const arch = await resolveContainerArch(agentContainer);
+    const resolved = await ensureTaskImage(task);
+    if (resolved.builtLocally) builtImage = resolved.image;
+    agentContainer = await startContainer(task, resolved.image, false);
+    const [archOut, pwdOut] = await Promise.all([
+      dockerCmd(["exec", agentContainer, "uname", "-m"], 15_000),
+      dockerCmd(["exec", agentContainer, "pwd"], 15_000),
+    ]);
+    const arch: LinuxArch =
+      archOut.stdout.trim() === "aarch64" || archOut.stdout.trim() === "arm64" ? "arm64" : "x64";
+    const workdir = pwdOut.stdout.trim() || "/app";
 
-    await execInContainer(
-      agentContainer,
-      `mkdir -p ${INSTALL_DIR} ${INSTALL_DIR}/arch ${LOGS_DIR}/agent ${LOGS_DIR}/verifier ${LOGS_DIR}/artifacts ${TESTS_DIR}`,
-      { timeoutMs: 30_000 },
-    );
-
-    await copyIntoContainer(agentContainer, `${bundle.dir}/.`, INSTALL_DIR);
-    if (bundle.archDirs) {
-      await copyIntoContainer(agentContainer, `${bundle.archDirs[arch]}/.`, `${INSTALL_DIR}/arch`);
+    const prepRes = await execInContainer({
+      container: agentContainer,
+      command: `mkdir -p '${INSTALL_DIR}/arch' '${TASK_DIR}' '${LOGS_DIR}/agent' '${LOGS_DIR}/verifier' '${LOGS_DIR}/artifacts'`,
+      timeoutMs: 30_000,
+    });
+    if (prepRes.exitCode !== 0) {
+      throw new Error(`Failed to prepare directories inside container (exit ${prepRes.exitCode})`);
     }
-    const localInstruction = join(trialDir, "instruction.md");
-    await writeFile(localInstruction, task.instruction);
-    await copyIntoContainer(agentContainer, localInstruction, `${INSTALL_DIR}/instruction.md`);
 
-    const runCtx: HarnessRunContext = {
-      installDir: INSTALL_DIR,
-      instructionPath: `${INSTALL_DIR}/instruction.md`,
-      logsDir: `${LOGS_DIR}/agent`,
-      taskWorkdir: workdir,
-      model,
-      reasoning,
-      agentTimeoutMs: task.agentTimeoutSec * 1000,
-    };
+    if (bundle.dir) await copyInto(`${bundle.dir}/.`, agentContainer, INSTALL_DIR);
+    if (bundle.harness !== "eve-code") {
+      await copyInto(PEER_RUNNER_SRC, agentContainer, `${INSTALL_DIR}/runner.mjs`);
+    }
+    const nodeDir = nodeDirs[arch];
+    if (!nodeDir) throw new Error(`Missing Node runtime binary for container arch ${arch}`);
+    await copyInto(`${nodeDir}/node`, agentContainer, `${INSTALL_DIR}/arch/node`);
+    if (bundle.archDirs?.[arch]) {
+      await copyInto(`${bundle.archDirs[arch]}/.`, agentContainer, `${INSTALL_DIR}/arch`);
+    }
+    await copyInto(task.instructionPath, agentContainer, `${TASK_DIR}/instruction.md`);
 
-    agent = await execInContainer(agentContainer, bundle.command(runCtx), {
-      cwd: workdir,
-      env: { ...forwardEnv, ...bundle.env(runCtx) },
-      timeoutMs: task.agentTimeoutSec * 1000 + 15_000,
+    const agentRes = await execInContainer({
+      container: agentContainer,
+      command: `exec '${INSTALL_DIR}/arch/node' '${INSTALL_DIR}/runner.mjs'`,
+      env: {
+        ...task.env,
+        ...forwardEnv,
+        CODE_BENCH_HARNESS: bundle.harness,
+        CODE_BENCH_INSTALL_DIR: INSTALL_DIR,
+        CODE_BENCH_INSTRUCTION: `${TASK_DIR}/instruction.md`,
+        CODE_BENCH_LOGS_DIR: `${LOGS_DIR}/agent`,
+        CODE_BENCH_TASK_WORKDIR: workdir,
+        CODE_BENCH_MODEL: model,
+        CODE_BENCH_REASONING: reasoning,
+        CODE_BENCH_TIMEOUT_MS: String(task.agentTimeoutSec * 1000),
+      },
+      timeoutMs: (task.agentTimeoutSec + 30) * 1000,
       logPath: join(trialDir, "agent.log"),
     });
+    agent = {
+      status: agentRes.timedOut ? "timeout" : agentRes.exitCode === 0 ? "completed" : "failed",
+      exitCode: agentRes.exitCode,
+      durationMs: agentRes.durationMs,
+    };
 
     for (const hook of task.collectHooks) {
-      await execInContainer(agentContainer, hook.command, {
-        cwd: workdir,
+      const hookRes = await execInContainer({
+        container: agentContainer,
+        command: hook.command,
+        env: task.env,
         timeoutMs: hook.timeoutSec * 1000,
-        logPath: join(trialDir, "collect.log"),
       });
+      if (hookRes.exitCode !== 0 && !error) {
+        error = `collect hook failed (exit ${hookRes.exitCode}): ${hook.command.slice(0, 120)}`;
+      }
     }
 
-    await copyFromContainer(agentContainer, `${LOGS_DIR}/agent`, join(trialDir, "agent"));
+    await copyFrom(agentContainer, `${LOGS_DIR}/agent`, agentLogsLocal);
 
+    let verifyTarget = agentContainer;
     if (task.separateVerifier) {
       const localArtifacts = join(trialDir, "artifacts");
-      await copyFromContainer(agentContainer, `${LOGS_DIR}/artifacts`, localArtifacts);
-      await removeContainer(agentContainer);
-      agentContainer = undefined;
+      const copiedArtifacts = await copyFrom(
+        agentContainer,
+        `${LOGS_DIR}/artifacts`,
+        localArtifacts,
+      );
+      await dockerCmd(["rm", "-f", agentContainer], 30_000).catch(() => {});
+      agentContainer = null;
 
-      verifierContainer = await startContainer(image, task, { networkDisabled: true });
-      await execInContainer(
-        verifierContainer,
-        `mkdir -p ${LOGS_DIR}/verifier ${LOGS_DIR}/artifacts ${TESTS_DIR}`,
-        { timeoutMs: 30_000 },
-      );
-      if (
-        await stat(localArtifacts).then(
-          () => true,
-          () => false,
-        )
-      ) {
-        await copyIntoContainer(verifierContainer, `${localArtifacts}/.`, `${LOGS_DIR}/artifacts`);
+      verifierContainer = await startContainer(task, resolved.image, true);
+      verifyTarget = verifierContainer;
+      const vPrep = await execInContainer({
+        container: verifierContainer,
+        command: `mkdir -p '${TESTS_DIR}' '${LOGS_DIR}/verifier' '${LOGS_DIR}/artifacts'`,
+        timeoutMs: 30_000,
+      });
+      if (vPrep.exitCode !== 0) {
+        throw new Error(`Failed to prepare verifier container (exit ${vPrep.exitCode})`);
       }
-      await copyIntoContainer(verifierContainer, `${join(task.dir, "tests")}/.`, TESTS_DIR);
-      verifier = await execInContainer(verifierContainer, `bash ${TESTS_DIR}/test.sh`, {
-        cwd: workdir,
-        timeoutMs: task.verifierTimeoutSec * 1000,
-        logPath: join(trialDir, "verifier.log"),
-      });
-      await copyFromContainer(
-        verifierContainer,
-        `${LOGS_DIR}/verifier`,
-        join(trialDir, "verifier"),
-      );
-    } else {
-      await copyIntoContainer(agentContainer, `${join(task.dir, "tests")}/.`, TESTS_DIR);
-      verifier = await execInContainer(agentContainer, `bash ${TESTS_DIR}/test.sh`, {
-        cwd: workdir,
-        timeoutMs: task.verifierTimeoutSec * 1000,
-        logPath: join(trialDir, "verifier.log"),
-      });
-      await copyFromContainer(agentContainer, `${LOGS_DIR}/verifier`, join(trialDir, "verifier"));
+      if (copiedArtifacts) {
+        await copyInto(`${localArtifacts}/.`, verifierContainer, `${LOGS_DIR}/artifacts`);
+      }
     }
 
-    reward = await readReward(join(trialDir, "verifier"));
-  } catch (caught) {
-    error = caught instanceof Error ? caught.message : String(caught);
+    await copyInto(`${task.testsDir}/.`, verifyTarget, TESTS_DIR);
+    const verifyRes = await execInContainer({
+      container: verifyTarget,
+      command: `bash '${TESTS_DIR}/test.sh'`,
+      env: task.env,
+      timeoutMs: task.verifierTimeoutSec * 1000,
+      logPath: join(trialDir, "verifier.log"),
+    });
+    verifier = {
+      status: verifyRes.timedOut ? "timeout" : verifyRes.exitCode === 0 ? "completed" : "failed",
+      exitCode: verifyRes.exitCode,
+      durationMs: verifyRes.durationMs,
+    };
+    await copyFrom(verifyTarget, `${LOGS_DIR}/verifier`, verifierLogsLocal);
+
+    const parsedReward = await readReward(verifierLogsLocal);
+    reward = parsedReward.reward;
+    if (parsedReward.error && !error) error = parsedReward.error;
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
   } finally {
-    await removeContainer(agentContainer);
-    await removeContainer(verifierContainer);
+    if (verifierContainer) await dockerCmd(["rm", "-f", verifierContainer], 30_000).catch(() => {});
+    if (agentContainer) await dockerCmd(["rm", "-f", agentContainer], 30_000).catch(() => {});
+    if (builtImage) await dockerCmd(["rmi", "-f", builtImage], 30_000).catch(() => {});
   }
 
-  const telemetry = await readAgentTelemetry(join(trialDir, "agent"));
-  if (telemetry.status === "timeout") {
-    agent = { ...agent, status: "timeout" };
+  const telemetry = await readAgentTelemetry(agentLogsLocal);
+  if (telemetry.status === "failed" && agent.status === "completed") {
+    agent = { ...agent, status: "failed", exitCode: agent.exitCode || 1 };
   }
-  if (typeof telemetry.durationMs === "number" && telemetry.durationMs > 0) {
-    agent = { ...agent, durationMs: telemetry.durationMs };
-  }
+  if (!error && telemetry.error) error = telemetry.error;
 
   const result: TrialResult = {
     task: task.name,
@@ -305,6 +345,6 @@ export async function runDockerTrial(input: {
     startedAt,
     finishedAt: new Date().toISOString(),
   };
-  await writeFile(join(trialDir, "trial.json"), `${JSON.stringify(result, null, 2)}\n`);
+  await writeFile(join(trialDir, "trial.json"), JSON.stringify(result, null, 2) + "\n");
   return result;
 }

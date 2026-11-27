@@ -15,8 +15,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import type { HarnessBundle, HarnessRunContext, ReasoningLevel } from "../types.ts";
-import { ensureNodeRuntime } from "./node-runtime.ts";
+import type { HarnessBundle } from "../types.ts";
+import { exists } from "./node-runtime.ts";
 
 const exec = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -24,17 +24,7 @@ const REPO_ROOT = resolve(here, "../../../..");
 const EVE_CODE_DIR = join(REPO_ROOT, "packages/eve-code");
 const EVE_DIR = join(REPO_ROOT, "packages/eve");
 
-export interface EveCodeBundleFiles {
-  readonly "agent/agent.ts": string;
-  readonly "agent/instructions.md": string;
-  readonly "agent/extensions/code.ts": string;
-  readonly "agent/channels/eve.ts": string;
-  readonly "agent/sandbox.ts": string;
-  readonly "agent/tools/web_search.ts": string;
-  readonly "agent/tools/web_fetch.ts": string;
-}
-
-export function renderEveCodeAppFiles(reasoning: ReasoningLevel): EveCodeBundleFiles {
+function renderEveCodeAppFiles(reasoning: string): Record<string, string> {
   return {
     "agent/agent.ts": [
       'import { defineAgent } from "eve";',
@@ -106,13 +96,6 @@ export function renderEveCodeAppFiles(reasoning: ReasoningLevel): EveCodeBundleF
   };
 }
 
-async function exists(path: string): Promise<boolean> {
-  return stat(path).then(
-    () => true,
-    () => false,
-  );
-}
-
 async function gitShortSha(cwd: string): Promise<string> {
   try {
     const { stdout } = await exec("git", ["rev-parse", "--short=7", "HEAD"], { cwd });
@@ -154,7 +137,7 @@ async function bundleRunnerWithClient(outFile: string): Promise<void> {
 export async function prepareEveCodeHarness(options: {
   readonly cacheDir: string;
   readonly model: string;
-  readonly reasoning: ReasoningLevel;
+  readonly reasoning: string;
 }): Promise<HarnessBundle> {
   const eveBin = join(EVE_CODE_DIR, "node_modules/.bin/eve");
   if (!(await exists(join(EVE_DIR, "dist/src/index.js")))) {
@@ -191,7 +174,6 @@ export async function prepareEveCodeHarness(options: {
     .digest("hex")
     .slice(0, 16);
 
-  const archDirs = await ensureNodeRuntime(options.cacheDir);
   const dest = join(options.cacheDir, "eve-code", key);
   const readyMarker = join(dest, ".ready");
 
@@ -238,7 +220,7 @@ export async function prepareEveCodeHarness(options: {
         recursive: true,
         dereference: true,
       });
-      await bundleRunnerWithClient(join(staging, "app/runner.mjs"));
+      await bundleRunnerWithClient(join(staging, "runner.mjs"));
       await writeFile(join(staging, ".ready"), `${key}\n`);
       await mkdir(dirname(dest), { recursive: true });
       await rename(staging, dest).catch(async (error: unknown) => {
@@ -254,17 +236,5 @@ export async function prepareEveCodeHarness(options: {
     harness: "eve-code",
     version,
     dir: dest,
-    archDirs,
-    command: (ctx: HarnessRunContext) =>
-      `exec '${ctx.installDir}/arch/node' '${ctx.installDir}/app/runner.mjs'`,
-    env: (ctx: HarnessRunContext) => ({
-      EVE_PROJECT_DIR: `${ctx.installDir}/app`,
-      EVE_INSTRUCTION_PATH: ctx.instructionPath,
-      EVE_AGENT_LOGS_DIR: ctx.logsDir,
-      CODE_BENCH_TASK_CONTAINER: "1",
-      CODE_BENCH_TASK_WORKDIR: ctx.taskWorkdir,
-      EVE_CODE_BENCH_MODEL: ctx.model,
-      EVE_AGENT_TIMEOUT_MS: String(ctx.agentTimeoutMs),
-    }),
   };
 }

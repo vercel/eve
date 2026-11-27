@@ -85,7 +85,7 @@ The `eve-code` workflow benchmarks `eve-code`, `opencode`, `pi`, and [fx](https:
 | `anthropic` | `EVE_CODE_BENCH_MODEL` repository variable, default `anthropic/claude-sonnet-5.5` |
 | `openai`    | `EVE_CODE_BENCH_OPENAI_MODEL` repository variable, default `openai/gpt-6.2-sol`   |
 
-Every trial runs in its own Vercel Sandbox, up to 16 at a time. The report covers resolved tasks, latency, and token usage. It goes to the job summary, uploads as a workflow artifact, and updates the PR comment on pull requests.
+Every trial runs in its own Vercel Sandbox, up to 24 at a time. The report covers resolved tasks, latency, and token usage. It goes to the job summary, uploads as a workflow artifact, and updates the PR comment on pull requests.
 
 | Trigger                                                             | Dataset        | Models                 |
 | ------------------------------------------------------------------- | -------------- | ---------------------- |
@@ -95,7 +95,7 @@ Every trial runs in its own Vercel Sandbox, up to 16 at a time. The report cover
 | Weekly, Monday 06:00 UTC, on `main`                                 | `deepswe-lean` | both, one after other  |
 | Manual dispatch                                                     | chosen         | both, or chosen        |
 
-Vercel Sandbox limits how fast a team can allocate vCPUs, so the two families run sequentially, each with a 120-minute job limit. A newer PR head or comment cancels an older PR run; runs on `main` queue behind each other instead.
+Vercel Sandbox limits how fast a team can allocate vCPUs, so the two families run sequentially, each with a 180-minute job limit. A newer PR head or comment cancels an older PR run; runs on `main` queue behind each other instead.
 
 The DeepSWE-lean results in the docs come from the `anthropic` report of the latest weekly or dispatched run on `main`. The `Refresh docs benchmark results` job updates `apps/docs/lib/evals/eve-code-benchmark.json` on `bot/eve-code-benchmark-snapshot` and opens or updates a PR with auto-merge enabled.
 

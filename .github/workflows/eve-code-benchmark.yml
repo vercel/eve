@@ -96,7 +96,7 @@ jobs:
       contents: read
       actions: read
       pull-requests: write
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -131,7 +131,7 @@ jobs:
             --model "${{ matrix.model }}" \
             --reasoning "${{ needs.request.outputs.reasoning }}" \
             --attempts "${{ needs.request.outputs.attempts }}" \
-            --concurrency 16 \
+            --concurrency 24 \
             --execution vercel-sandbox \
             --sha "${{ needs.request.outputs.sha }}" \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
@@ -145,17 +145,43 @@ jobs:
             echo 'Benchmark execution failed before a report was written.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Update pull request comment
-        if: always() && (github.event_name == 'pull_request' || github.event_name == 'issue_comment') && needs.request.outputs.pr != ''
+        if: always() && (github.event_name == 'pull_request' || github.event_name == 'issue_comment') && needs.request.outputs.pr != '' && needs.request.outputs.agent-source == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          if [ -f "$GITHUB_WORKSPACE/benchmark-results/comment.md" ]; then
-            pnpm --filter @eve-internal/benchmarks code-bench \
-              --publish-comment \
-              --pr "${{ needs.request.outputs.pr }}" \
-              --repository "${{ github.repository }}" \
-              --comment "$GITHUB_WORKSPACE/benchmark-results/comment.md"
-          fi
+          PR_NUMBER: ${{ needs.request.outputs.pr }}
+          COMMENT_FILE: ${{ github.workspace }}/benchmark-results/comment.md
+        with:
+          script: |
+            const fs = require('node:fs');
+            if (!fs.existsSync(process.env.COMMENT_FILE)) return;
+            const body = fs.readFileSync(process.env.COMMENT_FILE, 'utf8');
+            const marker = body.split('\n')[0]?.trim();
+            if (!marker || !marker.startsWith('<!-- eve-code-bench:')) return;
+            const issue_number = Number(process.env.PR_NUMBER);
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find(
+              (c) => c.user?.type === 'Bot' && c.body?.includes(marker),
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              return;
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body,
+            });
       - name: Upload benchmark artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

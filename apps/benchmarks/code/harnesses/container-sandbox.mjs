@@ -112,10 +112,11 @@ export function taskContainerEnvironment(options = {}) {
     async onSessionEnd(ctx, _state, { signal } = {}) {
       signal?.throwIfAborted();
       const id = sessionKey(ctx);
-      await starts.get(id);
-      const connection = await connections.get(id);
-      await connection?.stop();
+      await starts.get(id)?.catch(() => {});
+      const connection = await Promise.resolve(connections.get(id)).catch(() => undefined);
       connections.delete(id);
+      starts.delete(id);
+      await connection?.stop().catch(() => {});
     },
   };
 }
@@ -130,7 +131,7 @@ function byteStream(bytes) {
 }
 
 async function writeArtifactFiles(connection, artifact) {
-  const homeDir = process.env.HOME ?? "/root";
+  const homeDir = process.env.HOME || "/root";
   const files = (artifact?.files ?? []).map((file) => {
     const isHome = file.path.startsWith("$HOME/");
     const path = isHome ? resolve(homeDir, file.path.slice(6)) : resolve(file.path);
