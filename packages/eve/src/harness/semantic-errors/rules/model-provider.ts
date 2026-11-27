@@ -70,6 +70,14 @@ export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
     hint: "Review the request against your model provider's usage policies.",
   },
   {
+    id: "model-request-prompt-flagged",
+    name: "Model request refused",
+    tags: ["model-provider", "recoverable", "refused"],
+    when: codeIs("invalid_prompt"),
+    message: "The model provider flagged this request as potentially violating its usage policy.",
+    hint: "Review the request against your model provider's usage policies.",
+  },
+  {
     id: "model-capability-unsupported",
     name: "Model capability not supported",
     tags: ["model-provider"],

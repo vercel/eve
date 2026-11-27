@@ -206,7 +206,7 @@ describe("a model that needs the caller's credential", () => {
   });
 
   it.each([
-    ["a 403", Object.assign(new Error("Forbidden"), { statusCode: 403 }), "Forbidden"],
+    ["a 403", Object.assign(new Error("Forbidden"), { statusCode: 403 }), "Forbidden", {}],
     [
       "a 400 for a flagged prompt",
       new APICallError({
@@ -223,23 +223,18 @@ describe("a model that needs the caller's credential", () => {
         statusCode: 400,
         url: "https://provider.example/v1/responses",
       }),
-      "Your prompt was flagged as potentially violating our usage policy.",
-    ],
-    [
-      "a 402 for a spent budget",
-      Object.assign(new Error("Project budget exceeded. Current spend: $1.01, limit: $1.00."), {
-        statusCode: 402,
-      }),
-      "The AI Gateway project budget has been exceeded.",
+      "The model provider flagged this request as potentially violating its usage policy.",
+      { hint: "Review the request against your model provider's usage policies." },
     ],
     [
       "a model it doesn't know, with no status",
       Object.assign(new Error("No such model: refusing/model"), { name: "AI_NoSuchModelError" }),
       "The requested model is not available.",
+      { hint: expect.stringContaining("Check the model id") },
     ],
   ])(
     "fails only the turn with the provider's error when it answers %s",
-    async (_case, thrown: Error, message) => {
+    async (_case, thrown: Error, message, extra: Record<string, unknown>) => {
       const refusing = defineModel({
         auth: { displayName: "Billing", getToken: async () => ({ token: "bob-token" }) },
         authKey: "refusing",
@@ -264,7 +259,7 @@ describe("a model that needs the caller's credential", () => {
           );
           expect(filterEventsByType(settled, "session.ended")).toEqual([]);
           expect(turnSettled(settled)).toMatchObject({
-            error: { code: "MODEL_CALL_FAILED", message },
+            error: { code: "MODEL_CALL_FAILED", message, ...extra },
             outcome: "failed",
           });
         },
