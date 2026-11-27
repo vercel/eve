@@ -63,7 +63,7 @@ The runner uses agent-eval's native Gateway harnesses: OpenCode for other provid
 for Anthropic models, and Codex for OpenAI models. Each attempt starts an isolated Vercel Sandbox,
 then installs the selected immutable canary and scaffolds with it before the coding agent starts.
 Inside a project, `eve` on PATH runs the project's installed binary; outside one, such as for `eve init`, it runs that canary.
-The starting workspace includes pinned `just-bash@3.6.0` for the local default sandbox provider and `vitest@5.0.2` for the grader.
+The starting workspace includes pinned `just-bash@3.6.0` for the local default sandbox provider and `vitest@5.1.0` for the grader.
 Scaffolded workspaces must pass typecheck and build before any model inference starts.
 
 Local runs use the `guided` treatment by default, which keeps the `AGENTS.md` and aliases generated
