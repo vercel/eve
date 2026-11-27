@@ -833,6 +833,92 @@ describe("a session's spans, from its committed lines", () => {
     expect(tree(await spans())).toEqual(["invoke_agent weather failed !", "  agent.step !"]);
   });
 
+  it.each([
+    [
+      "turn.settled",
+      ["invoke_agent weather", "agent.step"],
+      {
+        data: {
+          error: { code: "MODEL_CALL_FAILED", message: "Overloaded for alice@example.com" },
+          outcome: "failed",
+          turnId: "turn_0",
+        },
+        type: "turn.settled",
+      },
+    ],
+    [
+      "session.ended",
+      ["invoke_agent weather"],
+      {
+        data: {
+          cause: { turnId: "turn_0" },
+          error: { code: "MODEL_CALL_FAILED", message: "Overloaded for alice@example.com" },
+          outcome: "failed",
+        },
+        type: "session.ended",
+      },
+    ],
+  ])(
+    "keeps a %s failure's code, not its message, when outputs are not recorded",
+    async (_, names, ended) => {
+      const { commit, spans } = session(() => ({
+        emit: true,
+        recordInputs: false,
+        recordOutputs: false,
+      }));
+      await commit(...opening);
+      await commit(ended as SessionEvent);
+
+      const exported = await spans();
+      for (const name of names) {
+        const span = exported.find((each) => each.name === name);
+        expect(span?.attributes["error.type"]).toBe("MODEL_CALL_FAILED");
+        expect(JSON.stringify([span?.status, span?.events])).not.toContain("alice@example.com");
+      }
+    },
+  );
+
+  it("gives a tool call a failed turn cuts short the turn's code when outputs are not recorded", async () => {
+    const scopes = new Map<string, InstrumentationScope>();
+    const { commit, runTool, spans } = session(
+      () => ({ emit: true, recordInputs: false, recordOutputs: false }),
+      undefined,
+      undefined,
+      undefined,
+      [
+        {
+          name: "scopes",
+          events: { "call.requested": (event) => void scopes.set(event.callId, event.scope) },
+        },
+      ],
+    );
+    await commit(...opening);
+    await commit(requested("call_weather", "weather"));
+    let release = () => {};
+    const running = runTool(
+      {
+        callId: "call_weather",
+        idempotencyKey: "tool:call_weather",
+        scope: scopes.get("call_weather")!,
+        toolName: "weather",
+        type: "tool.call",
+      },
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    await commit(
+      turnSettled({
+        error: { code: "MODEL_CALL_FAILED", message: "Overloaded for alice@example.com" },
+        outcome: "failed",
+      }),
+    );
+    release();
+    await running;
+
+    const tool = (await spans()).find((span) => span.name === "execute_tool weather");
+    expect(tool?.attributes["error.type"]).toBe("MODEL_CALL_FAILED");
+    expect(JSON.stringify([tool?.status, tool?.events])).not.toContain("alice@example.com");
+  });
+
   it("fails the turn a failed session ends, with the session's error", async () => {
     const { commit, spans } = session();
     await commit(...opening);

@@ -201,6 +201,7 @@ function instrumentationEventsOf(
             outcome === "failed"
               ? new Error(event.data.error?.message ?? "The session failed.")
               : undefined,
+          errorCode: outcome === "failed" ? event.data.error?.code : undefined,
           idempotencyKey: session,
           outcome,
           sessionId,
@@ -231,6 +232,7 @@ function instrumentationEventsOf(
             outcome === "failed"
               ? new Error(event.data.error?.message ?? "The turn failed.")
               : undefined,
+          errorCode: outcome === "failed" ? event.data.error?.code : undefined,
           idempotencyKey: turnIdempotencyKey(sessionId, turnId),
           outcome,
           sessionId,
@@ -245,6 +247,7 @@ function instrumentationEventsOf(
       return [
         {
           error: new Error(event.data.error.message),
+          errorCode: event.data.error.code,
           idempotencyKey: attemptIdempotencyKey(scope),
           scope,
           type: "model.retried",
@@ -263,6 +266,7 @@ function instrumentationEventsOf(
       return [
         {
           error: error === undefined ? undefined : new Error(error.message),
+          errorCode: error?.code ?? failedTurnCode(line, scope.turnId, outcome),
           idempotencyKey,
           scope,
           outcome: cancelled ? "cancelled" : outcome,
@@ -312,7 +316,7 @@ function instrumentationEventsOf(
           acceptedAtMs: line.settledAtMs?.[callId],
           cause: event.data.cause,
           error: line.capturesOutputs ? error : undefined,
-          errorCode: event.data.error?.code,
+          errorCode: event.data.error?.code ?? failedTurnCode(line, scope.turnId, outcome),
           idempotencyKey,
           outcome,
           reason: event.data.reason,
@@ -429,4 +433,14 @@ function latestTurnId(view: SessionView | undefined): string | undefined {
 function turnSequence(turnId: string): number {
   const match = /^turn_(\d+)$/.exec(turnId);
   return match === null ? 0 : Number(match[1]);
+}
+
+function failedTurnCode(
+  line: { readonly view?: SessionView },
+  turnId: string | undefined,
+  outcome: string,
+): string | undefined {
+  if (outcome !== "interrupted" || turnId === undefined) return undefined;
+  const turn = line.view?.turns[turnId];
+  return turn?.outcome === "failed" ? turn.error?.code : undefined;
 }
