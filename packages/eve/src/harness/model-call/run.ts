@@ -9,8 +9,10 @@ import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import { enforceBudget, humanInputContext } from "#harness/hitl/index.js";
 import { failModelCredential, pauseForModelSignIn } from "./credential-failure.js";
-import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
-import { changeHistory } from "#harness/session-machine/history.js";
+import {
+  isScopedAuthorizationRequiredError,
+  type ScopedAuthorizationRequiredError,
+} from "#runtime/connections/scoped-authorization.js";
 import {
   requestRun as requestRunFact,
   startRun as startRunFact,
@@ -38,7 +40,7 @@ import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
 import { type CredentialedModel, credentialedModel } from "./credential.js";
-import { credentialErrorIn, ModelCredentialFailure, refusesCredential } from "./errors.js";
+import { credentialErrorIn, type ModelCredentialFailure, refusesCredential } from "./errors.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
@@ -82,10 +84,7 @@ export async function runModelStep(
     generation,
     model: resolved.model,
     renewCredential: resolved.renew,
-    newRun: async () => {
-      const next = await requestRun(step, prompt);
-      if (next !== undefined) throw new Error("eve couldn't request the replacement model run.");
-    },
+    newRun: async () => await requestReplacementRun(step, prompt),
     startRun: async (attempt) => await startRun(step, attempt),
     projectedMessages,
     turnMessages: input.turn.messages,
@@ -98,20 +97,9 @@ export async function runModelStep(
     throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
     const credentialError = credentialErrorIn(error);
-    if (credentialError !== undefined) {
-      if (generation.interrupted) return caller.steered();
-      if (credentialError instanceof ModelCredentialFailure)
-        return await failModelCredential(
-          step,
-          credentialError.code,
-          credentialError.cause,
-          credentialError.scoped,
-        );
-      return await pauseForModelSignIn(step, credentialError, async () => {
-        const messages = await caller.abandon();
-        step.session = changeHistory(step.session, { extend: messages });
-      });
-    }
+    if (credentialError !== undefined && generation.interrupted) return caller.steered();
+    if (credentialError !== undefined)
+      return await failOrPauseForSignIn(step, credentialError, async () => await caller.abandon());
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
     if (generation.interrupted) return caller.steered();
@@ -169,7 +157,7 @@ async function resolveModel(
   } catch (error) {
     const credentialError = credentialErrorIn(error);
     if (credentialError === undefined) throw error;
-    return { failed: await failOrAsk(step, credentialError) };
+    return { failed: await failOrPauseForSignIn(step, credentialError) };
   }
 }
 
@@ -185,6 +173,11 @@ async function requestRun(step: Step, prompt: Prompt): Promise<StepResult | unde
   return undefined;
 }
 
+async function requestReplacementRun(step: Step, prompt: Prompt): Promise<void> {
+  const failed = await requestRun(step, prompt);
+  if (failed !== undefined) throw new Error("eve couldn't request the replacement model run.");
+}
+
 async function startRun(step: Step, attempt: number): Promise<void> {
   const runId = step.position().runId;
   if (runId === undefined) return;
@@ -192,10 +185,12 @@ async function startRun(step: Step, attempt: number): Promise<void> {
   await step.apply(startRunFact({ attempt, modelId, runId }));
 }
 
-async function failOrAsk(
+async function failOrPauseForSignIn(
   step: Step,
-  error: NonNullable<ReturnType<typeof credentialErrorIn>>,
+  error: ModelCredentialFailure | ScopedAuthorizationRequiredError,
+  beforePause?: () => Promise<void>,
 ): Promise<StepResult> {
-  if (isScopedAuthorizationRequiredError(error)) return await pauseForModelSignIn(step, error);
+  if (isScopedAuthorizationRequiredError(error))
+    return await pauseForModelSignIn(step, error, beforePause);
   return await failModelCredential(step, error.code, error.cause, error.scoped);
 }
