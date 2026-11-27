@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import type { CompiledDefinition } from "../compiler/manifest.js";
 import type { CompiledModuleMap } from "../compiler/module-map.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "../compiler/manifest.js";
-import { resolveDefinition } from "./resolve-definition.js";
+import { defineDynamicSchedules } from "../public/schedules/subscription.js";
+import { readScheduleCollectionSource } from "../shared/schedule-collection-definition.js";
+import { resolveDefinition, resolveScheduleCollection } from "./resolve-definition.js";
 
 async function resolveHookDefinition(definition: CompiledDefinition, moduleMap: CompiledModuleMap) {
   const resolved = await resolveDefinition(definition, {
@@ -114,5 +117,33 @@ describe("resolveDefinition for a hook", () => {
     await expect(resolveHookDefinition(definition, moduleMap)).rejects.toThrow(
       /events\.session\.started/,
     );
+  });
+});
+
+describe("resolveScheduleCollection", () => {
+  it("resolves one shared schedule module for two applications without cross-stamping", async () => {
+    const shared = defineDynamicSchedules({
+      description: "shared wake-ups",
+      inputSchema: z.object({ note: z.string() }),
+      run: async () => {},
+      auth: async () => ({ type: "service", id: "wake" }) as never,
+    });
+    const moduleMap = buildModuleMap("schedules/wake.ts", { default: shared });
+    const collectionFor = (application: string) => ({
+      application,
+      logicalPath: "schedules/wake.ts",
+      name: "wake",
+      providerKind: "vercel",
+      sourceId: "schedules/wake.ts",
+      sourceKind: "module" as const,
+    });
+    const scope = { moduleMap, nodeId: undefined, toolFiles: new Set<string>() };
+
+    const planner = await resolveScheduleCollection(collectionFor("planner"), scope);
+    const copy = await resolveScheduleCollection(collectionFor("copy"), scope);
+
+    expect(readScheduleCollectionSource(planner.definition)?.application).toBe("planner");
+    expect(readScheduleCollectionSource(copy.definition)?.application).toBe("copy");
+    expect(readScheduleCollectionSource(shared)).toBeUndefined();
   });
 });

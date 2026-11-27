@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { loadContext } from "#context/container.js";
+import { getCurrentAuth } from "#context/accessors.js";
 import { AuthKey, ScheduleIdKey, ScheduleInstanceKey, OccurrenceIdKey } from "#context/keys.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -196,5 +197,24 @@ describe("buildCallbackContext – getSandbox", () => {
     });
 
     expect(deletions).toBe(1);
+  });
+});
+
+describe("getCurrentAuth", () => {
+  it("is undefined outside eve-run code and the caller's auth inside it, across async boundaries", async () => {
+    expect(getCurrentAuth()).toBeUndefined();
+    const runtime = await createTestRuntime();
+    const seen = await runtime.runAsSession(undefined, async () => {
+      loadContext().set(AuthKey, {
+        attributes: { workspace: "ws_a" },
+        authenticator: "fixture",
+        principalId: "p",
+        principalType: "service",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return getCurrentAuth();
+    });
+    expect(seen?.attributes.workspace).toBe("ws_a");
+    expect(getCurrentAuth()).toBeUndefined();
   });
 });

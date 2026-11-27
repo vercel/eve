@@ -1,3 +1,4 @@
+export { getCurrentAuth } from "#context/accessors.js";
 export type {
   SessionAuth,
   SessionAuthContext,
