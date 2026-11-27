@@ -190,6 +190,23 @@ describe("createHostSpec", () => {
     expect(spec(dynamic, PRODUCTION).runtimePlugins).not.toContain("local-schedules");
   });
 
+  it("adds the local dev schedule timer under standalone eve dev only for an agent with a dynamic collection", async () => {
+    vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", undefined);
+    vi.stubEnv("VERCEL_SCHEDULE_DEV_API_VERSION", undefined);
+    const staticOnly = await compileAgent();
+    expect(spec(staticOnly, DEVELOPMENT).runtimePlugins).not.toContain("local-dev-schedules");
+    const dynamic = await compileAgent({ dynamicSchedules: true });
+    expect(dynamic.scheduleCollections?.map(({ providerKind }) => providerKind)).toEqual([
+      "local-dev",
+    ]);
+    const development = spec(dynamic, DEVELOPMENT).runtimePlugins;
+    expect(development).toContain("local-dev-schedules");
+    expect(development).not.toContain("local-schedules");
+    expect(spec(dynamic, PRODUCTION).runtimePlugins).not.toContain("local-dev-schedules");
+  });
+
   it("lets authored instrumentation replace local tracing and wrap the server entry", async () => {
     for (const mode of [DEVELOPMENT, PRODUCTION]) {
       const instrumented = spec(await compileAgent(), mode, { instrumented: true });

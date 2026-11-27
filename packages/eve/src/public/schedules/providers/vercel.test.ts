@@ -200,21 +200,4 @@ describe("vercelScheduleProvider", () => {
       vercelScheduleProvider().validateExpression?.({ type: "single", at: "2026-10-01T12:00" }),
     ).not.toThrow();
   });
-
-  it("uses the shared in-memory provider under standalone eve dev", async () => {
-    vi.stubEnv("EVE_DEV", "1");
-    vi.stubEnv("NODE_ENV", "development");
-    vi.stubEnv("VERCEL_SCHEDULE_DEV_API_VERSION", undefined);
-    const provider = vercelScheduleProvider();
-    expect(provider.kind).toBe("in-memory");
-
-    await provider.create(context, {
-      expression: { type: "single", at: "2026-10-01T12:00:00", timezone: "UTC" },
-      payload: "Review PRs",
-      name: "review-prs",
-    });
-    await expect(
-      provider.get({ ...context, operationId: "get" }, "review-prs"),
-    ).resolves.toMatchObject({ name: "review-prs" });
-  });
 });

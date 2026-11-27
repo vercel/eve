@@ -75,7 +75,7 @@ describe("normalizeScheduleCollectionDefinition", () => {
     ).not.toThrow();
   });
 
-  it("defaults to Vercel and preserves an explicit provider override", () => {
+  it("defaults to Vercel, the local dev provider under EVE_DEV, and preserves an explicit provider override", () => {
     vi.stubEnv("EVE_DEV", "");
     try {
       const { provider, ...options } = valid;
@@ -85,7 +85,7 @@ describe("normalizeScheduleCollectionDefinition", () => {
       );
       expect(defineDynamicSchedules({ ...options, provider }).provider).toBe(provider);
       vi.stubEnv("EVE_DEV", "1");
-      expect(defineDynamicSchedules({ ...options }).provider.kind).toBe("in-memory");
+      expect(defineDynamicSchedules({ ...options }).provider.kind).toBe("local-dev");
     } finally {
       vi.unstubAllEnvs();
     }

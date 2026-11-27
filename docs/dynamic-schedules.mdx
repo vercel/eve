@@ -240,12 +240,12 @@ Updates, `enable`, `disable`, and `delete` affect future runs, not callbacks alr
 
 The built-in `vercelScheduleProvider()` uses Vercel Schedules in production and supports local development:
 
-| Environment                                      | Storage and delivery                                                                                           |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| Vercel deployments                               | Hosted Vercel Schedules delivers occurrences through Vercel Queues.                                            |
-| `eve dev` without local Vercel Schedules         | Process-local storage, with no background clock. Call `invoke` through the client to dispatch an occurrence.   |
-| `vc dev` with local Schedules and Queues support | Local Vercel Schedules stores timing, and eve delivers due occurrences automatically through local Queues.     |
-| Self-hosted production                           | [Create a provider](#create-a-provider-for-your-use-case) for your application's storage and scheduling needs. |
+| Environment                                      | Storage and delivery                                                                                                                        |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vercel deployments                               | Hosted Vercel Schedules delivers occurrences through Vercel Queues.                                                                         |
+| `eve dev` without local Vercel Schedules         | Schedules persist in `.eve/schedules.db` in the app root, and eve fires each due occurrence from the dev server, including after a restart. |
+| `vc dev` with local Schedules and Queues support | Local Vercel Schedules stores timing, and eve delivers due occurrences automatically through local Queues.                                  |
+| Self-hosted production                           | [Create a provider](#create-a-provider-for-your-use-case) for your application's storage and scheduling needs.                              |
 
 On Vercel, schedules belong to the deployment's track, selected by its OIDC credentials. Preview schedules are separate from production schedules. Occurrences run on the track's current leader deployment, so schedules follow updates within that track.
 
@@ -310,7 +310,7 @@ A retried callback doesn't start its sessions again. eve keys each send by the o
 | `null`                      | The occurrence fails without a retry, and `run` isn't called.                                                                         |
 | A thrown error              | The provider retries the occurrence. Throw when a lookup fails, so an outage doesn't read as a denial.                                |
 
-A result of any other shape also fails the occurrence without a retry. On Vercel and under `vc dev`, `occurrence.failed` reports these failures. With process-local storage, the `invoke` call that dispatched the occurrence rejects instead. Type a standalone `auth` helper's return value as `ScheduleAuthResult`, exported from `eve/schedules`.
+A result of any other shape also fails the occurrence without a retry. On Vercel, under `vc dev`, and under `eve dev`, `occurrence.failed` reports these failures. With process-local storage from `eve/schedules/testing`, the `invoke` call that dispatched the occurrence rejects instead. Type a standalone `auth` helper's return value as `ScheduleAuthResult`, exported from `eve/schedules`.
 
 A denial fails only the current occurrence; a recurring schedule keeps firing and failing. When a denial is permanent, such as a removed account, stop the schedule through `schedule` before you return `null`:
 

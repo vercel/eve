@@ -2,13 +2,17 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type {
   ScheduleCreate,
-  ScheduleExpression,
   ScheduleList,
   SchedulePatch,
   SchedulePage,
   ScheduleProvider,
   ScheduleRecord,
 } from "#public/schedules/subscription.js";
+import {
+  decodeScheduleCursor,
+  normalizeScheduleExpression,
+  normalizeScheduleLimit,
+} from "#internal/schedules/provider-utils.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
 
 /**
@@ -49,7 +53,7 @@ export function inMemoryScheduleProvider(
         const timestamp = now().getTime();
         const record: StoredSchedule = {
           createdAt: timestamp,
-          expression: normalizeExpression(schedule.expression),
+          expression: normalizeScheduleExpression(schedule.expression),
           payload: schedule.payload,
           name: schedule.name,
           scheduleId: allocateScheduleId(context, schedule.name, scheduleIds, usedScheduleIds),
@@ -70,8 +74,8 @@ export function inMemoryScheduleProvider(
         .filter(([key]) => key.startsWith(collectionPrefix(context)))
         .map(([, record]) => publicRecord(record))
         .sort((left, right) => left.name.localeCompare(right.name));
-      const start = decodeCursor(query.cursor);
-      const limit = normalizeLimit(query.limit);
+      const start = decodeScheduleCursor(query.cursor);
+      const limit = normalizeScheduleLimit(query.limit);
       const data = records.slice(start, start + limit);
       const next = start + data.length;
       return { cursor: next < records.length ? String(next) : null, data };
@@ -95,7 +99,7 @@ export function inMemoryScheduleProvider(
           expression:
             patch.expression === undefined
               ? current.expression
-              : normalizeExpression(patch.expression),
+              : normalizeScheduleExpression(patch.expression),
           payload: patch.payload === undefined ? current.payload : patch.payload,
           updatedAt: now().getTime(),
         };
@@ -200,29 +204,6 @@ function allocateOccurrenceId(operationId: string, usedOccurrenceIds: Set<string
   return occurrenceId;
 }
 
-function normalizeExpression(expression: ScheduleExpression): ScheduleExpression {
-  if (expression.type === "cron") {
-    const normalized: {
-      type: "cron";
-      cron: string;
-      timezone?: string;
-      jitter?: number;
-    } = {
-      type: "cron",
-      cron: expression.cron.trim().replace(/\s+/gu, " "),
-    };
-    if (expression.timezone !== undefined) normalized.timezone = expression.timezone;
-    if (expression.jitter !== undefined) normalized.jitter = expression.jitter;
-    return normalized;
-  }
-  const normalized: { type: "single"; at: string; timezone?: string } = {
-    type: "single",
-    at: expression.at,
-  };
-  if (expression.timezone !== undefined) normalized.timezone = expression.timezone;
-  return normalized;
-}
-
 function publicRecord(record: StoredSchedule): ScheduleRecord {
   return {
     createdAt: record.createdAt,
@@ -258,19 +239,4 @@ function allocateScheduleId(
   scheduleIds.set(key, scheduleId);
   usedScheduleIds.add(scheduleId);
   return scheduleId;
-}
-
-function normalizeLimit(limit: number | undefined): number {
-  if (limit === undefined) return 20;
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
-    throw new Error("Schedule list limit must be an integer from 1 through 100.");
-  }
-  return limit;
-}
-
-function decodeCursor(cursor: string | undefined): number {
-  if (cursor === undefined) return 0;
-  const value = Number(cursor);
-  if (!Number.isSafeInteger(value) || value < 0) throw new Error("Invalid schedule cursor.");
-  return value;
 }

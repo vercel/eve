@@ -30,3 +30,12 @@ export function hasVercelScheduleCollections(manifest: {
     false
   );
 }
+
+export function hasLocalDevScheduleCollections(manifest: {
+  readonly scheduleCollections?: readonly { readonly providerKind: string }[];
+}): boolean {
+  return (
+    manifest.scheduleCollections?.some((collection) => collection.providerKind === "local-dev") ??
+    false
+  );
+}
