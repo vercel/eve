@@ -31,7 +31,8 @@ const githubBase = {
   broker: fn<GitHubLeaseBroker>(),
   /**
    * Resolves the person each turn publishes for. Their
-   * `Co-authored-by` trailer ends signed commits and new pull requests.
+   * `Co-authored-by` trailer ends signed commits and new pull requests, and
+   * their `commentFooter`, when set, ends comments, reviews, and replies.
    */
   attribution: fn<GitHubAttribution>().optional(),
 };
