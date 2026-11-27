@@ -2,7 +2,16 @@ import { defineHook } from "eve/hooks";
 import { call, turn } from "eve/events";
 import { isScheduleAuth } from "eve/schedules";
 import extension from "../extension.js";
-import { feedbackScope, fingerprint, observe } from "../lib/observe.js";
+import {
+  feedbackScope,
+  fingerprint,
+  observeBatch,
+  pseudonymizeObservation,
+} from "../lib/observe.js";
+import type { Observation } from "../lib/types.js";
+
+const MAX_BUFFERED_OBSERVATIONS = 200;
+const FLUSH_TIMEOUT_MS = 15_000;
 
 let warned = false;
 function warnTelemetry() {
@@ -13,6 +22,29 @@ function warnTelemetry() {
   );
 }
 
+function flushSignal(): AbortSignal {
+  return AbortSignal.timeout(FLUSH_TIMEOUT_MS);
+}
+
+function drainPendingObservations(): Observation[] {
+  const buffered = feedbackScope.get().pendingObservations ?? [];
+  if (buffered.length === 0) return [];
+  feedbackScope.update((state) => ({ ...state, pendingObservations: [] }));
+  return buffered;
+}
+
+async function flushObservations(extra?: Observation, signal?: AbortSignal): Promise<void> {
+  const batch = drainPendingObservations();
+  if (extra !== undefined) batch.push(extra);
+  if (batch.length === 0) return;
+  try {
+    const outcome = await observeBatch(extension.config, batch, { signal });
+    if (outcome === "failed") warnTelemetry();
+  } catch {
+    warnTelemetry();
+  }
+}
+
 export default defineHook({
   events: {
     "turn.started"(event) {
@@ -20,6 +52,7 @@ export default defineHook({
         state.current === event.data.turnId
           ? state
           : {
+              ...state,
               current: event.data.turnId,
               previous: state.current,
               currentTargets: [],
@@ -31,18 +64,11 @@ export default defineHook({
       if (ctx.session.parent || isScheduleAuth(ctx.session.auth.current)) return;
       const observed = call(ctx.view, event.data.callId);
       if (!observed || observed.kind !== "tool" || !observed.turnId) return;
-      feedbackScope.update((state) =>
-        state.current === observed.turnId
-          ? {
-              ...state,
-              currentTargets: [...new Set([...state.currentTargets, observed.name])].slice(0, 100),
-            }
-          : state,
-      );
+      let sample: Observation | undefined;
       try {
         const started = observed.startedAt ? Date.parse(observed.startedAt) : undefined;
         const ended = observed.endedAt ? Date.parse(observed.endedAt) : ctx.now.getTime();
-        await observe(extension.config, {
+        sample = pseudonymizeObservation(extension.config, {
           id: `${ctx.session.id}:${ctx.occurrence.idempotencyKey}`,
           at: ended,
           session: ctx.session.id,
@@ -63,14 +89,47 @@ export default defineHook({
       } catch {
         warnTelemetry();
       }
+      const writeImmediately = event.data.outcome !== "completed";
+      let shouldFlush = false;
+      feedbackScope.update((state) => {
+        const nextPending =
+          sample === undefined || writeImmediately
+            ? (state.pendingObservations ?? [])
+            : [...(state.pendingObservations ?? []), sample];
+        if (nextPending.length >= MAX_BUFFERED_OBSERVATIONS) shouldFlush = true;
+        return {
+          ...state,
+          ...(state.current === observed.turnId && {
+            currentTargets: [...new Set([...state.currentTargets, observed.name])].slice(0, 100),
+          }),
+          pendingObservations: nextPending,
+        };
+      });
+      if (writeImmediately && sample !== undefined) {
+        try {
+          const outcome = await observeBatch(extension.config, [sample], {
+            signal: flushSignal(),
+          });
+          if (outcome === "failed") warnTelemetry();
+        } catch {
+          warnTelemetry();
+        }
+      } else if (shouldFlush) {
+        await flushObservations(undefined, flushSignal());
+      }
+    },
+    async "turn.paused"(_event, ctx) {
+      if (ctx.session.parent || isScheduleAuth(ctx.session.auth.current)) return;
+      await flushObservations(undefined, flushSignal());
     },
     async "turn.settled"(event, ctx) {
       if (ctx.session.parent || isScheduleAuth(ctx.session.auth.current)) return;
       const observed = turn(ctx.view, event.data.turnId);
+      let sample: Observation | undefined;
       try {
         const started = observed?.startedAt ? Date.parse(observed.startedAt) : undefined;
         const ended = observed?.endedAt ? Date.parse(observed.endedAt) : ctx.now.getTime();
-        await observe(extension.config, {
+        sample = pseudonymizeObservation(extension.config, {
           id: `${ctx.session.id}:${ctx.occurrence.idempotencyKey}`,
           at: ended,
           session: ctx.session.id,
@@ -87,6 +146,7 @@ export default defineHook({
       } catch {
         warnTelemetry();
       }
+      await flushObservations(sample, flushSignal());
     },
   },
 });
