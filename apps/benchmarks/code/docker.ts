@@ -48,14 +48,7 @@ async function execInContainer(options: {
     ...Object.entries(options.env ?? {}).flatMap(([k, v]) => ["-e", `${k}=${v}`]),
   ];
   const wrapped = `echo $$ > '${pidFile}'; trap 'rm -f "${pidFile}"' EXIT; ${options.command}`;
-  args.push(
-    options.container,
-    "sh",
-    "-c",
-    `if command -v setsid >/dev/null 2>&1; then exec setsid sh -c "$1"; else exec sh -c "$1"; fi`,
-    "code-bench",
-    wrapped,
-  );
+  args.push(options.container, "sh", "-c", wrapped);
 
   const logStream = options.logPath ? createWriteStream(options.logPath) : null;
   logStream?.on("error", () => {});
