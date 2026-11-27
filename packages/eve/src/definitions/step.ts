@@ -61,9 +61,14 @@ export async function evaluateStepValues(step: StepSource, run: ValueRun): Promi
   await chooseModel(contributions, container);
   const draft = draftOf(contributions);
   await draft.tools();
-  await draft.system();
-  await draft.context();
-  await draft.announcements();
+  const settled = await Promise.allSettled([
+    draft.system(),
+    draft.context(),
+    draft.announcements(),
+  ]);
+  for (const result of settled) {
+    if (result.status === "rejected") throw result.reason;
+  }
 }
 
 export async function evaluateStepModel(

@@ -49,10 +49,23 @@ async function collect<F extends "announcements" | "context" | "effects" | "syst
   contributions: readonly Contribution[],
   field: F,
 ): Promise<ContributionValues[F][]> {
+  if (field === "tools") {
+    const out: ContributionValues[F][] = [];
+    for (const contribution of contributions) {
+      const value = await force(contribution[field] as Lazy<ContributionValues[F]> | undefined);
+      if (value !== undefined) out.push(value);
+    }
+    return out;
+  }
+  const results = await Promise.allSettled(
+    contributions.map((contribution) =>
+      force(contribution[field] as Lazy<ContributionValues[F]> | undefined),
+    ),
+  );
   const out: ContributionValues[F][] = [];
-  for (const contribution of contributions) {
-    const value = await force(contribution[field] as Lazy<ContributionValues[F]> | undefined);
-    if (value !== undefined) out.push(value);
+  for (const result of results) {
+    if (result.status === "rejected") throw result.reason;
+    if (result.value !== undefined) out.push(result.value);
   }
   return out;
 }
