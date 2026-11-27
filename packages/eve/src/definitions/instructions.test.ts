@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   announcedNext,
@@ -7,10 +7,17 @@ import {
   definitionSession,
 } from "#internal/testing/definition-session.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
-import { stepSystem } from "#definitions/step.js";
+import { evaluateStepValues, stepSystem } from "#definitions/step.js";
 import { restoreDefinitions } from "#definitions/kernel.js";
-import { contextStorage } from "#context/container.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import { DefaultSandbox } from "#sandbox/providers/default.js";
+import { HostSandbox } from "#sandbox/providers/host.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 
 const system = async (ctx: ReturnType<typeof definitionSession>["ctx"]) => {
   const prompt = await stepSystem({
@@ -75,5 +82,121 @@ describe("dynamic instructions", () => {
       instructions: [{ evaluate: () => ({ content: "Be brief." }), slug: "brief" }],
     });
     expect(await evaluationError(ctx)).toContain("wrap with defineInstructions()");
+  });
+});
+
+function workspaceContext(input: {
+  readonly provider: "default" | "host";
+  readonly rootEntries?: readonly string[];
+  readonly sandboxCwd?: string;
+}) {
+  const ctx = new ContextContainer();
+  const sessionId = `sess-${Math.random()}`;
+  ctx.set(SessionIdKey, sessionId);
+  ctx.set(SessionKey, {
+    auth: { current: null, initiator: null },
+    sessionId,
+  } as never);
+  const environment =
+    input.provider === "host" ? HostSandbox.environment() : DefaultSandbox.environment();
+  ctx.set(
+    SessionAgentKey,
+    fromCompiledBundle({
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: { definition: { environment, kind: "independent" } } },
+        },
+      },
+      resolvedAgent: {
+        channels: [],
+        definitions: [],
+        instructions: [
+          {
+            content: "Help the user.",
+            name: "agent",
+            owner: { kind: "application" },
+            role: "system",
+          },
+        ],
+        sandbox: { environment, kind: "independent" },
+        skills: [],
+      },
+      subagentRegistry: { dynamicResolvers: [], preparedTools: [], subagentsByName: new Map() },
+      toolRegistry: { toolsByName: new Map() },
+      turnAgent: {
+        workspaceSpec: { rootEntries: input.rootEntries ?? [] },
+      },
+    } as never),
+  );
+  enterSessionProjection(ctx, undefined);
+  const getSandbox = vi.fn(async () => ({
+    resolvePath: () => input.sandboxCwd ?? "/testbed",
+  }));
+  ctx.set(SandboxKey, { get: getSandbox } as never);
+  return { ctx, getSandbox };
+}
+
+function stubTools(...names: string[]): Map<string, HarnessToolDefinition> {
+  return new Map(
+    names.map((name) => [
+      name,
+      { description: name, inputSchema: {}, name } as HarnessToolDefinition,
+    ]),
+  );
+}
+
+describe("workspace working directory instruction", () => {
+  it("adds Current working directory: /workspace when a sandbox tool exists on an isolated provider without opening the sandbox", async () => {
+    const { ctx, getSandbox } = workspaceContext({ provider: "default" });
+    const step = {
+      config: { tools: stubTools("bash") },
+      ctx,
+      finalReplyOnly: false,
+      session: {},
+    };
+    await evaluateStepValues(step, { conversation: [] });
+    const prompt = await stepSystem(step);
+
+    expect(prompt).toContain("Current working directory: /workspace");
+    expect(getSandbox).not.toHaveBeenCalled();
+  });
+
+  it("omits Current working directory when no sandbox tools are offered", async () => {
+    const { ctx, getSandbox } = workspaceContext({ provider: "host" });
+    const step = {
+      config: { tools: stubTools("web_fetch") },
+      ctx,
+      finalReplyOnly: false,
+      session: {},
+    };
+    await evaluateStepValues(step, { conversation: [] });
+    const prompt = await stepSystem(step);
+
+    expect(prompt).not.toContain("Current working directory:");
+    expect(getSandbox).not.toHaveBeenCalled();
+  });
+
+  it("resolves and caches HostSandbox cwd once per session and combines it with workspace entries", async () => {
+    const { ctx, getSandbox } = workspaceContext({
+      provider: "host",
+      rootEntries: ["README.md"],
+      sandboxCwd: "/testbed",
+    });
+    const step = {
+      config: { tools: stubTools("read_file") },
+      ctx,
+      finalReplyOnly: false,
+      session: {},
+    };
+    await evaluateStepValues(step, { conversation: [] });
+    const first = await stepSystem(step);
+    await evaluateStepValues(step, { conversation: [] });
+    const second = await stepSystem(step);
+
+    expect(first).toContain("Current working directory: /testbed");
+    expect(first).toContain("Workspace\n- You have access to authored files");
+    expect(second).toBe(first);
+    expect(getSandbox).toHaveBeenCalledTimes(1);
   });
 });

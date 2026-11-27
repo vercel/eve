@@ -7,6 +7,7 @@ import {
   dynamicSkillAnnouncements,
 } from "#execution/skills/instructions.js";
 import { type Definition, type DefinitionContext, once } from "./definition.js";
+import { modelSkillRootOf } from "./skills.js";
 
 export const catalog: Definition = {
   contribute: (ctx) => {
@@ -33,6 +34,7 @@ export const catalog: Definition = {
                 skills: {
                   ...dynamicSkillAnnouncements(
                     [...callable.skills.values()].filter(({ source }) => source !== undefined),
+                    { skillRoot: modelSkillRootOf(ctx.container) },
                   ),
                   ...(ctx.call?.skillCatalog === undefined
                     ? {}

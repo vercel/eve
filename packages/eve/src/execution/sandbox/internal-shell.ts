@@ -22,8 +22,10 @@ export type ConnectionBoundedSpawner = (
 ) => Promise<SandboxProcess>;
 
 export interface ConnectionFastPaths {
+  readonly jobsRoot?: string;
   readonly runFast?: ConnectionCommandRunner;
   readonly runLogin?: ConnectionCommandRunner;
+  readonly skillsRoot?: string;
   readonly spawnBounded?: ConnectionBoundedSpawner;
 }
 
@@ -38,7 +40,9 @@ export type SessionCommandRunner = (
 export type SessionBoundedSpawner = (options: SandboxSpawnOptions) => Promise<SandboxProcess>;
 
 export interface SessionFastPaths {
+  readonly jobsRoot?: string;
   readonly runFast?: SessionCommandRunner;
+  readonly skillsRoot?: string;
   readonly spawnBounded?: SessionBoundedSpawner;
 }
 
@@ -67,6 +71,14 @@ export function withSessionFastPaths<Session extends object>(
   return session;
 }
 
+export function getSessionJobsRoot(sandbox: object): string | undefined {
+  return sessionFastPaths.get(sandbox)?.jobsRoot;
+}
+
+export function getSessionSkillsRoot(sandbox: object): string | undefined {
+  return sessionFastPaths.get(sandbox)?.skillsRoot;
+}
+
 export function forwardSessionFastPaths<Target extends object>(
   source: object,
   target: Target,
@@ -78,11 +90,13 @@ export function forwardSessionFastPaths<Target extends object>(
     sessionFastPaths.set(target, paths);
     return target;
   }
-  const { runFast, spawnBounded } = paths;
+  const { jobsRoot, runFast, skillsRoot, spawnBounded } = paths;
   sessionFastPaths.set(target, {
+    ...(jobsRoot !== undefined && { jobsRoot }),
     ...(runFast !== undefined && {
       runFast: (options) => runFast({ ...options, signal: wrapSignal(options.signal) }),
     }),
+    ...(skillsRoot !== undefined && { skillsRoot }),
     ...(spawnBounded !== undefined && {
       spawnBounded: (options) => spawnBounded({ ...options, signal: wrapSignal(options.signal) }),
     }),

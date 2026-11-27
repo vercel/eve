@@ -9,6 +9,7 @@ import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { defineChannel, WS } from "#public/definitions/channel.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
+import { HostSandbox } from "#sandbox/providers/host.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
 import { defineTool } from "#tools/definition.js";
@@ -25,7 +26,7 @@ type Modules = Array<NonNullable<Parameters<typeof compileFromMemory>[0]["module
 
 interface AgentVariant {
   readonly externalDependencies?: readonly string[];
-  readonly sandbox?: "just-bash" | "vercel";
+  readonly sandbox?: "host" | "just-bash" | "vercel";
   readonly tool?: "ordinary" | "workflow" | "workflow-program";
   readonly websocket?: boolean;
   readonly dynamicSchedules?: boolean;
@@ -35,7 +36,12 @@ async function compileAgent(variant: AgentVariant = {}, name = "weather-agent") 
   const agentRoot = `${APP_ROOT}/agent`;
   const modules: Modules = [];
   if (variant.sandbox !== undefined) {
-    const provider = variant.sandbox === "just-bash" ? JustBashSandbox : VercelSandbox;
+    const provider =
+      variant.sandbox === "host"
+        ? HostSandbox
+        : variant.sandbox === "just-bash"
+          ? JustBashSandbox
+          : VercelSandbox;
     modules.push({
       logicalPath: "sandbox.ts",
       loadNamespace: async () => {
@@ -234,6 +240,7 @@ describe("createHostSpec", () => {
   it.each([
     ["Vercel without a sandbox", VERCEL, undefined, true],
     ["Vercel with Vercel Sandbox", VERCEL, "vercel", true],
+    ["Vercel with host sandbox", VERCEL, "host", false],
     ["Vercel with just-bash", VERCEL, "just-bash", false],
     ["a self-hosted build", PRODUCTION, undefined, false],
     ["dev", DEVELOPMENT, undefined, false],

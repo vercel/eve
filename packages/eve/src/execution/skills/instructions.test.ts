@@ -60,6 +60,17 @@ describe("formatAvailableSkillsSection", () => {
     expect(result?.split("\n").at(-1)).toBe("- inline: Inline only");
   });
 
+  it("advertises an isolated skill root without the $HOME fallback when configured", () => {
+    const skill = createTestSkill();
+    const result = formatAvailableSkillsSection([skill], { skillRoot: "$EVE_SKILLS_DIR" });
+
+    expect(result).toContain("`$EVE_SKILLS_DIR/<skill>/`");
+    expect(result).not.toContain("$HOME");
+    expect(result).toContain(
+      "- test-skill: A test skill (path: $EVE_SKILLS_DIR/test-skill/SKILL.md)",
+    );
+  });
+
   it("always lists all skills in the menu regardless of activation state", () => {
     const s1 = createTestSkill({ logicalPath: "skills/skill-one/SKILL.md", name: "skill-one" });
     const s2 = createTestSkill({ logicalPath: "skills/skill-two/SKILL.md", name: "skill-two" });

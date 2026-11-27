@@ -1,16 +1,36 @@
 import { normalizeInstructionsDefinition } from "#internal/authored-definition/core.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
 import type { AlsContext } from "#context/container.js";
+import { SandboxKey } from "#context/keys.js";
 import type { Announcement } from "#harness/announcements.js";
 import { digestOf } from "#definitions/state.js";
 import { agentInstructionsOf, renderInstructionsBlock } from "#runtime/prompt/compose.js";
 import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedDynamicDefinition } from "#runtime/types.js";
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
+import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import { isBrandedInstructionsEntry } from "#shared/instructions-definition.js";
-import { authoredEvaluate, type Definition, section, SECTION_ORDER } from "./definition.js";
+import {
+  authoredEvaluate,
+  type Definition,
+  type DefinitionContext,
+  section,
+  SECTION_ORDER,
+} from "./definition.js";
+import { owningSandboxProviderOf } from "./skills.js";
 
 type Instruction = { readonly role: "system" | "user"; readonly content: string };
+
+const SANDBOX_TOOL_NAMES = new Set([
+  "bash",
+  "read_file",
+  "write_file",
+  "edit_file",
+  "glob",
+  "grep",
+]);
+
+const STATIC_WORKSPACE_ROOT_PROVIDERS = new Set(["default", "docker", "just-bash", "vercel"]);
 
 export const instructions: Definition = {
   contribute: ({ container }) => ({
@@ -35,18 +55,50 @@ export const instructions: Definition = {
 };
 
 export const workspace: Definition = {
-  contribute: ({ container }) => ({
-    system: () => {
-      const spec = compiledBundleOf(container)?.turnAgent?.workspaceSpec;
-      const text = spec === undefined ? undefined : createWorkspacePromptSection(spec);
-      return text === undefined
-        ? []
-        : [section("eve.workspace", text, { order: SECTION_ORDER.workspace })];
-    },
+  contribute: (ctx) => ({
+    arrange: (draft) => ({
+      system: async () => {
+        const existing = await draft.system();
+        const spec = compiledBundleOf(ctx.container)?.turnAgent?.workspaceSpec;
+        const workspaceText = spec === undefined ? undefined : createWorkspacePromptSection(spec);
+        const tools = await draft.tools();
+        const hasSandboxTool = [...tools.entries.keys()].some((name) =>
+          SANDBOX_TOOL_NAMES.has(name),
+        );
+        const cwd = hasSandboxTool ? await resolveWorkingDirectory(ctx) : undefined;
+        const parts = [
+          ...(cwd === undefined ? [] : [`Current working directory: ${cwd}`]),
+          ...(workspaceText === undefined ? [] : [workspaceText]),
+        ];
+        return parts.length === 0
+          ? existing
+          : [
+              ...existing,
+              section("eve.workspace", parts.join("\n\n"), { order: SECTION_ORDER.workspace }),
+            ];
+      },
+    }),
   }),
   id: "eve.workspace",
   label: "the agent's workspace",
 };
+
+async function resolveWorkingDirectory(ctx: DefinitionContext): Promise<string | undefined> {
+  const provider = owningSandboxProviderOf(ctx.container);
+  if (provider === undefined) return undefined;
+  if (STATIC_WORKSPACE_ROOT_PROVIDERS.has(provider)) return WORKSPACE_ROOT;
+  if (provider !== "host") return undefined;
+  const kept = await ctx.keep(async (_evaluation, previous) => {
+    if (typeof previous === "string") return { value: previous };
+    try {
+      const sandbox = await ctx.container.get(SandboxKey)?.get();
+      return sandbox == null ? null : { value: sandbox.resolvePath(".") };
+    } catch {
+      return null;
+    }
+  });
+  return typeof kept?.value === "string" ? kept.value : undefined;
+}
 
 export function instructionsDefinition(
   resolver: ResolvedDynamicDefinition<"instructions">,

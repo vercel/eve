@@ -25,7 +25,7 @@ export default defineSandbox(() => environment.open());
 - Put the file at `agent/sandbox/sandbox.ts` when the agent also has [workspace seeds](#managed-workspace-and-skills) or a Docker `Dockerfile` in `agent/sandbox/`. When the `agent/sandbox/` folder exists, put the definition there. A root `agent/sandbox.ts` beside that folder is a build error.
 - `environment.open()` starts the sandbox for the current session.
 - The selector runs until it succeeds once. After that, later workflow steps and process restarts resume the same sandbox without running the selector again.
-- Commands start and relative paths resolve from the workspace root, `/workspace` on every built-in provider.
+- Commands start and relative paths resolve from the workspace root: `/workspace` on Vercel, Docker, and just-bash, or the configured host directory on [Host Sandbox](/docs/sandbox/host).
 
 ## Use the sandbox
 
@@ -71,6 +71,7 @@ The environment you pass must match the one configured for the current sandbox.
 | [Default](/docs/sandbox/default)     | Vercel Sandbox on Vercel, Docker when reachable, and just-bash in development.              |
 | [Vercel](/docs/sandbox/vercel)       | Persistent Vercel Sandboxes, prepared snapshots, domain network policies, and Drive mounts. |
 | [Docker](/docs/sandbox/docker)       | Local containers from the default image, an existing OCI image, or a Dockerfile.            |
+| [Host](/docs/sandbox/host)           | Direct host filesystem and shell access without container or VM isolation.                  |
 | [just-bash](/docs/sandbox/just-bash) | A pure-JavaScript shell and virtual filesystem without native process isolation.            |
 
 `DefaultSandbox` accepts only `autoInstall` and `prepare` for just-bash. Use the [experimental options](/docs/sandbox/just-bash#experimental-options) of `JustBashSandbox.environment()` from `eve/sandbox/just-bash` for custom commands or filesystems.
