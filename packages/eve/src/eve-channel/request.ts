@@ -1,4 +1,6 @@
+import { sessionAuthFromResult } from "#channel/auth/result.js";
 import { internalSession } from "#channel/session.js";
+import { HttpError } from "#channel/http-error.js";
 import { MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH } from "#channel/delivery-idempotency.js";
 import { parseToolStubs } from "#tool-stubs/rules.js";
 import {
@@ -30,7 +32,7 @@ import {
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/session-http.js";
-import type { ClientContextValue } from "#eve-channel/types.js";
+import type { ClientContextValue, EveAuthResult } from "#eve-channel/types.js";
 import {
   HEARTBEAT_RECORD,
   LEASE_ENDED_RECORD,
@@ -339,6 +341,33 @@ export async function parseOptionalJsonRequest(
 export function requireSessionId(params: Readonly<Record<string, string>>): string | Response {
   const sessionId = params.sessionId;
   return sessionId || Response.json({ error: "Missing session id.", ok: false }, { status: 400 });
+}
+
+export async function requireSessionAccess(input: {
+  readonly sessionId: string;
+  readonly session: () => Session;
+  readonly authResult: EveAuthResult;
+  readonly request: Request;
+}): Promise<Response | undefined> {
+  const policy = input.authResult.sessionAccess;
+  if (policy === undefined || policy === "any") return undefined;
+  const caller = sessionAuthFromResult(input.authResult);
+  let owned: Promise<boolean> | undefined;
+  const isOwner = () => (owned ??= internalSession(input.session()).ownedBy(caller));
+  const notFound = () => Response.json({ error: "Session not found.", ok: false }, { status: 404 });
+  if (policy === "owner") return (await isOwner()) ? undefined : notFound();
+  try {
+    const allowed = await policy({
+      sessionId: input.sessionId,
+      isOwner,
+      auth: caller,
+      request: input.request,
+    });
+    return allowed ? undefined : notFound();
+  } catch (error) {
+    if (HttpError.is(error)) return error.response;
+    throw error;
+  }
 }
 
 export async function createSessionStreamResponse(

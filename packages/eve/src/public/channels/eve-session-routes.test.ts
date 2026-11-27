@@ -7,6 +7,7 @@ import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.j
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { InternalSession as Session } from "#channel/session.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import { ANONYMOUS_SESSION_AUTH_CONTEXT } from "#channel/principal-identity.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { HttpError, none, TooManyRequestsError } from "#public/channels/auth.js";
@@ -52,6 +53,7 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
     getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     hasRunnableOwner: vi.fn().mockResolvedValue(true),
+    ownedBy: vi.fn().mockResolvedValue(true),
     ...overrides,
   };
 }
@@ -165,6 +167,35 @@ describe("eve ID-addressed session routes", () => {
       expect(createSession).not.toHaveBeenCalled();
       expect(attachSession).not.toHaveBeenCalled();
       expect(onMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [undefined, 202],
+    ["any" as const, 202],
+    ["owner" as const, 404],
+  ])(
+    "when the authenticator returns sessionAccess %s a message from a non-owner answers %s",
+    async (sessionAccess, status) => {
+      const session = createFixedSession({ ownedBy: vi.fn().mockResolvedValue(false) });
+      const response = await route("POST", "/eve/v1/session/:sessionId", {
+        auth: () => ({
+          ...ANONYMOUS_SESSION_AUTH_CONTEXT,
+          ...(sessionAccess !== undefined && { sessionAccess }),
+        }),
+        onMessage: () => ({ auth: null }),
+      })(
+        new Request("https://eve.test/eve/v1/session/wrun_A", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ message: "Hello" }),
+        }),
+        createArgs(session),
+      );
+
+      expect(response.status).toBe(status);
+      expect(session.ownedBy).toHaveBeenCalledTimes(sessionAccess === "owner" ? 1 : 0);
+      expect(session.send).toHaveBeenCalledTimes(status === 202 ? 1 : 0);
     },
   );
 

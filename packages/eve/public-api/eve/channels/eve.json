@@ -10,6 +10,8 @@
   "EveMessageContext",
   "EveMessageResult",
   "EveMessageResultOrPromise",
+  "EveSessionAccessContext",
+  "EveSessionAccessPolicy",
   "EveVercelOidcOptions",
   "ForwardedAssertion",
   "MAX_MESSAGE_PARTS",
