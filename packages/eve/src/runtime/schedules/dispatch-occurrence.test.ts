@@ -85,6 +85,26 @@ describe("the schedule handle an occurrence callback receives", () => {
     },
   );
 
+  it("hands the provider the scope the schedule was created in when an occurrence fires", async () => {
+    const inner = inMemoryScheduleProvider();
+    const scopes: unknown[] = [];
+    const provider: ScheduleProvider = {
+      ...inner,
+      disable: async (context, name) => {
+        scopes.push(context.scope);
+        return await inner.disable(context, name);
+      },
+    };
+    const { client } = setup(provider, async ({ schedule }) => await schedule.disable());
+    const fired = await client.create({ name: "fired", expression, payload: { task: "a" } });
+    const context = new ContextContainer();
+    context.set(SessionAgentKey, fromCompiledBundle(bundle));
+
+    await contextStorage.run(context, () => client.invoke(fired.name));
+
+    expect(scopes).toEqual([["team", "billing"]]);
+  });
+
   it("addresses the Vercel schedule in the namespace its creator wrote it to", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");
