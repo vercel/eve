@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import { bashJobTaskWorkflowReference } from "#execution/sandbox/bash-job-reference.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
-import { runInternalCommand, spawnBoundedCommand } from "#execution/sandbox/internal-shell.js";
+import {
+  getSessionJobsRoot,
+  runInternalCommand,
+  spawnBoundedCommand,
+} from "#execution/sandbox/internal-shell.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import {
   capLineLength,
@@ -362,7 +366,7 @@ async function runCommand(
 ): Promise<BashResult> {
   signal?.throwIfAborted();
   const jobId = randomUUID().slice(0, 8);
-  const directory = `${JOB_ROOT}/${jobId}`;
+  const directory = `${getSessionJobsRoot(sandbox) ?? JOB_ROOT}/${jobId}`;
   const controller = new AbortController();
   const cancel = () => {
     controller.abort(signal?.reason);

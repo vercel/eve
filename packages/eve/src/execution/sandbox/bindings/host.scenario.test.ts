@@ -342,6 +342,26 @@ describe.skipIf(process.platform === "win32")("HostSandbox live host execution",
       await expect(abortedBash).rejects.toThrow("stop bash");
       await vi.waitFor(() => expect(isProcessAlive(bashAbortPid)).toBe(false), { timeout: 5_000 });
 
+      const bashYieldPidFile = join(workdir, "bash-yield.pid");
+      const yielded = await executeBashOnSandbox(
+        sandbox,
+        {
+          command: `sleep 60 & echo $! > ${JSON.stringify(bashYieldPidFile)}; wait`,
+          timeout: 1,
+        },
+        { onTimeout: "background" },
+      );
+      expect(yielded.status).toBe("running");
+      if (yielded.status === "running") {
+        expect(yielded.outputDirectory.startsWith(join(storagePath, "host/sessions"))).toBe(true);
+      }
+      const bashYieldPid = await waitForPidFile(bashYieldPidFile);
+      expect(isProcessAlive(bashYieldPid)).toBe(true);
+
+      await connection.stop();
+      await vi.waitFor(() => expect(isProcessAlive(bashYieldPid)).toBe(false), { timeout: 5_000 });
+      expect(existsSync(skillsDir)).toBe(true);
+
       const endPidFile = join(workdir, "end-child.pid");
       const leftover = await sandbox.spawn({
         command: `sleep 60 & echo $! > ${JSON.stringify(endPidFile)}; wait`,

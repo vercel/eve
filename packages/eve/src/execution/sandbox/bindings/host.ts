@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { constants as osConstants } from "node:os";
 import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -92,6 +92,7 @@ interface ActiveProcessGroup {
 }
 
 const activeProcessesBySession = new Map<string, Set<ActiveProcessGroup>>();
+const activeJobsDirs = new Set<string>();
 const lingeringProcessGroups = new Set<ActiveProcessGroup>();
 let lingeringReaperTimer: ReturnType<typeof setInterval> | undefined;
 let exitHookInstalled = false;
@@ -126,7 +127,15 @@ function installExitHook(): void {
         }
       }
     }
+    for (const jobsDir of activeJobsDirs) {
+      for (const pgid of readActiveJobPgidsSync(jobsDir)) {
+        try {
+          process.kill(-pgid, "SIGKILL");
+        } catch {}
+      }
+    }
     activeProcessesBySession.clear();
+    activeJobsDirs.clear();
     lingeringProcessGroups.clear();
   });
 }
@@ -205,12 +214,17 @@ export function createHostSandboxProvider(
     assertPosixHost();
     const artifact = requirePreparedHostArtifact(artifactValue);
     await assertHostDirectoryExists(cwd, { goneOnMissing });
-    const skillsDir = join(resolveHostSessionDir(context), "skills");
+    const sessionDir = resolveHostSessionDir(context);
+    const jobsDir = join(sessionDir, "jobs");
+    const skillsDir = join(sessionDir, "skills");
     await materializeHostSkills(skillsDir, artifact.skills);
+    installExitHook();
+    activeJobsDirs.add(jobsDir);
     return createHostConnection({
       cwd,
       environmentEnv: options.env,
       inheritEnv,
+      jobsDir,
       loginShell,
       runtimeEnv,
       sessionKey: sessionRegistryKey(context),
@@ -222,8 +236,11 @@ export function createHostSandboxProvider(
   return {
     async onSessionEnd(context, _state, { signal }) {
       signal?.throwIfAborted();
-      await stopSessionProcesses(sessionRegistryKey(context));
-      await rm(resolveHostSessionDir(context), { force: true, recursive: true });
+      const sessionDir = resolveHostSessionDir(context);
+      const jobsDir = join(sessionDir, "jobs");
+      await stopSessionProcesses(sessionRegistryKey(context), jobsDir);
+      activeJobsDirs.delete(jobsDir);
+      await rm(sessionDir, { force: true, recursive: true });
     },
 
     async prepare(context) {
@@ -309,14 +326,24 @@ function createHostConnection(input: {
   readonly cwd: string;
   readonly environmentEnv?: Readonly<Record<string, string | undefined>>;
   readonly inheritEnv: boolean;
+  readonly jobsDir: string;
   readonly loginShell: boolean;
   readonly runtimeEnv?: Readonly<Record<string, string | null | undefined>>;
   readonly sessionKey: string;
   readonly shell: string;
   readonly skillsDir: string;
 }): SandboxConnection {
-  const { cwd, environmentEnv, inheritEnv, loginShell, runtimeEnv, sessionKey, shell, skillsDir } =
-    input;
+  const {
+    cwd,
+    environmentEnv,
+    inheritEnv,
+    jobsDir,
+    loginShell,
+    runtimeEnv,
+    sessionKey,
+    shell,
+    skillsDir,
+  } = input;
   const primaryArgs = loginShell ? ["-lc", "--"] : ["-c", "--"];
   const bashShell = basename(shell) === "bash";
   const fastArgs = bashShell ? ["--noprofile", "--norc", "-c", "--"] : ["-c", "--"];
@@ -387,7 +414,7 @@ function createHostConnection(input: {
       });
     },
     spawn: (options) => spawnWithArgs(primaryArgs, options),
-    stop: () => stopSessionProcesses(sessionKey),
+    stop: () => stopSessionProcesses(sessionKey, jobsDir),
     async writeFiles(options: SandboxWriteFilesOptions) {
       for (const file of options.files) {
         options.signal?.throwIfAborted();
@@ -398,6 +425,7 @@ function createHostConnection(input: {
   };
 
   return withConnectionFastPaths(connection, {
+    jobsRoot: jobsDir,
     ...(bashShell || loginShell
       ? {
           async runFast(cmdOptions): Promise<SandboxCommandResult> {
@@ -561,11 +589,68 @@ function isProcessGroupAlive(pgid: number): boolean {
   }
 }
 
-async function stopSessionProcesses(sessionKey: string): Promise<void> {
+async function stopSessionProcesses(sessionKey: string, jobsDir: string): Promise<void> {
   const active = activeProcessesBySession.get(sessionKey);
-  if (active === undefined) return;
-  const entries = [...active];
-  await Promise.allSettled(entries.map((entry) => entry.kill()));
+  const entries = active === undefined ? [] : [...active];
+  await Promise.allSettled([
+    ...entries.map((entry) => entry.kill()),
+    stopActiveJobProcessGroups(jobsDir),
+  ]);
+}
+
+async function stopActiveJobProcessGroups(jobsDir: string): Promise<void> {
+  let jobEntries;
+  try {
+    jobEntries = await readdir(jobsDir, { withFileTypes: true });
+  } catch (error) {
+    if (isErrnoCode(error, "ENOENT")) return;
+    throw error;
+  }
+  await Promise.allSettled(
+    jobEntries
+      .filter((entry) => entry.isDirectory())
+      .map(async (entry) => {
+        const jobDir = join(jobsDir, entry.name);
+        if (existsSync(join(jobDir, "exit"))) return;
+        const pidPath = join(jobDir, "pid");
+        let rawPid: string;
+        try {
+          rawPid = (await readFile(pidPath, "utf8")).trim();
+        } catch {
+          return;
+        }
+        if (!/^[1-9]\d*$/u.test(rawPid)) return;
+        const pgid = Number(rawPid);
+        await rm(pidPath, { force: true }).catch(() => {});
+        if (!isProcessGroupAlive(pgid)) return;
+        sendGroupSignal(pgid, "SIGTERM");
+        await waitForProcessGroupDeath(pgid, Promise.resolve(), PROCESS_KILL_GRACE_MS);
+        if (isProcessGroupAlive(pgid)) {
+          sendGroupSignal(pgid, "SIGKILL");
+          await waitForProcessGroupDeath(pgid, Promise.resolve(), PROCESS_KILL_GRACE_MS);
+        }
+      }),
+  );
+}
+
+function readActiveJobPgidsSync(jobsDir: string): number[] {
+  let entries;
+  try {
+    entries = readdirSync(jobsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const pgids: number[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const jobDir = join(jobsDir, entry.name);
+    if (existsSync(join(jobDir, "exit"))) continue;
+    try {
+      const rawPid = readFileSync(join(jobDir, "pid"), "utf8").trim();
+      if (/^[1-9]\d*$/u.test(rawPid)) pgids.push(Number(rawPid));
+    } catch {}
+  }
+  return pgids;
 }
 
 function sendGroupSignal(pid: number, signal: NodeJS.Signals): void {
