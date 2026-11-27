@@ -7,6 +7,7 @@ node_modules
 .output
 .nitro
 .tmp-test-*
+.eve-extension-build-*
 dist
 .DS_Store
 *.tsbuildinfo

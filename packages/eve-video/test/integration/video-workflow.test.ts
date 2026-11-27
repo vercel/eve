@@ -964,7 +964,8 @@ describe("slackVideoRenderer", () => {
     const reqCalls: [string, unknown][] = [];
     const origFetch = globalThis.fetch;
     globalThis.fetch = async (url, init) => {
-      preOrder.push(`post:${String(url)}:${(init?.body as Uint8Array).byteLength}`);
+      const len = init?.body instanceof Uint8Array ? init.body.byteLength : 0;
+      preOrder.push(`post:${String(url)}:${len}`);
       return new Response("OK", { status: 200 });
     };
     try {
