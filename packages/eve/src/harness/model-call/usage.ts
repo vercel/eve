@@ -4,6 +4,8 @@ import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { turnUsage } from "#harness/session-usage.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import type { Step } from "#harness/step/context.js";
+import type { Usage } from "#protocol/session-events/envelope.js";
+import { addTokenUsage } from "#shared/token-usage-math.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 export type TokenUsageDelta = Partial<TokenUsage>;
@@ -57,11 +59,16 @@ function readGatewayMetadata(
 
 export async function recordModelUsage(
   step: Step,
-  input: { readonly model: LanguageModel; readonly tools: number },
+  input: {
+    readonly model: LanguageModel;
+    readonly pendingUsage?: Usage;
+    readonly tools: number;
+  },
 ): Promise<void> {
   const { setAttributes } = step.config;
   if (setAttributes === undefined) return;
-  const usage = turnUsage(step.view().projection.view, step.position().turnId);
+  const base = turnUsage(step.view().projection.view, step.position().turnId);
+  const usage = input.pendingUsage === undefined ? base : addTokenUsage(base, input.pendingUsage);
   const attributes = {
     "$eve.model": gatewayModelId(input.model),
     "$eve.input_tokens": usage.inputTokens,
