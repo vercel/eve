@@ -4,6 +4,7 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import type { ModelMetadata } from "#internal/model-catalog.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
+import { materializeCompiledArtifactsSource } from "#runtime/compiled-artifacts-override.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import type { RuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
@@ -133,6 +134,8 @@ async function getOrLoadFullBundle(
 ): Promise<CompiledRuntimeAgentBundle> {
   const normalizedCompiledArtifactsSource =
     normalizeCompiledArtifactsSource(compiledArtifactsSource);
+
+  await materializeCompiledArtifactsSource(normalizedCompiledArtifactsSource);
 
   if (isCacheDisabled) {
     return loadFullBundle(normalizedCompiledArtifactsSource);

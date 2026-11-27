@@ -73,6 +73,7 @@ describe("an inactive press through the production dispatcher", () => {
     };
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           adapter: channel.adapter,

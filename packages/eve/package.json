@@ -593,11 +593,11 @@
       "import": "./dist/src/internal/channels.js",
       "default": "./dist/src/internal/channels.js"
     },
-    "./internal/workspace-runtime": {
-      "eve-source": "./dist/src/internal/workspace-runtime.js",
-      "types": "./dist/src/internal/workspace-runtime.d.ts",
-      "import": "./dist/src/internal/workspace-runtime.js",
-      "default": "./dist/src/internal/workspace-runtime.js"
+    "./internal/compiled-artifacts-override": {
+      "eve-source": "./dist/src/runtime/compiled-artifacts-override.js",
+      "types": "./dist/src/runtime/compiled-artifacts-override.d.ts",
+      "import": "./dist/src/runtime/compiled-artifacts-override.js",
+      "default": "./dist/src/runtime/compiled-artifacts-override.js"
     },
     "./internal/git": {
       "eve-source": "./dist/src/internal/git.js",

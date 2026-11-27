@@ -14,6 +14,8 @@ export interface RuntimeDiskCompiledArtifactsSource {
   readonly sandboxScope?: string;
   readonly sandboxAppRoot?: string;
   readonly durableReference?: "development-generation";
+  /** Opaque, JSON-safe reference a materializer turns back into the files under `appRoot`. */
+  readonly materializationRef?: string;
 }
 
 export function createBundledRuntimeCompiledArtifactsSource(
