@@ -82,6 +82,21 @@ export default defineAgent({
 });
 ```
 
+### Attribute AI Gateway spend per agent
+
+When several agents share one Vercel project, AI Gateway can split their spend only by tag. Set `modelOptions.gatewayAgentTag` to add `agent:<name>` to `providerOptions.gateway.tags` on the agent's AI Gateway calls, including compaction. The name is the one eve sends as the `x-title` header:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
+  modelOptions: { gatewayAgentTag: true },
+});
+```
+
+The tag is opt-in because AI Gateway [bills each tag](https://vercel.com/docs/ai-gateway/observability-and-spend/custom-reporting) and accepts at most 10 per request, each up to 64 characters. eve adds it after your own `tags`, and skips it when they already include it, already hold 10, or the tag would be too long. A dynamic model returns `gatewayAgentTag` in each selection's `modelOptions`. To share these options across a workspace's agents, export them from a module each `agent.ts` imports.
+
 ### Use a local model
 
 To test against a model on your own machine, use the AI SDK
@@ -555,7 +570,7 @@ All other `defineAgent` fields are optional. For the exported types, see the [Ty
 | Field          | Type                                  | Default          | Description                                                                                                                                                                                                                                                                                                         |
 | -------------- | ------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `reasoning`    | `AgentReasoningDefinition`            | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                                                                       |
-| `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call, and [`promptCache`](#prompt-caching) settings.                                                                                                                                                                                                               |
+| `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call, [`promptCache`](#prompt-caching) settings, and the [`gatewayAgentTag`](#attribute-ai-gateway-spend-per-agent) opt-in.                                                                                                                                        |
 | `limits`       | `AgentLimitsDefinition`               | field-specific   | eve's [runtime limits](#runtime-limits).                                                                                                                                                                                                                                                                            |
 | `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins: [`workflow.world`](#workflow-world), [`workflow.modelCallsPerStep`](#workflow-checkpoint-batching), and [`workflow.retention`](#run-data-retention).                                                                                                                                              |
 | `build`        | `{ externalDependencies?: string[] }` | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages unbundled and includes them in the hosted output.                                                                                                                                                                                     |

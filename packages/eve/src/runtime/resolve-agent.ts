@@ -231,11 +231,13 @@ function createResolvedAgentConfig(
               contextWindowTokens: manifest.config.compaction.model.contextWindowTokens,
               id: manifest.config.compaction.model.id,
               providerOptions: manifest.config.compaction.model.providerOptions,
+              gatewayAgentTag: manifest.config.compaction.model.gatewayAgentTag,
             }
           : {
               contextWindowTokens: manifest.config.compaction.model.contextWindowTokens,
               id: manifest.config.compaction.model.id,
               providerOptions: manifest.config.compaction.model.providerOptions,
+              gatewayAgentTag: manifest.config.compaction.model.gatewayAgentTag,
               source: {
                 exportName: manifest.config.compaction.model.source.exportName,
                 sourceKind: "module" as const,
@@ -299,12 +301,14 @@ function createResolvedAgentConfig(
             contextWindowTokens: model.contextWindowTokens,
             promptCache: model.promptCache,
             providerOptions: model.providerOptions,
+            gatewayAgentTag: model.gatewayAgentTag,
           }
         : {
             contextWindowTokens: model.contextWindowTokens,
             id: model.id,
             promptCache: model.promptCache,
             providerOptions: model.providerOptions,
+            gatewayAgentTag: model.gatewayAgentTag,
             source: {
               exportName: model.source.exportName,
               sourceKind: "module" as const,

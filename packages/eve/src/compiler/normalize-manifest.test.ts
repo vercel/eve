@@ -1006,6 +1006,34 @@ describe("compileAgentManifest source graph", () => {
     });
   });
 
+  it("carries the Gateway agent tag opt-in to the model and compaction model", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({
+            model: "openai/gpt-5.4",
+            modelOptions: { gatewayAgentTag: true },
+            compaction: { model: "openai/gpt-5.4" },
+          }),
+        }),
+      },
+    ]);
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+    const resolved = await resolveAgent({
+      manifest: compiledAgentManifestSchema.parse(compiled),
+      moduleMap: await createProgrammaticCompiledModuleMap(compiled, [
+        frameworkAgentSourceRegistry,
+        sourceRegistry,
+      ]),
+    });
+
+    expect(resolved.config?.model?.gatewayAgentTag).toBe(true);
+    expect(resolved.config?.compaction?.model?.gatewayAgentTag).toBe(true);
+  });
+
   it("carries a direct model's prompt cache options to the resolved agent", async () => {
     const bedrockProfile = {
       doGenerate: async () => ({}),

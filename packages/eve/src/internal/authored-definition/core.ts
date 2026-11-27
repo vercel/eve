@@ -274,7 +274,7 @@ function normalizeAgentModelOptions(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["modelOptions"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["promptCache", "providerOptions"], message);
+  expectOnlyKnownKeys(record, ["gatewayAgentTag", "promptCache", "providerOptions"], message);
   const options: Mutable<NonNullable<NormalizedAgentDefinition["modelOptions"]>> = {};
 
   if (record.providerOptions !== undefined) {
@@ -283,6 +283,10 @@ function normalizeAgentModelOptions(
 
   if (record.promptCache !== undefined) {
     options.promptCache = normalizeAgentPromptCache(record.promptCache, message);
+  }
+
+  if (record.gatewayAgentTag !== undefined) {
+    options.gatewayAgentTag = expectBoolean(record.gatewayAgentTag, message);
   }
 
   return options;

@@ -17,6 +17,7 @@ import { againstWindow, compactionConfig } from "#harness/compaction/config.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import {
   buildGatewayAttributionHeaders,
+  gatewayAgentTag,
   resolveEffectiveRuntimeModel,
   withGatewayTraceContext,
 } from "#harness/model-call/model.js";
@@ -421,6 +422,10 @@ async function summaryExecutor(
       step.instrumentation?.gatewayTraceContextHeaders,
     ),
     providerOptions: resolveCallProviderOptions({
+      agentTag: gatewayAgentTag(
+        { gatewayAgentTag: reference.gatewayAgentTag ?? turnReference.gatewayAgentTag },
+        config.runtimeIdentity,
+      ),
       auth: step.ctx.get(AuthKey) ?? null,
       profile,
       providerOptions: reference.providerOptions,

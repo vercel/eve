@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { gatewayAgentTag } from "#harness/model-call/model.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import {
   mergeProviderSafetyIdentifier,
@@ -141,5 +142,51 @@ describe("resolveCallProviderOptions", () => {
       gateway: { sessionId: "conversation-1" },
     });
     expect(resolve({ ...openai, provider: "anthropic" })).toBeUndefined();
+  });
+
+  it("adds the agent tag to Gateway calls after authored tags, once, within the limit", () => {
+    const gateway = { ...openai, gateway: true };
+    const tagged = (providerOptions?: Record<string, unknown>) =>
+      resolveCallProviderOptions({
+        agentTag: "agent:support",
+        auth: null,
+        profile: gateway,
+        providerOptions,
+        session: { sessionId: "session-1" },
+      });
+    const full = Array.from({ length: 10 }, (_, index) => `team:${index}`);
+
+    expect(tagged()).toEqual({ gateway: { tags: ["agent:support"], sessionId: "session-1" } });
+    expect(tagged({ gateway: { tags: ["team:billing"] } })).toEqual({
+      gateway: { tags: ["team:billing", "agent:support"], sessionId: "session-1" },
+    });
+    expect(tagged({ gateway: { tags: ["agent:support"] } })).toEqual({
+      gateway: { tags: ["agent:support"], sessionId: "session-1" },
+    });
+    expect(tagged({ gateway: { tags: full } })).toEqual({
+      gateway: { tags: full, sessionId: "session-1" },
+    });
+    expect(
+      resolveCallProviderOptions({
+        agentTag: "agent:support",
+        auth: null,
+        profile: openai,
+        providerOptions: undefined,
+        session: { sessionId: "session-1" },
+      }),
+    ).not.toHaveProperty("gateway");
+  });
+
+  it("names the agent tag after the runtime agent, only when opted in and within 64 characters", () => {
+    const identity = { agentId: "support-id", agentName: "support", eveVersion: "0.0.0" };
+
+    expect(gatewayAgentTag({ gatewayAgentTag: true }, identity)).toBe("agent:support");
+    expect(gatewayAgentTag({ gatewayAgentTag: true }, { ...identity, agentName: undefined })).toBe(
+      "agent:support-id",
+    );
+    expect(gatewayAgentTag({}, identity)).toBeUndefined();
+    expect(
+      gatewayAgentTag({ gatewayAgentTag: true }, { ...identity, agentName: "a".repeat(59) }),
+    ).toBeUndefined();
   });
 });

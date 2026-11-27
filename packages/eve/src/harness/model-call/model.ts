@@ -24,6 +24,19 @@ export function buildGatewayAttributionHeaders(
   return headers;
 }
 
+const MAX_GATEWAY_TAG_LENGTH = 64;
+
+export function gatewayAgentTag(
+  reference: { readonly gatewayAgentTag?: boolean },
+  runtimeIdentity: KernelConfig["runtimeIdentity"],
+): string | undefined {
+  const name = runtimeIdentity?.agentName ?? runtimeIdentity?.agentId;
+  const tag = `agent:${name}`;
+  return reference.gatewayAgentTag === true && name && tag.length <= MAX_GATEWAY_TAG_LENGTH
+    ? tag
+    : undefined;
+}
+
 export function withGatewayTraceContext(
   model: LanguageModel,
   profile: ModelProfile,

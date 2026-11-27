@@ -53,6 +53,7 @@ export type HarnessStepResult = Pick<
 };
 
 interface StepHooksInput {
+  readonly agentTag?: string;
   readonly auth?: import("#channel/types.js").SessionAuthContext | null;
   readonly model: RuntimeModelReference;
   readonly profile: ModelProfile;
@@ -87,6 +88,7 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
     };
 
     const providerOptions = resolveCallProviderOptions({
+      agentTag: input.agentTag,
       auth: input.auth ?? contextStorage.getStore()?.get(AuthKey) ?? null,
       profile,
       providerOptions: input.model.providerOptions,

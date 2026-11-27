@@ -69,7 +69,11 @@ import { getInputTokenCount } from "#harness/compaction/engine.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { compactedTurnInput, historyBeforeCall } from "#harness/compaction/step.js";
 import { reportCompactionFailure, reportModelCallFailure } from "./failure.js";
-import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model.js";
+import {
+  buildGatewayAttributionHeaders,
+  gatewayAgentTag,
+  withGatewayTraceContext,
+} from "./model.js";
 import {
   isEmptyModelResponse,
   recoverModelCall,
@@ -446,6 +450,7 @@ export class ModelCaller {
     });
 
     const hooks = buildStepHooks({
+      agentTag: gatewayAgentTag(stepReference(step), step.config.runtimeIdentity),
       auth: step.ctx.get(AuthKey) ?? null,
       model: stepReference(step),
       profile: this.profile,
