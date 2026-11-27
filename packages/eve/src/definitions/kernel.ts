@@ -320,7 +320,7 @@ async function evaluate(
       (again) => {
         if (digestOf(parseJsonValue(again.value ?? null)) === digest) return;
         log.warn(
-          `Dynamic value "${definition.label}" returned something different when evaluated again with the same memos. Code outside a memo, such as Math.random() or Date.now() in a name or description, makes eve rebuild it before every model call; move it into a memo, or use ctx.now.`,
+          `Dynamic value "${definition.label}" returned something different when evaluated again with the same memos. Code outside a memo, such as Math.random() or Date.now() in a name or description, makes eve rebuild it before every model call; move it into a memo keyed on the session. For the current time, return a user-role instruction from a turn-keyed memo.`,
         );
       },
       (error: unknown) =>
