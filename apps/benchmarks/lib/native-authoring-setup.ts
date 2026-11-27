@@ -28,7 +28,7 @@ interface FixtureBootstrap {
 /** Must satisfy eve's `just-bash` peer range; matches the version eve tests against. */
 export const JUST_BASH_VERSION = "3.6.0";
 /** Matches the workspace catalog, so it accepts the `vite` version eve's peer range requires. */
-export const VITEST_VERSION = "5.0.2";
+export const VITEST_VERSION = "5.1.0";
 
 /**
  * OpenCode asks before some tool calls, and a run has nobody to answer: the request is

@@ -27,11 +27,10 @@ export const WRITE_FILE_INPUT_SCHEMA = prepareJsonSchema<WriteFileToolInput>(
   {
     type: "object",
     properties: {
-      content: { type: "string", description: "Complete replacement file contents." },
+      content: { type: "string", description: "Content to write to the file" },
       filePath: {
         type: "string",
-        description:
-          "The path to the file to write: absolute, relative to the workspace root, or beginning with ~/ or $HOME/.",
+        description: "Path to the file to write (relative or absolute)",
       },
     },
     required: ["content", "filePath"],
@@ -59,10 +58,8 @@ export const WRITE_FILE_OUTPUT_SCHEMA = defineJsonSchema<WriteFileToolOutput>({
 export const writeFile: ToolDefinition<WriteFileToolInput, WriteFileToolOutput> = frameworkTool(
   defineTool({
     label: { start: (input) => toolLabel("Write", input.filePath) },
-    description: [
-      "Write a file to the local filesystem, creating missing parent directories and overwriting any existing file at the path.",
-      "Prefer `edit_file` for targeted changes to existing files.",
-    ].join("\n"),
+    description:
+      "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
     async execute(input, ctx) {
       return await executeWriteFileOnSandbox(await ctx.getSandbox(), input as WriteFileInput);
     },

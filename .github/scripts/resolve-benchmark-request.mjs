@@ -1,23 +1,10 @@
-export const BENCHMARK_HARNESSES = [
-  "eve-code",
-  "codex",
-  "opencode",
-  "claude-code",
-  "pi",
-  "hermes",
-  "fx",
-  "oracle",
-];
+export const BENCHMARK_HARNESSES = ["eve-code", "opencode", "pi", "fx"];
 
 /** Harnesses compared on every automatic run; eve-code against opencode, pi, and fx. */
 export const DEFAULT_HARNESSES = ["eve-code", "opencode", "pi", "fx"];
 
 /**
- * eve-bench datasets a benchmark can run, with the settings each was calibrated for.
- * swe-lean needs five attempts to separate a 10-15% token change from trial noise.
- * deepswe-lean resolves almost nothing at low reasoning; its stored baselines use
- * three attempts. eve-bench compares only whole-dataset results with matching
- * attempts, so changing either count needs fresh baselines for every harness.
+ * Code benchmark datasets, with the settings each was calibrated for.
  */
 export const BENCHMARK_DATASETS = {
   "swe-lean": { reasoning: "low", attempts: "5" },
@@ -32,10 +19,8 @@ export const SCHEDULED_DATASET = "deepswe-lean";
 
 /**
  * Model families a benchmark can run; the workflow maps each to a model ID. The first is
- * the default. eve-bench stores results per model, so families are never compared with
- * each other. Only scheduled and dispatched runs cover every family: Vercel Sandbox
- * limits how fast vCPUs can be allocated. A PR comment runs one family, because
- * eve-bench keys its PR comment by harness and dataset only.
+ * the default. Only scheduled and dispatched runs cover every family: Vercel Sandbox
+ * limits how fast vCPUs can be allocated. A PR comment runs one family at a time.
  */
 export const BENCHMARK_MODEL_FAMILIES = ["anthropic", "openai"];
 
@@ -97,9 +82,7 @@ function request({ dataset, harnesses, families }, models, sha, pr) {
   return {
     harness: harnesses.join(","),
     slug: harnesses.join("+"),
-    // eve-bench builds the agent checkout only for eve-code and rejects agent
-    // inputs without it. Such a run is measured but never published or compared
-    // with stored results, which are keyed by the agent repository.
+    // Only runs that include eve-code post PR benchmark comments.
     agentSource: harnesses.includes("eve-code"),
     dataset,
     ...BENCHMARK_DATASETS[dataset],

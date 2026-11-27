@@ -1,0 +1,8 @@
+{
+  "name": "eve-code-bench-app",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "eve": "workspace:*"
+  }
+}
