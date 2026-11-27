@@ -126,7 +126,7 @@ export async function runWorkflowToolRun(
     const closing = started.close();
     if (outcome !== undefined) {
       const usage = started.usage.total();
-      await Promise.all([
+      const [closeResult, deliverResult] = await Promise.allSettled([
         closing,
         owner.handleMessage({
           from: createWorkflowBodyRef(run),
@@ -135,6 +135,8 @@ export async function runWorkflowToolRun(
           ...(usage !== undefined && { usage }),
         }),
       ]);
+      if (deliverResult.status === "rejected") throw deliverResult.reason;
+      if (closeResult.status === "rejected") throw closeResult.reason;
     } else {
       await closing;
     }

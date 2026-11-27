@@ -485,6 +485,17 @@ it("reports a duplicate task start as started without starting its body", async 
 });
 
 it("propagates terminal delivery failure instead of replacing the invocation outcome", async () => {
+  let finishClose!: () => void;
+  let closeSettled = false;
+  mocks.closeBody.mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finishClose = () => {
+          closeSettled = true;
+          resolve();
+        };
+      }),
+  );
   mocks.runBody.mockResolvedValue({ status: "completed", output: "done" });
   mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
     owner: { send: vi.fn(), sent: 0 },
@@ -495,7 +506,18 @@ it("propagates terminal delivery failure instead of replacing the invocation out
     }),
   });
   mocks.deliver.mockRejectedValue(new Error("delivery failed"));
-  await expect(workflowToolRunWorkflow(input)).rejects.toThrow("delivery failed");
+  let rejected = false;
+  const run = workflowToolRunWorkflow(input);
+  void run.catch(() => {
+    rejected = true;
+  });
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  expect(rejected).toBe(false);
+  expect(closeSettled).toBe(false);
+
+  finishClose();
+  await expect(run).rejects.toThrow("delivery failed");
+  expect(closeSettled).toBe(true);
   expect(mocks.deliver).toHaveBeenCalledOnce();
   expect(mocks.closeBody).toHaveBeenCalledOnce();
 });
