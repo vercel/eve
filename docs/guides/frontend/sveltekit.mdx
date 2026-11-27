@@ -88,7 +88,36 @@ The browser still needs a production authentication policy. See [Authenticate br
   });
   ```
 
-- **Non-Vercel hosts.** When the eve service runs on a separate origin, pass `baseUrl` directly to `useEveAgent`:
+- **Non-Vercel hosts.** The Vite plugin only configures dev and preview. For production builds such as `adapter-node`, add the eve `handle` hook to proxy transport requests from the SvelteKit origin:
+
+  ```ts title="src/hooks.server.ts"
+  import { createEveHandle } from "eve/sveltekit";
+
+  export const handle = createEveHandle();
+  ```
+
+  For a single `agent/`, the hook forwards `/eve/v1/**` to `http://127.0.0.1:4274`. Override the port with `EVE_SVELTEKIT_PRODUCTION_PORT`. Set `EVE_SVELTEKIT_PRODUCTION_ORIGIN` to use another host, or pass `origin` to override that variable. An origin override keeps public paths, including `/eve/<name>/v1/**` when one upstream host routes all agents.
+
+  For an `agents/` workspace with separate servers, map each agent name to its server:
+
+  ```ts title="src/hooks.server.ts"
+  import { createEveHandle } from "eve/sveltekit";
+
+  export const handle = createEveHandle({
+    agents: {
+      alice: "http://127.0.0.1:4274",
+      bob: "http://127.0.0.1:4275",
+    },
+  });
+  ```
+
+  With `agents`, the hook forwards only the listed names and rewrites `/eve/<name>/v1/**` to each server's `/eve/v1/**`. The map takes precedence over `origin` and the environment variables. Other requests pass to SvelteKit. The deployed frontend needs no agent source files.
+
+  Build and start each eve service yourself; the hook doesn't start backends. See [Self-host eve](../deployment/self-hosting) and [Run workspace members](../deployment/self-hosted-operations#run-workspace-members). The hook forwards only eve transport routes, not `/.well-known/workflow/**` callbacks; configure callback routing separately when your backend needs it. It streams request and response bodies and preserves cancellation, redirects, and cookies. Configure authentication on the eve services; the hook is not an authentication policy. Compose it with other hooks through SvelteKit's [`sequence`](https://svelte.dev/docs/kit/@sveltejs-kit-hooks#sequence).
+
+  You don't need the hook on Vercel: service routing sends each agent's transport requests to its eve service before SvelteKit. The hook has no Vercel-specific bypass; any matching request that reaches it is forwarded.
+
+  When the eve service instead runs on a public origin the browser calls directly, pass `baseUrl` to `useEveAgent` and handle CORS and authentication yourself:
 
   ```ts
   const agent = useEveAgent({
