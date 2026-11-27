@@ -40,7 +40,7 @@ export function createVercelNetworkPolicySetter(
   sandbox: VercelSandbox,
 ): (policy: SandboxNetworkPolicy) => Promise<void> {
   return async (policy) => {
-    await sandbox.update({ networkPolicy: toVercelNetworkPolicy(policy) });
+    await sandbox.updateNetworkPolicy(toVercelNetworkPolicy(policy));
   };
 }
 
