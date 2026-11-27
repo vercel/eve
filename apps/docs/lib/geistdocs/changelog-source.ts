@@ -1,11 +1,17 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { createChangesetsChangelogSource } from "@vercel/geistdocs/changelog";
+import { parseChangesetsChangelog, type ChangelogSource } from "@vercel/geistdocs/changelog";
 
-const readChangelog = async () => {
+const readChangelogEntries = async () => {
   "use cache";
 
-  return readFile(path.join(process.cwd(), "../../packages/eve/CHANGELOG.md"), "utf8");
+  const markdown = await readFile(
+    path.join(process.cwd(), "../../packages/eve/CHANGELOG.md"),
+    "utf8",
+  );
+  return parseChangesetsChangelog(markdown);
 };
 
-export const changelogSource = createChangesetsChangelogSource({ read: readChangelog });
+export const changelogSource = {
+  getEntries: (_context) => readChangelogEntries(),
+} satisfies ChangelogSource;
