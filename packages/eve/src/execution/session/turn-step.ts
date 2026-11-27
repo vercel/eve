@@ -391,6 +391,7 @@ async function runSessionStepBody(
     input.abortSignal === undefined
       ? hookCancellation.signal
       : AbortSignal.any([input.abortSignal, hookCancellation.signal]);
+  let admissionRegistry: { dispose(): Promise<void> } | undefined;
   try {
     const effectiveNode = { ...bundle.graph.root, turnAgent: bundle.turnAgent };
     const sessionUsageLimit = agent.settings.limits?.sessionUsage;
@@ -561,14 +562,16 @@ async function runSessionStepBody(
       const created = sessionProvider.create(ctx, initialSession);
       ctx.setVirtualContext(SessionKey, created.value);
       const registry = await connectionProvider.create(ctx, initialSession);
-      if (registry !== undefined) ctx.setVirtualContext(ConnectionRegistryKey, registry.value);
+      if (registry !== undefined) {
+        admissionRegistry = registry.value;
+        ctx.setVirtualContext(ConnectionRegistryKey, registry.value);
+      }
       const sandbox = await sandboxProvider.create(ctx, initialSession);
       if (sandbox !== undefined) ctx.setVirtualContext(SandboxKey, sandbox.value);
       const publish = instrumentation?.createHandleEvent({ handleEvent }) ?? handleEvent;
       try {
         await contextStorage.run(ctx, () => publish(facts));
       } finally {
-        await publisher.drain().finally(() => registry?.value.dispose());
         if (sandbox !== undefined) {
           const sandboxState = await sandbox.value.captureState();
           if (
@@ -603,6 +606,7 @@ async function runSessionStepBody(
 
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
       await publishAdmission(buildRuntimeIdentity(agent)).catch(ignoreTurnCancellation);
+      await publisher.drain();
       await instrumentation?.flush();
       const aliased = saveSessionProjection(
         reconcileSessionContinuationToken(ctx, initialSession),
@@ -846,7 +850,11 @@ async function runSessionStepBody(
     if (durableResult.action === "done") await publisher.writer.close();
     return compacted ? { ...durableResult, compacted: true } : durableResult;
   } finally {
-    await publisher.release();
+    try {
+      await publisher.release();
+    } finally {
+      await admissionRegistry?.dispose();
+    }
   }
 }
 

@@ -206,4 +206,45 @@ describe("channel event delivery", () => {
       expect.objectContaining({ eventType: "turn.started" }),
     );
   }, 60_000);
+
+  it("does not block the first model call on delivery.admitted waitUntil work", async () => {
+    const admittedGate = Promise.withResolvers<void>();
+    const admittedStarted = Promise.withResolvers<void>();
+    const order: string[] = [];
+    const channel = defineChannel<{ done: boolean }, { state: { done: boolean } }>({
+      context: (state) => ({ state }),
+      routes,
+      state: { done: false },
+      events: {
+        "delivery.admitted"(_event, ctx) {
+          ctx.waitUntil(
+            (async () => {
+              order.push("admitted.start");
+              admittedStarted.resolve();
+              await admittedGate.promise;
+              ctx.channel.state.done = true;
+              order.push("admitted.done");
+            })(),
+          );
+        },
+        "turn.settled"(_event, ctx) {
+          order.push(`settled:${String(ctx.channel.state.done)}`);
+        },
+      },
+    });
+
+    await converse({
+      name: "channel-admitted-wait-until-nonblocking",
+      channel,
+      respond: () => {
+        order.push("model");
+        admittedGate.resolve();
+        return "Hi Alice.";
+      },
+    });
+
+    await admittedStarted.promise;
+    expect(order.indexOf("model")).toBeLessThan(order.indexOf("admitted.done"));
+    expect(order).toContain("admitted.done");
+  }, 60_000);
 });
