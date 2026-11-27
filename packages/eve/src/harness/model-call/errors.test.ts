@@ -402,6 +402,62 @@ describe("classifyModelCallError", () => {
     );
   });
 
+  it.each([
+    {
+      title: "a provider tool",
+      attempts: [
+        providerAttempt("anthropic", 503, "Service temporarily unavailable"),
+        providerAttempt("claudeaws", 503, "Service temporarily unavailable"),
+        providerAttempt(
+          "bedrock",
+          400,
+          "tools.0: Input tag 'web_search_20250305' found using 'type' does not match any of the expected tags: 'bash_20250124', 'custom'",
+        ),
+        providerAttempt("vertexAnthropic", 400, "Bad Request"),
+      ],
+    },
+    {
+      title: "a history block",
+      attempts: [
+        providerAttempt("anthropic", 503, "Service temporarily unavailable"),
+        providerAttempt(
+          "claudeaws",
+          400,
+          "messages.5.content.0: Invalid encrypted_content in search_result block",
+        ),
+        providerAttempt(
+          "vertexAnthropic",
+          400,
+          "messages.5.content.0: Invalid encrypted_content in search_result block",
+        ),
+      ],
+    },
+  ])(
+    "retries when AI Gateway fallbacks reject $title while the primary provider is unavailable",
+    ({ attempts }) => {
+      expect(classifyModelCallError(gatewayRoutingFailure(attempts))).toBe("retry");
+    },
+  );
+
+  it.each([
+    {
+      title: "every provider rejects the tool",
+      attempts: [
+        providerAttempt("anthropic", 400, "tool type 'web_search_20250305' is not supported"),
+        providerAttempt("bedrock", 400, "tool type 'web_search_20250305' is not supported"),
+      ],
+    },
+    {
+      title: "fallbacks give no provider-specific reason",
+      attempts: [
+        providerAttempt("anthropic", 503, "Service temporarily unavailable"),
+        providerAttempt("vertexAnthropic", 400, "Bad Request"),
+      ],
+    },
+  ])("keeps an AI Gateway 400 terminal when $title", ({ attempts }) => {
+    expect(classifyModelCallError(gatewayRoutingFailure(attempts))).toBe("terminal");
+  });
+
   it("falls back to recoverable for unknown errors so the session parks instead of dying", () => {
     expect(classifyModelCallError(new Error("mystery"))).toBe("recoverable");
     expect(classifyModelCallError("weird string throw")).toBe("recoverable");
@@ -519,28 +575,30 @@ describe("extractUpstreamRejectionMessage", () => {
   });
 });
 
+function providerAttempt(provider: string, statusCode: number, error: string) {
+  return { provider, credentialType: "system", success: false, error, statusCode };
+}
+
 function gatewayProviderToolFailure(input: {
   readonly unsupportedTypes: readonly string[];
   readonly omitData?: boolean;
   readonly truncateResponseBody?: boolean;
 }): Error {
-  const providerAttempts = [
-    {
-      provider: "anthropic",
-      credentialType: "system",
-      success: false,
-      error: "Service temporarily unavailable",
-      statusCode: 503,
-    },
-    ...input.unsupportedTypes.map((type) => ({
-      provider: "bedrock",
-      credentialType: "system",
-      success: false,
-      error: `tool type '${type}' is not supported for this model`,
-      statusCode: 400,
-    })),
-  ];
+  return gatewayRoutingFailure(
+    [
+      providerAttempt("anthropic", 503, "Service temporarily unavailable"),
+      ...input.unsupportedTypes.map((type) =>
+        providerAttempt("bedrock", 400, `tool type '${type}' is not supported for this model`),
+      ),
+    ],
+    input,
+  );
+}
 
+function gatewayRoutingFailure(
+  providerAttempts: readonly ReturnType<typeof providerAttempt>[],
+  input: { readonly omitData?: boolean; readonly truncateResponseBody?: boolean } = {},
+): Error {
   const responseBodyValue = {
     error: {
       message: "Bad Request",
