@@ -289,11 +289,6 @@
       "import": "./dist/src/public/sandbox/docker.js",
       "default": "./dist/src/public/sandbox/docker.js"
     },
-    "./sandbox/host": {
-      "types": "./dist/src/public/sandbox/host.d.ts",
-      "import": "./dist/src/public/sandbox/host.js",
-      "default": "./dist/src/public/sandbox/host.js"
-    },
     "./sandbox/just-bash": {
       "types": "./dist/src/public/sandbox/just-bash.d.ts",
       "import": "./dist/src/public/sandbox/just-bash.js",
@@ -597,6 +592,12 @@
       "types": "./dist/src/internal/channels.d.ts",
       "import": "./dist/src/internal/channels.js",
       "default": "./dist/src/internal/channels.js"
+    },
+    "./internal/workspace-runtime": {
+      "eve-source": "./dist/src/internal/workspace-runtime.js",
+      "types": "./dist/src/internal/workspace-runtime.d.ts",
+      "import": "./dist/src/internal/workspace-runtime.js",
+      "default": "./dist/src/internal/workspace-runtime.js"
     },
     "./internal/git": {
       "eve-source": "./dist/src/internal/git.js",
