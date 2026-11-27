@@ -150,6 +150,35 @@ test("streamToFileWithLimit and extractBoundedTar enforce byte, file-count, and 
     }),
     /disallowed entry type/u,
   );
+
+  // Craft a synthetic PAX sparse tar (tiny archive claiming a 1 GiB sparse file).
+  const paxRest = " GNU.sparse.realsize=1073741824\n";
+  const paxLine = `${String(paxRest.length + 2)}${paxRest}`;
+  const paxBody = Buffer.from(paxLine, "utf8");
+  const paxHeader = Buffer.alloc(512, 0);
+  paxHeader.write("PaxHeader/reward.txt", 0, "utf8");
+  paxHeader.write("0000644\0", 100, "ascii");
+  paxHeader.write(`${paxBody.length.toString(8).padStart(11, "0")}\0`, 124, "ascii");
+  paxHeader.write("x", 156, "ascii");
+  const paxPad = Buffer.alloc(512 - (paxBody.length % 512), 0);
+  const fileHeader = Buffer.alloc(512, 0);
+  fileHeader.write("reward.txt", 0, "utf8");
+  fileHeader.write("0000644\0", 100, "ascii");
+  fileHeader.write("00000000000\0", 124, "ascii");
+  fileHeader.write("0", 156, "ascii");
+  const sparseTar = join(work, "sparse.tar");
+  await writeFile(
+    sparseTar,
+    Buffer.concat([paxHeader, paxBody, paxPad, fileHeader, Buffer.alloc(1024, 0)]),
+  );
+  await assert.rejects(
+    extractBoundedTar(sparseTar, join(work, "sparse-out"), {
+      gzip: false,
+      maxFiles: 10,
+      maxUncompressedBytes: 64 * 1024,
+    }),
+    /disallowed sparse entry/u,
+  );
 });
 
 test("peer-runner handles OpenCode gpt-6.2-sol config, reasoning tokens, pi error masking, and fx subagents", () => {

@@ -123,35 +123,199 @@ export async function streamToFileWithLimit(
   }
 }
 
-async function measureTarUncompressedBytes(
-  tarPath: string,
-  gzip: boolean,
-  maxBytes: number,
-): Promise<number> {
-  if (!gzip) {
-    const size = (await stat(tarPath)).size;
-    if (size > maxBytes) {
-      throw new RangeError(`Archive exceeded ${maxBytes} uncompressed byte limit`);
-    }
-    return size;
+function parseTarOctalOrBase256(buf: Buffer): number {
+  if (buf.length > 0 && (buf[0]! & 0x80) !== 0) {
+    let val = 0;
+    for (let i = 1; i < buf.length; i++) val = val * 256 + buf[i]!;
+    return val;
   }
-  const input = createReadStream(tarPath);
-  const gunzip = createGunzip();
-  input.pipe(gunzip);
-  let total = 0;
-  try {
-    for await (const chunk of gunzip) {
-      total += (chunk as Buffer).length;
-      if (total > maxBytes) {
-        input.destroy();
-        gunzip.destroy();
-        throw new RangeError(`Archive exceeded ${maxBytes} uncompressed byte limit`);
+  const str = buf.toString("ascii").replace(/\0.*$/u, "").trim();
+  return str ? Number.parseInt(str, 8) : 0;
+}
+
+function readCString(buf: Buffer): string {
+  const zero = buf.indexOf(0);
+  return (zero === -1 ? buf : buf.subarray(0, zero)).toString("utf8");
+}
+
+function parsePaxRecords(data: Buffer): { size?: number; path?: string; hasSparse: boolean } {
+  let offset = 0;
+  let size: number | undefined;
+  let path: string | undefined;
+  let hasSparse = false;
+  while (offset < data.length) {
+    const space = data.indexOf(0x20, offset);
+    if (space === -1) break;
+    const len = Number.parseInt(data.subarray(offset, space).toString("ascii"), 10);
+    if (!Number.isFinite(len) || len <= 0 || offset + len > data.length) break;
+    const record = data
+      .subarray(space + 1, offset + len)
+      .toString("utf8")
+      .replace(/\n$/u, "");
+    const eq = record.indexOf("=");
+    if (eq !== -1) {
+      const key = record.slice(0, eq);
+      const value = record.slice(eq + 1);
+      if (key.startsWith("GNU.sparse.") || key.startsWith("SCHILY.sparse.")) hasSparse = true;
+      else if (key === "size") {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed) && parsed >= 0) size = parsed;
+      } else if (key === "path") {
+        path = value;
       }
     }
-    return total;
+    offset += len;
+  }
+  return { size, path, hasSparse };
+}
+
+async function inspectBoundedTar(
+  tarPath: string,
+  options: {
+    readonly gzip: boolean;
+    readonly maxFiles: number;
+    readonly maxUncompressedBytes: number;
+  },
+): Promise<void> {
+  if (!options.gzip) {
+    const size = (await stat(tarPath)).size;
+    if (size > options.maxUncompressedBytes) {
+      throw new RangeError(
+        `Archive exceeded ${options.maxUncompressedBytes} uncompressed byte limit`,
+      );
+    }
+  }
+
+  const input = createReadStream(tarPath);
+  const stream = options.gzip ? input.pipe(createGunzip()) : input;
+
+  let streamBytes = 0;
+  let logicalBytes = 0;
+  let entryCount = 0;
+  let pending: Buffer = Buffer.alloc(0);
+  let skipBytes = 0;
+  let captureKind: "pax" | "gnu-long" | null = null;
+  let captureRemaining = 0;
+  let captureChunks: Buffer[] = [];
+  let capturePad = 0;
+  let nextPax: { size?: number; path?: string } | null = null;
+  let nextGnuPath: string | null = null;
+
+  const consumeBlocks = () => {
+    for (;;) {
+      if (captureKind !== null) {
+        if (captureRemaining > 0) {
+          if (pending.length === 0) return;
+          const take = Math.min(pending.length, captureRemaining);
+          captureChunks.push(pending.subarray(0, take));
+          pending = pending.subarray(take);
+          captureRemaining -= take;
+          if (captureRemaining > 0) return;
+        }
+        if (capturePad > 0) {
+          if (pending.length < capturePad) return;
+          pending = pending.subarray(capturePad);
+          capturePad = 0;
+        }
+        const payload = Buffer.concat(captureChunks);
+        captureChunks = [];
+        if (captureKind === "pax") {
+          const pax = parsePaxRecords(payload);
+          if (pax.hasSparse) {
+            throw new RangeError("Archive contains disallowed sparse entry");
+          }
+          nextPax = { size: pax.size, path: pax.path };
+        } else {
+          nextGnuPath = readCString(payload);
+        }
+        captureKind = null;
+        continue;
+      }
+
+      if (skipBytes > 0) {
+        if (pending.length === 0) return;
+        const drop = Math.min(pending.length, skipBytes);
+        pending = pending.subarray(drop);
+        skipBytes -= drop;
+        if (skipBytes > 0) return;
+      }
+
+      if (pending.length < 512) return;
+      const header = pending.subarray(0, 512);
+      pending = pending.subarray(512);
+
+      let allZero = true;
+      for (let i = 0; i < 512; i++) {
+        if (header[i] !== 0) {
+          allZero = false;
+          break;
+        }
+      }
+      if (allZero) continue;
+
+      const typeByte = header[156]!;
+      const typeChar = typeByte === 0 ? "0" : String.fromCharCode(typeByte);
+      const rawDataSize = parseTarOctalOrBase256(header.subarray(124, 136));
+      if (!Number.isFinite(rawDataSize) || rawDataSize < 0) {
+        throw new RangeError("Archive contains invalid entry size");
+      }
+      const paddedDataSize = Math.ceil(rawDataSize / 512) * 512;
+
+      if (typeChar === "x" || typeChar === "g" || typeChar === "L") {
+        if (rawDataSize > 1024 * 1024) {
+          throw new RangeError("Archive metadata header exceeds 1 MiB limit");
+        }
+        captureKind = typeChar === "L" ? "gnu-long" : "pax";
+        captureRemaining = rawDataSize;
+        capturePad = paddedDataSize - rawDataSize;
+        captureChunks = [];
+        continue;
+      }
+
+      if (typeChar !== "0" && typeChar !== "5") {
+        throw new RangeError(`Archive contains disallowed entry type '${typeChar}'`);
+      }
+
+      const name = readCString(header.subarray(0, 100));
+      const prefix = readCString(header.subarray(345, 500));
+      const entryPath = nextPax?.path ?? nextGnuPath ?? (prefix ? `${prefix}/${name}` : name);
+      const logicalSize = Math.max(rawDataSize, nextPax?.size ?? 0);
+      nextPax = null;
+      nextGnuPath = null;
+
+      entryCount += 1;
+      if (entryCount > options.maxFiles) {
+        throw new RangeError(`Archive exceeded ${options.maxFiles} entry limit`);
+      }
+      if (entryPath.startsWith("/") || entryPath.split("/").includes("..")) {
+        throw new RangeError(`Archive contains unsafe path: ${entryPath}`);
+      }
+      logicalBytes += logicalSize;
+      if (logicalBytes > options.maxUncompressedBytes) {
+        throw new RangeError(
+          `Archive exceeded ${options.maxUncompressedBytes} uncompressed byte limit`,
+        );
+      }
+
+      skipBytes = paddedDataSize;
+    }
+  };
+
+  try {
+    for await (const rawChunk of stream) {
+      const chunk = rawChunk as Buffer;
+      streamBytes += chunk.length;
+      if (streamBytes > options.maxUncompressedBytes) {
+        throw new RangeError(
+          `Archive exceeded ${options.maxUncompressedBytes} uncompressed byte limit`,
+        );
+      }
+      pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
+      consumeBlocks();
+    }
   } catch (err) {
     input.destroy();
-    gunzip.destroy();
+    if (stream !== input) stream.destroy();
     throw err;
   }
 }
@@ -165,36 +329,7 @@ export async function extractBoundedTar(
     readonly maxUncompressedBytes: number;
   },
 ): Promise<void> {
-  await measureTarUncompressedBytes(tarPath, options.gzip, options.maxUncompressedBytes);
-  const listFlag = options.gzip ? "-tzf" : "-tf";
-  const verboseFlag = options.gzip ? "-tzvf" : "-tvf";
-  const { stdout: namesOut } = await execFileAsync("tar", [listFlag, tarPath], {
-    timeout: 60_000,
-    maxBuffer: 8 * 1024 * 1024,
-  });
-  const entries = namesOut
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  if (entries.length > options.maxFiles) {
-    throw new RangeError(`Archive exceeded ${options.maxFiles} entry limit (${entries.length})`);
-  }
-  for (const entry of entries) {
-    if (entry.startsWith("/") || entry.split("/").includes("..")) {
-      throw new RangeError(`Archive contains unsafe path: ${entry}`);
-    }
-  }
-  const { stdout: verboseOut } = await execFileAsync("tar", [verboseFlag, tarPath], {
-    timeout: 60_000,
-    maxBuffer: 8 * 1024 * 1024,
-  });
-  for (const line of verboseOut.split("\n")) {
-    if (!line) continue;
-    const typeChar = line[0];
-    if (typeChar !== "-" && typeChar !== "d") {
-      throw new RangeError(`Archive contains disallowed entry type '${typeChar}'`);
-    }
-  }
+  await inspectBoundedTar(tarPath, options);
   await mkdir(destDir, { recursive: true });
   const extractFlag = options.gzip ? "-xzf" : "-xf";
   await execFileAsync("tar", ["--no-same-owner", extractFlag, tarPath, "-C", destDir], {
@@ -296,18 +431,30 @@ export function parseRewardText(raw: string): { reward: number | null; error?: s
   return { reward: num };
 }
 
+async function readBoundedUtf8(filePath: string, maxBytes: number): Promise<string> {
+  const info = await stat(filePath);
+  if (info.size > maxBytes) {
+    throw new RangeError(`${filePath} exceeded ${maxBytes} byte read limit`);
+  }
+  return await readFile(filePath, "utf8");
+}
+
 async function readReward(verifierDir: string): Promise<{ reward: number | null; error?: string }> {
   try {
-    return parseRewardText(await readFile(join(verifierDir, "reward.txt"), "utf8"));
-  } catch {}
+    return parseRewardText(await readBoundedUtf8(join(verifierDir, "reward.txt"), 64 * 1024));
+  } catch (err) {
+    if (err instanceof RangeError) return { reward: null, error: err.message };
+  }
   try {
-    const raw = JSON.parse(await readFile(join(verifierDir, "reward.json"), "utf8")) as {
+    const raw = JSON.parse(await readBoundedUtf8(join(verifierDir, "reward.json"), 64 * 1024)) as {
       reward?: unknown;
     };
     if (typeof raw.reward === "number" && Number.isFinite(raw.reward)) {
       return parseRewardText(String(raw.reward));
     }
-  } catch {}
+  } catch (err) {
+    if (err instanceof RangeError) return { reward: null, error: err.message };
+  }
   return { reward: null };
 }
 
@@ -318,10 +465,9 @@ async function readAgentTelemetry(agentDir: string): Promise<{
   error?: string;
 }> {
   try {
-    const parsed = JSON.parse(await readFile(join(agentDir, "result.json"), "utf8")) as Record<
-      string,
-      unknown
-    >;
+    const parsed = JSON.parse(
+      await readBoundedUtf8(join(agentDir, "result.json"), 4 * 1024 * 1024),
+    ) as Record<string, unknown>;
     return {
       usage: parsed.usage as TokenUsage | undefined,
       overhead: parsed.overhead as TrialOverhead | undefined,

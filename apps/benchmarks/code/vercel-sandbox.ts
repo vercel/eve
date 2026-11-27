@@ -320,7 +320,7 @@ async function runSingleTrialInSandbox(options: {
 out="${remoteOut}"
 rm -f /tmp/trial-out.tar.gz
 [ -d "$out" ] || exit 0
-count=$(find "$out" -mindepth 1 | head -n ${MAX_TRIAL_ARCHIVE_FILES + 1} | wc -l | tr -d ' ')
+count=$(set +o pipefail; find "$out" -mindepth 1 | head -n ${MAX_TRIAL_ARCHIVE_FILES + 1} | wc -l | tr -d ' ')
 kb=$(du -sk "$out" 2>/dev/null | awk '{print $1}')
 if [ "$count" -le ${MAX_TRIAL_ARCHIVE_FILES} ] && [ "\${kb:-0}" -le ${maxArchiveKb} ]; then
   tar -czf /tmp/trial-out.tar.gz -C "$out" . 2>/dev/null || true
