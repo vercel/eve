@@ -24,6 +24,13 @@ export function startRun(input: Parameters<typeof runStarted>[0]): Commit {
   return commitOf([runStarted(input)]);
 }
 
+export function requestAndStartRun(
+  owner: ModelOwner,
+  input: Parameters<typeof runStarted>[0],
+): Commit {
+  return commitOf([runRequested(owner, input.runId), runStarted(input)]);
+}
+
 export function retryRun(input: {
   readonly attempt: number;
   readonly error: ErrorInfo;

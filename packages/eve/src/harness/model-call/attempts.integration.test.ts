@@ -3,6 +3,8 @@ import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createTestKernel } from "#internal/testing/kernel.js";
+import { createUserMessage } from "#harness/messages.js";
+import { eventsOf } from "#harness/publication.js";
 import type { HarnessSession } from "#harness/types.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -247,6 +249,68 @@ describe("model attempts", () => {
       { outcome: "failed", runId: "run_0", type: "model.settled" },
       { owner: { runId: "run_0" }, type: "usage.recorded", usage: billed },
     ]);
+  });
+
+  it("coalesces model.requested and model.started into one publication when no model.requested hook subscribes", async () => {
+    const batches: string[][] = [];
+    const session: HarnessSession = {
+      compaction: {},
+      continuationToken: "http:coalesce",
+      history: [],
+      sessionId: "coalesce",
+    };
+    await createTestKernel({
+      agent: { model: { id: "m" } },
+      handleEvent: async (publication) => {
+        const types = eventsOf(publication).map((event) => event.type);
+        if (types.includes("model.requested") || types.includes("model.started")) {
+          batches.push(types);
+        }
+      },
+      resolveModel: async () =>
+        new MockLanguageModelV3({ doStream: async () => streamOf(reply("Done.")) }),
+      tools: new Map(),
+    })(session, { message: "Hello." });
+
+    expect(batches).toEqual([["model.requested", "model.started"]]);
+  });
+
+  it("propagates non-provider errors from committing model.requested/model.started without entering provider retries", async () => {
+    for (const error of [
+      new Error("boundary write rejected"),
+      Object.assign(new Error("fetch failed"), { code: "ECONNRESET" }),
+      Object.assign(new Error("Unauthorized"), { statusCode: 401 }),
+      Object.assign(new Error("prompt is too long: 250000 tokens > 200000 maximum"), {
+        statusCode: 400,
+      }),
+    ]) {
+      const doStream = vi.fn(async () => streamOf(reply("Never reached.")));
+      const session: HarnessSession = {
+        compaction: {},
+        continuationToken: "http:boundary-error",
+        history: [
+          createUserMessage("user", "Earlier message."),
+          { content: "Earlier reply.", role: "assistant" },
+        ],
+        sessionId: "boundary-error",
+      };
+      let calls = 0;
+      await expect(
+        createTestKernel({
+          agent: { model: { id: "m" } },
+          handleEvent: async (publication) => {
+            if (eventsOf(publication).some((event) => event.type === "model.requested")) {
+              calls += 1;
+              throw error;
+            }
+          },
+          resolveModel: async () => new MockLanguageModelV3({ doStream }),
+          tools: new Map(),
+        })(session, { message: "Hello." }),
+      ).rejects.toBe(error);
+      expect(calls).toBe(1);
+      expect(doStream).not.toHaveBeenCalled();
+    }
   });
 });
 

@@ -121,6 +121,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
 }
 
 interface HistoryBeforeCallInput {
+  readonly beforeCompact?: () => Promise<void>;
   readonly force?: boolean;
   readonly messages: readonly HarnessModelMessage[];
   readonly promptMessages: readonly HarnessModelMessage[];
@@ -181,6 +182,7 @@ async function compactUnder(
   ) {
     return undefined;
   }
+  await input.beforeCompact?.();
   const tokens = getInputTokenCount(prompt, config, input.requestEnvelopeTokens, previousEnvelope);
   const effectiveConfig =
     input.force === true

@@ -87,27 +87,27 @@
     "eve.reactions": {
       "at": "<time>",
       "latest": {
-        "*": 20,
-        "content.completed": 18,
-        "content.delta": 17,
-        "context.settled": 11,
-        "context.settled:compaction": 11,
-        "context.started": 9,
-        "context.started:compaction": 9,
-        "delivery.admitted": 13,
-        "delivery.consumed": 14,
-        "delivery.settled": 20,
-        "model.requested": 15,
-        "model.settled": 19,
-        "model.started": 16,
+        "*": 18,
+        "content.completed": 16,
+        "content.delta": 15,
+        "context.settled": 10,
+        "context.settled:compaction": 10,
+        "context.started": 8,
+        "context.started:compaction": 8,
+        "delivery.admitted": 12,
+        "delivery.consumed": 13,
+        "delivery.settled": 18,
+        "model.requested": 14,
+        "model.settled": 17,
+        "model.started": 14,
         "session.started": 0,
-        "turn.settled": 20,
-        "turn.started": 14,
-        "usage.recorded": 19
+        "turn.settled": 18,
+        "turn.started": 13,
+        "usage.recorded": 17
       },
       "memos": {
         "memory:team:recall": {
-          "vgwb_PJlsAJUva0VtMYUPM": {
+          "Z9HunuNocLuznrtcnduib-": {
             "cleared": null,
             "result": {
               "messages": [
@@ -242,7 +242,7 @@
                   "value": "Yes."
                 }
               },
-              "position": 21,
+              "position": 19,
               "responses": {},
               "runs": {
                 "run_2": {

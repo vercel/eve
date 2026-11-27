@@ -12,6 +12,7 @@ import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js"
 import { captureTurnEvents, type CapturedTurnStream } from "#internal/testing/events.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
 import { startTestSession } from "#internal/testing/test-session-hosts.js";
+import { runs as readRuns } from "#protocol/session-projection/public-view.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook, type HookContext, type HookDefinition } from "#public/definitions/hook.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
@@ -483,5 +484,32 @@ describe("hook ctx.end()", () => {
       data: { cause: { hook: "after-clear" }, outcome: "completed" },
       type: "session.ended",
     });
+  }, 90_000);
+
+  it("emits model.requested before model.started when a hook subscribes to model.requested and lets it cancel before the model call", async () => {
+    const seen: string[] = [];
+    const { log } = await runSession({
+      drive: async ({ log }) => {
+        await until(log, "turn:cancelled", 1);
+      },
+      hooks: {
+        gate: defineHook({
+          events: {
+            "model.requested": (event, ctx) => {
+              const found = readRuns(ctx.view).find((entry) => entry.runId === event.data.runId);
+              seen.push(`requested:${found?.status}`);
+              ctx.cancel("Blocked before model call.");
+            },
+            "model.started": () => {
+              seen.push("started");
+            },
+          },
+        }),
+      },
+      name: "hook-cancel-on-model-requested",
+    });
+
+    expect(seen).toEqual(["requested:requested"]);
+    expect(log).not.toContain("model:Hello.");
   }, 90_000);
 });
