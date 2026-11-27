@@ -4,14 +4,16 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
-  realpath,
   rename,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -20,81 +22,13 @@ import { exists } from "./node-runtime.ts";
 
 const exec = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(here, "../../../..");
+const BENCHMARKS_DIR = resolve(here, "../..");
+const REPO_ROOT = resolve(BENCHMARKS_DIR, "../..");
+const EVE_CODE_APP_DIR = resolve(here, "../eve-code-app");
 const EVE_CODE_DIR = join(REPO_ROOT, "packages/eve-code");
 const EVE_DIR = join(REPO_ROOT, "packages/eve");
 
-function renderEveCodeAppFiles(reasoning: string): Record<string, string> {
-  return {
-    "agent/agent.ts": [
-      'import { defineAgent } from "eve";',
-      "const model = process.env.EVE_CODE_BENCH_MODEL;",
-      'if (!model) throw new Error("EVE_CODE_BENCH_MODEL must be set");',
-      `export default defineAgent({ model, reasoning: ${JSON.stringify(reasoning)} });`,
-      "",
-    ].join("\n"),
-    "agent/instructions.md": "The task's working directory is /workspace.\n",
-    "agent/extensions/code.ts": [
-      'import code from "eve/extensions/code";',
-      "export default code({});",
-      "",
-    ].join("\n"),
-    "agent/channels/eve.ts": [
-      'import { eveChannel } from "eve/channels/eve";',
-      'import { verifyHttpBasic, withAuthChallenges } from "eve/channels/auth";',
-      "",
-      "const benchAuth = withAuthChallenges(",
-      "  (request) => {",
-      "    const password = process.env.EVE_BENCH_TOKEN;",
-      "    if (!password) return null;",
-      '    const result = verifyHttpBasic(request.headers.get("authorization"), {',
-      '      username: "code-bench",',
-      "      password,",
-      "    });",
-      "    return result.ok ? result.sessionAuth : null;",
-      "  },",
-      '  [{ scheme: "Basic", parameters: { realm: "code-bench", charset: "UTF-8" } }],',
-      ");",
-      "",
-      "export default eveChannel({ auth: [benchAuth] });",
-      "",
-    ].join("\n"),
-    "agent/sandbox.ts": [
-      'import { defineSandbox } from "eve/sandbox";',
-      'import { defineSandboxProvider, SandboxSessionGoneError } from "eve/sandbox/provider";',
-      'import { TASK_CONTAINER_PROVIDER_NAME, taskContainerEnvironment } from "./lib/container-sandbox.mjs";',
-      "",
-      "const TaskContainerSandbox = defineSandboxProvider({",
-      "  name: TASK_CONTAINER_PROVIDER_NAME,",
-      "  stateProtocolVersion: 1,",
-      "  environment(options) {",
-      "    const implementation = taskContainerEnvironment(options);",
-      "    return {",
-      "      ...implementation,",
-      "      async resume(...args) {",
-      "        try {",
-      "          return await implementation.resume(...args);",
-      "        } catch (error) {",
-      '          if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {',
-      '            throw new SandboxSessionGoneError("The benchmark task container no longer exists");',
-      "          }",
-      "          throw error;",
-      "        }",
-      "      },",
-      "    };",
-      "  },",
-      "});",
-      "",
-      "export const environment = TaskContainerSandbox.environment();",
-      "export default defineSandbox(() => environment.open());",
-      "",
-    ].join("\n"),
-    "agent/tools/web_search.ts":
-      'import { disableTool } from "eve/tools";\nexport default disableTool();\n',
-    "agent/tools/web_fetch.ts":
-      'import { disableTool } from "eve/tools";\nexport default disableTool();\n',
-  };
-}
+const SKIP_DIRS = new Set([".generated", ".output", "node_modules"]);
 
 async function gitShortSha(cwd: string): Promise<string> {
   try {
@@ -103,6 +37,34 @@ async function gitShortSha(cwd: string): Promise<string> {
   } catch {
     return "dev";
   }
+}
+
+async function listAppFiles(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files: string[] = [];
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (SKIP_DIRS.has(entry.name)) continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listAppFiles(full)));
+    } else if (entry.isFile()) {
+      files.push(full);
+    }
+  }
+  return files;
+}
+
+async function computeBuildKey(version: string, model: string, reasoning: string): Promise<string> {
+  const hash = createHash("sha256");
+  hash.update(JSON.stringify({ version, model, reasoning }));
+  for (const file of await listAppFiles(EVE_CODE_APP_DIR)) {
+    hash.update(relative(EVE_CODE_APP_DIR, file));
+    hash.update(await readFile(file));
+  }
+  hash.update(await readFile(join(here, "eve-runner.mjs")));
+  hash.update(await readFile(join(EVE_CODE_DIR, "extension/instructions.md")));
+  hash.update(String((await stat(join(EVE_DIR, "dist/src/index.js"))).mtimeMs));
+  return hash.digest("hex").slice(0, 16);
 }
 
 async function bundleRunnerWithClient(outFile: string): Promise<void> {
@@ -139,7 +101,7 @@ export async function prepareEveCodeHarness(options: {
   readonly model: string;
   readonly reasoning: string;
 }): Promise<HarnessBundle> {
-  const eveBin = join(EVE_CODE_DIR, "node_modules/.bin/eve");
+  const eveBin = join(BENCHMARKS_DIR, "node_modules/.bin/eve");
   if (!(await exists(join(EVE_DIR, "dist/src/index.js")))) {
     throw new Error(
       "packages/eve/dist is missing; run `pnpm build:eve` before benchmarking eve-code.",
@@ -150,58 +112,19 @@ export async function prepareEveCodeHarness(options: {
   }
 
   const version = await gitShortSha(REPO_ROOT);
-  const files = renderEveCodeAppFiles(options.reasoning);
-  const [containerSandboxSource, runnerSource, extInstructions] = await Promise.all([
-    readFile(join(here, "container-sandbox.mjs"), "utf8"),
-    readFile(join(here, "eve-runner.mjs"), "utf8"),
-    readFile(join(EVE_CODE_DIR, "extension/instructions.md"), "utf8"),
-  ]);
-
-  const eveDistMtime = (await stat(join(EVE_DIR, "dist/src/index.js"))).mtimeMs;
-  const key = createHash("sha256")
-    .update(
-      JSON.stringify({
-        version,
-        model: options.model,
-        reasoning: options.reasoning,
-        files,
-        containerSandboxSource,
-        runnerSource,
-        extInstructions,
-        eveDistMtime,
-      }),
-    )
-    .digest("hex")
-    .slice(0, 16);
-
+  const key = await computeBuildKey(version, options.model, options.reasoning);
   const dest = join(options.cacheDir, "eve-code", key);
   const readyMarker = join(dest, ".ready");
 
   if (!(await exists(readyMarker))) {
-    const scratch = await mkdtemp(join(await realpath(EVE_CODE_DIR), ".code-bench-"));
+    const scratch = await mkdtemp(join(tmpdir(), "eve-code-bench-"));
     const staging = `${dest}.staging-${Date.now()}`;
     try {
-      await writeFile(
-        join(scratch, "package.json"),
-        `${JSON.stringify(
-          {
-            name: "eve-code-bench-app",
-            private: true,
-            type: "module",
-            dependencies: { eve: "workspace:*" },
-          },
-          null,
-          2,
-        )}\n`,
-      );
-      await cp(join(EVE_CODE_DIR, "tsconfig.json"), join(scratch, "tsconfig.json"));
-      for (const [rel, content] of Object.entries(files)) {
-        const target = join(scratch, rel);
-        await mkdir(dirname(target), { recursive: true });
-        await writeFile(target, content);
-      }
-      await mkdir(join(scratch, "agent/lib"), { recursive: true });
-      await writeFile(join(scratch, "agent/lib/container-sandbox.mjs"), containerSandboxSource);
+      await cp(EVE_CODE_APP_DIR, scratch, {
+        recursive: true,
+        filter: (src) => !SKIP_DIRS.has(src.split("/").pop() ?? ""),
+      });
+      await symlink(join(BENCHMARKS_DIR, "node_modules"), join(scratch, "node_modules"), "dir");
 
       await exec(eveBin, ["build"], {
         cwd: scratch,
@@ -211,6 +134,7 @@ export async function prepareEveCodeHarness(options: {
           TMPDIR: process.env.TMPDIR,
           CI: "true",
           EVE_CODE_BENCH_MODEL: options.model,
+          EVE_CODE_BENCH_REASONING: options.reasoning,
         },
         maxBuffer: 16 * 1024 * 1024,
       });

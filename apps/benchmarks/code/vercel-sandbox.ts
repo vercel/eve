@@ -100,11 +100,20 @@ async function createWithRetry<T>(fn: () => Promise<T>, maxRetries = 8): Promise
   }
 }
 
-async function createTarGz(cwd: string, entries: readonly string[]): Promise<Buffer> {
-  const { stdout } = await execFileAsync("tar", ["-czf", "-", "-C", cwd, ...entries], {
-    encoding: "buffer",
-    maxBuffer: 512 * 1024 * 1024,
-  });
+async function createTarGz(
+  cwd: string,
+  entries: readonly string[],
+  excludes: readonly string[] = [],
+): Promise<Buffer> {
+  const excludeArgs = excludes.flatMap((pattern) => ["--exclude", pattern]);
+  const { stdout } = await execFileAsync(
+    "tar",
+    [...excludeArgs, "-czf", "-", "-C", cwd, ...entries],
+    {
+      encoding: "buffer",
+      maxBuffer: 512 * 1024 * 1024,
+    },
+  );
   return stdout;
 }
 
@@ -180,7 +189,7 @@ async function prepareTemplateSnapshot(options: {
       throw new Error(`Failed to install docker in sandbox template: ${await installRes.stderr()}`);
     }
 
-    const runnerTar = await createTarGz(THIS_DIR, ["."]);
+    const runnerTar = await createTarGz(THIS_DIR, ["."], [".output", ".generated"]);
     const cacheTar = await createTarGz(cacheDir, [...tarEntries]);
     await template.writeFiles([
       { path: "/tmp/runner.tar.gz", content: runnerTar },

@@ -7,7 +7,7 @@ import test from "node:test";
 import { snapshotFromReport } from "../../../.github/scripts/eve-code-docs-snapshot.mjs";
 import { loadTaskFromDir } from "./datasets.ts";
 import { parseRewardText } from "./docker.ts";
-import { taskContainerEnvironment } from "./harnesses/container-sandbox.mjs";
+import { taskContainerEnvironment } from "./eve-code-app/agent/lib/container-sandbox.mjs";
 import { summarizeEvents } from "./harnesses/eve-runner.mjs";
 import {
   buildOpencodeConfig,

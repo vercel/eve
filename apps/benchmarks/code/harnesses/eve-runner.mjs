@@ -124,6 +124,7 @@ function startProductionServer({
   token,
   taskEnv,
   model,
+  reasoning,
   workdir,
   logPath,
 }) {
@@ -142,6 +143,7 @@ function startProductionServer({
     CODE_BENCH_TASK_WORKDIR: workdir,
     CODE_BENCH_TASK_ENV: taskEnv,
     EVE_CODE_BENCH_MODEL: model,
+    EVE_CODE_BENCH_REASONING: reasoning,
   };
   delete env.EVE_DEV;
   delete env.CI;
@@ -208,6 +210,7 @@ async function main() {
   const logsDir = process.env.CODE_BENCH_LOGS_DIR || "/logs/agent";
   const workdir = process.env.CODE_BENCH_TASK_WORKDIR || "/app";
   const model = process.env.CODE_BENCH_MODEL || "anthropic/claude-sonnet-5.5";
+  const reasoning = process.env.CODE_BENCH_REASONING || "high";
   const host = process.env.EVE_HOST ?? "127.0.0.1";
   const port = Number(process.env.EVE_PORT ?? "3024");
   const token = randomBytes(24).toString("hex");
@@ -238,6 +241,7 @@ async function main() {
       token,
       taskEnv,
       model,
+      reasoning,
       workdir,
       logPath: serverLogPath,
     });

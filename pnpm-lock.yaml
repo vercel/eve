@@ -320,6 +320,9 @@ importers:
       '@vercel/sandbox':
         specifier: 'catalog:'
         version: 4.0.0
+      eve:
+        specifier: workspace:*
+        version: link:../../packages/eve
       jiti:
         specifier: 2.7.0
         version: 2.7.0
