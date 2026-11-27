@@ -15,6 +15,7 @@ import {
   ConversationContextKey,
   normalizeConversationContext,
 } from "#shared/conversation-context.js";
+import { EVE_MESSAGE_STREAM_VERSION } from "#protocol/session-http.js";
 import { isSampledTrace } from "#shared/trace-policy.js";
 import { resolveForwardedTraceSeed } from "#shared/forwarded-trace-policy.js";
 
@@ -22,7 +23,26 @@ export const EVE_PREWARM_ATTRIBUTE = "$eve.prewarm";
 
 export const EVE_VERSION_ATTRIBUTE = "$eve.version";
 
+export const EVE_STREAM_VERSION_ATTRIBUTE = "$eve.stream_version";
+
 export const EVE_TYPE_ATTRIBUTE = "$eve.type";
+
+const FIRST_V27_MINOR = 84;
+const SEMVER_PREFIX = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/;
+
+export function resolveSessionStreamVersion(
+  attributes: Readonly<Record<string, string | undefined>> | undefined,
+): string | undefined {
+  const explicit = attributes?.[EVE_STREAM_VERSION_ATTRIBUTE];
+  if (explicit !== undefined && explicit.length > 0) return explicit;
+  const eveVersion = attributes?.[EVE_VERSION_ATTRIBUTE];
+  if (eveVersion === undefined) return undefined;
+  const match = SEMVER_PREFIX.exec(eveVersion.trim());
+  if (match === null) return undefined;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > 0 || minor >= FIRST_V27_MINOR ? EVE_MESSAGE_STREAM_VERSION : undefined;
+}
 
 export const EVE_SESSION_ATTRIBUTE = "$eve.session";
 

@@ -5,6 +5,8 @@ import {
   buildSubagentRootAttributes,
   deriveSessionTitle,
   EVE_SESSION_TITLE_MAX_CHARS,
+  EVE_STREAM_VERSION_ATTRIBUTE,
+  EVE_VERSION_ATTRIBUTE,
   isWorkflowTraceContentVisible,
   readChannelKind,
   readChannelRequestId,
@@ -13,6 +15,7 @@ import {
   readRootSessionId,
   readScheduleId,
   readSessionTraceId,
+  resolveSessionStreamVersion,
 } from "#execution/eve-workflow-attributes.js";
 import {
   ChannelInstrumentationKey,
@@ -529,5 +532,31 @@ describe("readSessionTraceId", () => {
 
   it("returns undefined when no seed is present", () => {
     expect(readSessionTraceId({})).toBeUndefined();
+  });
+});
+
+describe("resolveSessionStreamVersion", () => {
+  it("prefers an explicit $eve.stream_version attribute", () => {
+    expect(
+      resolveSessionStreamVersion({
+        [EVE_STREAM_VERSION_ATTRIBUTE]: "27",
+        [EVE_VERSION_ATTRIBUTE]: "0.71.0",
+      }),
+    ).toBe("27");
+    expect(resolveSessionStreamVersion({ [EVE_STREAM_VERSION_ATTRIBUTE]: "26" })).toBe("26");
+  });
+
+  it("classifies $eve.version 0.84.0 and above as stream version 27", () => {
+    for (const version of ["0.84.0", "0.99.0", "1.0.0-rc.1", "1.0.0-rc.6", "1.5.0", "2.0.0"]) {
+      expect(resolveSessionStreamVersion({ [EVE_VERSION_ATTRIBUTE]: version })).toBe("27");
+    }
+  });
+
+  it("returns undefined for pre-0.84.0, missing, or unrecognized $eve.version values", () => {
+    expect(resolveSessionStreamVersion(undefined)).toBeUndefined();
+    expect(resolveSessionStreamVersion({})).toBeUndefined();
+    for (const version of ["0.0.0", "0.0.1", "0.54.3", "0.71.0", "0.83.3", "unknown"]) {
+      expect(resolveSessionStreamVersion({ [EVE_VERSION_ATTRIBUTE]: version })).toBeUndefined();
+    }
   });
 });

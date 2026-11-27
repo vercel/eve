@@ -120,6 +120,10 @@ export async function assertSessionHistoryReadable(sessionId: string): Promise<v
   await sessionLineStore(sessionId).assertReadable(sessionId);
 }
 
+export async function readSessionStreamVersion(sessionId: string): Promise<string | undefined> {
+  return await sessionLineStore(sessionId).streamVersion?.(sessionId);
+}
+
 export async function* streamSessionLines(
   sessionId: string,
   options: SessionEventStreamOptions = {},

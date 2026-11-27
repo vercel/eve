@@ -64,6 +64,7 @@ export interface InternalSession extends Session {
   getChildBinding?(childSessionId: string): Promise<RemoteChildBinding | undefined>;
   getLineStream(options?: SessionStreamOptions): Promise<ReadableStream<unknown>>;
   getStreamTailIndex(): Promise<number>;
+  getStreamVersion?(): Promise<string | undefined>;
   hasRunnableOwner(): Promise<boolean>;
 }
 
@@ -269,6 +270,9 @@ export function createSession(
     },
     async getStreamTailIndex() {
       return runtime.getStreamTailIndex(id);
+    },
+    async getStreamVersion() {
+      return await runtime.getStreamVersion?.(id);
     },
     async hasRunnableOwner() {
       return (await runtime.hasRunnableOwner?.(id)) ?? true;
