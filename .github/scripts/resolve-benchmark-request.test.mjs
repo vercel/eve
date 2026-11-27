@@ -12,7 +12,7 @@ import {
   resolveBenchmarkRequest,
 } from "./resolve-benchmark-request.mjs";
 
-const models = { anthropic: "anthropic/claude-sonnet-5.5", openai: "openai/gpt-6.1-sol" };
+const models = { anthropic: "anthropic/claude-sonnet-5.5", openai: "openai/gpt-6.2-sol" };
 const anthropic = { family: "anthropic", model: models.anthropic };
 const openai = { family: "openai", model: models.openai };
 const sweLean = { dataset: "swe-lean", reasoning: "low", attempts: "5" };

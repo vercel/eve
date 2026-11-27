@@ -83,7 +83,7 @@ The `eve-code` workflow benchmarks eve-code, opencode, pi, and [fx](https://fx.s
 | Family      | Model                                                                             |
 | ----------- | --------------------------------------------------------------------------------- |
 | `anthropic` | `EVE_CODE_BENCH_MODEL` repository variable, default `anthropic/claude-sonnet-5.5` |
-| `openai`    | `EVE_CODE_BENCH_OPENAI_MODEL` repository variable, default `openai/gpt-6.1-sol`   |
+| `openai`    | `EVE_CODE_BENCH_OPENAI_MODEL` repository variable, default `openai/gpt-6.2-sol`   |
 
 Every trial runs in its own Vercel Sandbox, up to 16 at a time per harness. Each harness is compared with its own latest result from `main` on the same dataset and model, never with another model's results. The report covers resolved tasks, latency, and token usage. It goes to the job summary and, on PRs, a PR comment.
 
