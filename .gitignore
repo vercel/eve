@@ -18,6 +18,7 @@ coverage/
 .eve-bench-runner/
 benchmark-results/
 .vitest/
+apps/benchmarks/.cache/
 apps/benchmarks/experiments/
 apps/benchmarks/results/
 apps/benchmarks/evals/*/PROMPT.md

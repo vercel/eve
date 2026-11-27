@@ -12,7 +12,7 @@ import {
   resolveBenchmarkRequest,
 } from "./resolve-benchmark-request.mjs";
 
-const models = { anthropic: "anthropic/claude-sonnet-5.5", openai: "openai/gpt-6.1-sol" };
+const models = { anthropic: "anthropic/claude-sonnet-5.5", openai: "openai/gpt-6.2-sol" };
 const anthropic = { family: "anthropic", model: models.anthropic };
 const openai = { family: "openai", model: models.openai };
 const sweLean = { dataset: "swe-lean", reasoning: "low", attempts: "5" };
@@ -304,10 +304,10 @@ test("manual dispatch defaults to the default harnesses and validates an explici
     sha: input.context.sha,
     pr: "",
   });
-  input.context.payload.inputs.harness = "codex";
-  assert.equal((await resolve(input)).harness, "codex");
-  input.context.payload.inputs.harness = "codex, pi";
-  assert.equal((await resolve(input)).harness, "codex,pi");
+  input.context.payload.inputs.harness = "opencode";
+  assert.equal((await resolve(input)).harness, "opencode");
+  input.context.payload.inputs.harness = "opencode, pi";
+  assert.equal((await resolve(input)).harness, "opencode,pi");
   input.context.payload.inputs.harness = "missing";
   await assert.rejects(resolve(input), /Supported benchmark harnesses/u);
 });
@@ -387,31 +387,24 @@ test("workflow names and concurrency preserve independent authorized harness run
     /needs: request\n\s+if: needs\.request\.outputs\.run == 'true'\n\s+concurrency:/u,
   );
   assert.match(workflow, /push:\n\s+branches: \[main\]/u);
-  // Each dataset's attempts run in waves of the action's maximum of 16 sandboxes.
-  assert.match(workflow, /attempts: \$\{\{ needs\.request\.outputs\.attempts \}\}/u);
-  assert.match(workflow, /concurrency: "16"/u);
-  assert.match(
-    workflow,
-    /agent-ref: \$\{\{ needs\.request\.outputs\.agent-source == 'true' && needs\.request\.outputs\.sha \|\| '' \}\}/u,
-  );
+  assert.match(workflow, /--attempts "\$\{\{ needs\.request\.outputs\.attempts \}\}"/u);
+  assert.match(workflow, /--concurrency 16/u);
+  assert.match(workflow, /ref: \$\{\{ needs\.request\.outputs\.sha \}\}/u);
 });
 
-test("the consumer tracks eve-bench main and owns its model selection", async () => {
+test("the workflow runs the in-repo code-bench runner and owns its model selection", async () => {
   const workflow = await readFile(
     new URL("../workflows/eve-code-benchmark.yml", import.meta.url),
     "utf8",
   );
-  assert.match(workflow, /repository: vercel-labs\/eve-bench\n\s+ref: main\n/u);
-  assert.match(workflow, /uses: \.\/\.eve-bench-action/u);
-  assert.match(workflow, /reasoning: \$\{\{ needs\.request\.outputs\.reasoning \}\}\n/u);
-  assert.doesNotMatch(workflow, /runner-revision:/u);
-  assert.match(workflow, /blob-token: \$\{\{ secrets\.EVE_BENCH_BLOB_READ_WRITE_TOKEN \}\}/u);
-  assert.doesNotMatch(workflow, /artifact-id/u);
-  assert.match(workflow, /dataset: \$\{\{ needs\.request\.outputs\.dataset \}\}\n/u);
+  assert.doesNotMatch(workflow, /vercel-labs\/eve-bench/u);
+  assert.doesNotMatch(workflow, /EVE_BENCH_SSH_KEY/u);
   assert.match(
     workflow,
-    /contenders: \$\{\{ needs\.request\.outputs\.agent-source == 'true' && 'eve-code@baseline,eve-code@head' \|\| '' \}\}\n/u,
+    /OPENAI_MODEL: \$\{\{ vars\.EVE_CODE_BENCH_OPENAI_MODEL \|\| 'openai\/gpt-6\.2-sol' \}\}/u,
   );
-  assert.doesNotMatch(workflow, /^\s+task:/mu);
-  assert.equal((workflow.match(/uses: \.\/\.eve-bench-action/gu) ?? []).length, 1);
+  assert.match(workflow, /pnpm --filter @eve-internal\/benchmarks code-bench/u);
+  assert.match(workflow, /--reasoning "\$\{\{ needs\.request\.outputs\.reasoning \}\}"/u);
+  assert.match(workflow, /--dataset "\$\{\{ needs\.request\.outputs\.dataset \}\}"/u);
+  assert.match(workflow, /--execution vercel-sandbox/u);
 });

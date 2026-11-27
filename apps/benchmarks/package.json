@@ -7,12 +7,14 @@
     "benchmark": "node run.mjs",
     "benchmark:publish": "node publish.mjs",
     "benchmark:export": "node scripts/export-results.mjs",
-    "test": "node --test lib/*.test.mjs lib/setups/*.test.mjs scripts/*.test.mjs",
+    "code-bench": "node code/cli.ts",
+    "test": "node --test lib/*.test.mjs lib/setups/*.test.mjs scripts/*.test.mjs code/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "benchmark:timings": "node scripts/timings.mjs"
   },
   "dependencies": {
     "@vercel/agent-eval": "3.0.0",
+    "@vercel/sandbox": "catalog:",
     "jiti": "2.7.0",
     "zod": "catalog:"
   },

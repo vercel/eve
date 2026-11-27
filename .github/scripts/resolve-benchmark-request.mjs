@@ -1,23 +1,10 @@
-export const BENCHMARK_HARNESSES = [
-  "eve-code",
-  "codex",
-  "opencode",
-  "claude-code",
-  "pi",
-  "hermes",
-  "fx",
-  "oracle",
-];
+export const BENCHMARK_HARNESSES = ["eve-code", "opencode", "pi", "fx"];
 
 /** Harnesses compared on every automatic run; eve-code against opencode, pi, and fx. */
 export const DEFAULT_HARNESSES = ["eve-code", "opencode", "pi", "fx"];
 
 /**
- * eve-bench datasets a benchmark can run, with the settings each was calibrated for.
- * swe-lean needs five attempts to separate a 10-15% token change from trial noise.
- * deepswe-lean resolves almost nothing at low reasoning; its stored baselines use
- * three attempts. eve-bench compares only whole-dataset results with matching
- * attempts, so changing either count needs fresh baselines for every harness.
+ * Code benchmark datasets, with the settings each was calibrated for.
  */
 export const BENCHMARK_DATASETS = {
   "swe-lean": { reasoning: "low", attempts: "5" },
