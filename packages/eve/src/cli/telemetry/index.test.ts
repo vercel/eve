@@ -19,6 +19,11 @@ import {
   readEveTelemetryPreference,
   readOrCreateEveTelemetryIdentity,
 } from "#cli/telemetry/preference.js";
+import { resolveEveTelemetryInternal } from "#cli/telemetry/internal.js";
+
+vi.mock("#cli/telemetry/internal.js", () => ({
+  resolveEveTelemetryInternal: vi.fn(async () => undefined),
+}));
 
 vi.mock("#cli/telemetry/identity.js", () => ({
   createEveTelemetryIdentity: vi.fn(() => ({
@@ -52,6 +57,7 @@ afterEach(() => {
     projectSalt: "ephemeral_project_salt_123",
   });
   vi.mocked(isEphemeralEveTelemetryEnvironment).mockReset().mockReturnValue(false);
+  vi.mocked(resolveEveTelemetryInternal).mockReset().mockResolvedValue(undefined);
 });
 
 describe("canonicalCommand", () => {
@@ -114,6 +120,21 @@ describe("createEveCliTelemetry", () => {
 
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("eve telemetry disable"));
     expect(markEveTelemetryNotified).toHaveBeenCalled();
+  });
+
+  it("shows the internal flag in debug output", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_TELEMETRY_DEBUG", "1");
+    vi.mocked(resolveEveTelemetryInternal).mockResolvedValue(true);
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await createEveCliTelemetry("1.0.0").flush();
+
+    const events = JSON.parse(
+      String(write.mock.calls[0]?.[0]).replace("[eve telemetry] ", ""),
+    ) as Array<{ key: string; value: string }>;
+    expect(events).toContainEqual(expect.objectContaining({ key: "internal", value: "true" }));
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it("records resolved dev context without inspecting command arguments", async () => {
