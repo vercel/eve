@@ -16,10 +16,7 @@ import { createChannelRouteArgs } from "#channel/route-args.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
-import {
-  type NitroArtifactsConfig,
-  resolveNitroCompiledArtifactsSource,
-} from "#internal/nitro/routes/runtime-artifacts.js";
+import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { traceChannelRequest } from "#internal/nitro/routes/channel-request-instrumentation.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { createRouteInvokeTool } from "#internal/nitro/routes/route-invoke-tool.js";
@@ -39,7 +36,7 @@ export async function dispatchChannelRequest(
   return await traceChannelRequest({ request: event.req, routeKey }, async (span) => {
     const requestTraceContext =
       span?.reference ?? otelTrace.getSpan(otelContext.active())?.spanContext();
-    const bundle = await resolveNitroChannelRuntimeBundle(config);
+    const bundle = await resolveNitroChannelRuntimeBundle(config, event.req);
     const matchedChannel = channelsByRouteKey(bundle.channels).get(routeKey);
 
     if (matchedChannel === undefined) {
@@ -102,7 +99,7 @@ export async function dispatchChannelWebSocketRequest(
   config: NitroArtifactsConfig,
 ): Promise<WebSocketRouteHooks> {
   const params = getRouterParams(event, { decode: true });
-  const bundle = await resolveNitroChannelRuntimeBundle(config);
+  const bundle = await resolveNitroChannelRuntimeBundle(config, event.req);
   const matchedChannel = channelsByRouteKey(bundle.channels).get(routeKey);
 
   if (matchedChannel === undefined || matchedChannel.websocket === undefined) {
@@ -219,15 +216,15 @@ async function buildRouteArgs(input: {
     deliverySource,
   );
 
-  const agent = createAgentDescriptionRouteArgs(() => resolveNitroCompiledArtifactsSource(config));
+  const agent = createAgentDescriptionRouteArgs(() => bundle.compiledArtifactsSource);
   return createChannelRouteArgs({
     adapter,
-    compiledArtifactsSource: () => resolveNitroCompiledArtifactsSource(config),
+    compiledArtifactsSource: () => bundle.compiledArtifactsSource,
     agent: {
       ...agent.args,
       invokeTool: createRouteInvokeTool({
         agentName: bundle.agentName,
-        config,
+        compiledArtifactsSource: bundle.compiledArtifactsSource,
         origin: { adapter, agentName: bundle.agentName, channelName },
         requestUrl: event.req.url,
       }),

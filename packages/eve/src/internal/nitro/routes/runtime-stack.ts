@@ -3,6 +3,8 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { resolveRemoteAgentStreamHeaders } from "#execution/agent-sessions/remote.js";
 import type { RemoteAgentStreamHeadersResolver } from "#internal/nitro/routes/channel-route-context.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { readCompiledArtifactsOverride } from "#runtime/compiled-artifacts-override.js";
+import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import {
   type NitroArtifactsConfig,
@@ -11,6 +13,7 @@ import {
 
 interface NitroChannelRuntimeBundle {
   readonly agentName: string;
+  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly channels: readonly ResolvedChannelDefinition[];
   readonly resolveRemoteAgentStreamHeaders?: RemoteAgentStreamHeadersResolver;
   readonly runtime: Runtime;
@@ -18,14 +21,18 @@ interface NitroChannelRuntimeBundle {
 
 export async function resolveNitroChannelRuntimeBundle(
   config: NitroArtifactsConfig,
+  request?: Request,
 ): Promise<NitroChannelRuntimeBundle> {
-  const compiledArtifactsSource = resolveNitroCompiledArtifactsSource(config);
+  const compiledArtifactsSource =
+    (request === undefined ? undefined : await readCompiledArtifactsOverride()?.resolve(request)) ??
+    resolveNitroCompiledArtifactsSource(config);
   const bundle = await getCompiledRuntimeAgentBundle({
     compiledArtifactsSource,
   });
   const runtime = createWorkflowRuntime({ compiledArtifactsSource });
   return {
     agentName: bundle.resolvedAgent.config?.name ?? "eve",
+    compiledArtifactsSource,
     channels: bundle.graph.root.channels,
     resolveRemoteAgentStreamHeaders: async (input) =>
       await resolveRemoteAgentStreamHeaders({ bundle, ...input }),

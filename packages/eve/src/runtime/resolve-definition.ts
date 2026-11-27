@@ -78,7 +78,7 @@ export async function resolveScheduleCollection(
     ) as DynamicSchedulesDefinition<unknown>;
     const definition =
       collection.namedScope === undefined
-        ? authored
+        ? { ...authored }
         : namedScopeDefinition(authored, collection.namedScope.name);
     stampScheduleCollectionSource(definition, {
       application: collection.application,
