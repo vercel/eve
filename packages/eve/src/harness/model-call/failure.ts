@@ -33,8 +33,9 @@ export function modelCallErrorInfo(error: unknown): ErrorInfo {
 export async function reportModelCallFailure(
   step: Step,
   error: unknown,
-  usage?: Usage,
+  options: { readonly canEndSession: boolean; readonly usage?: Usage },
 ): Promise<StepResult> {
+  const { usage } = options;
   step.instrumentation?.recordError(error);
   if (step.emit === undefined) throw error;
   const { sessionId } = step.session;
@@ -77,7 +78,7 @@ export async function reportModelCallFailure(
       : rejection !== null
         ? { errorId, message: toErrorMessage(error), name: rejection.name, ...diagnostics }
         : { ...formatError(error, errorId), ...diagnostics };
-  const terminal = classifyModelCallError(error) === "terminal";
+  const terminal = options.canEndSession && classifyModelCallError(error) === "terminal";
   if (terminal && summary !== null) {
     log.error(`${summary.name}: ${summary.message}`, { ...coordinates, hint: summary.hint });
   } else {

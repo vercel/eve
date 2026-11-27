@@ -16,7 +16,6 @@ import {
   type ModelCredentialFailureCode,
   rejectsCredential,
 } from "./errors.js";
-import { modelCallErrorInfo } from "./failure.js";
 
 export async function pauseForModelSignIn(
   step: Step,
@@ -49,16 +48,6 @@ export async function failModelCredential(
 ): Promise<StepResult> {
   const name = providerName(step.view(), scoped);
   return await failTurn(step, error, code, credentialFailureMessage(code, name, error));
-}
-
-export async function failClientError(
-  step: Step,
-  error: unknown,
-  scoped: ScopedAuthorization,
-): Promise<StepResult> {
-  if (rejectsCredential(error))
-    return await failModelCredential(step, "MODEL_AUTHORIZATION_FAILED", error, scoped);
-  return await failTurn(step, error, "MODEL_CALL_FAILED", modelCallErrorInfo(error).message);
 }
 
 function credentialFailureMessage(

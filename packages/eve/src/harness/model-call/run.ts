@@ -6,7 +6,7 @@ import { stepCatalog } from "#definitions/step.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import { enforceBudget, humanInputContext } from "#harness/hitl/index.js";
-import { failClientError, failModelCredential, pauseForModelSignIn } from "./credential-failure.js";
+import { failModelCredential, pauseForModelSignIn } from "./credential-failure.js";
 import {
   isScopedAuthorizationRequiredError,
   type ScopedAuthorizationRequiredError,
@@ -38,7 +38,7 @@ import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
 import { type CredentialedModel, credentialedModel } from "./credential.js";
-import { credentialErrorIn, isTerminalClientError, type ModelCredentialFailure } from "./errors.js";
+import { credentialErrorIn, type ModelCredentialFailure } from "./errors.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
@@ -98,12 +98,11 @@ export async function runModelStep(
     if (credentialError !== undefined && generation.interrupted) return caller.steered();
     if (credentialError !== undefined)
       return await failOrPauseForSignIn(step, credentialError, async () => await caller.abandon());
-    const compactionFailed = await caller.failIfCompactionFailed();
+    const canEndSession = resolved.scoped === undefined;
+    const compactionFailed = await caller.failIfCompactionFailed(canEndSession);
     if (compactionFailed !== undefined) return compactionFailed;
     if (generation.interrupted) return caller.steered();
-    if (resolved.scoped !== undefined && isTerminalClientError(error))
-      return await failClientError(step, error, resolved.scoped);
-    return reportModelCallFailure(step, error, caller.takeUnkeptUsage());
+    return reportModelCallFailure(step, error, { canEndSession, usage: caller.takeUnkeptUsage() });
   }
 
   await recordModelUsage(step, { model: resolved.model, tools: catalog.advertised.size });

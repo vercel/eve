@@ -1,4 +1,4 @@
-import { simulateReadableStream } from "ai";
+import { APICallError, simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -145,7 +145,7 @@ describe("a model that needs the caller's credential", () => {
     );
   });
 
-  it("leaves the person's credential alone when compaction.model rejects its own", async () => {
+  it("leaves the person's credential alone and fails only the turn when compaction.model rejects its own", async () => {
     const billing = billingProvider({ token: "billing-token" });
     billing.options = { bigFirstAnswer: true };
     let summaries = 0;
@@ -169,35 +169,77 @@ describe("a model that needs the caller's credential", () => {
         await session.send("And yesterday's?");
         const settled = await session.stream.nextUntil(
           "second turn",
-          (event) => isSignInOpened(event) || event.type === "session.ended",
+          (event) =>
+            isSignInOpened(event) || isTurnSettled(event) || event.type === "session.ended",
         );
         expect(settled.filter(isSignInOpened)).toEqual([]);
         expect(billing.evictions).toBe(0);
         expect(summaries).toBe(1);
-        expect(filterEventsByType(settled, "session.ended").at(-1)?.data).toMatchObject({
+        expect(filterEventsByType(settled, "session.ended")).toEqual([]);
+        expect(turnSettled(settled)).toMatchObject({
           error: { code: "MODEL_CALL_FAILED" },
+          outcome: "failed",
         });
       },
     );
   });
 
+  it("fails only the turn when the provider refuses the person's compaction summary", async () => {
+    const billing = billingProvider({ token: "billing-token" });
+    await withSession(
+      billing,
+      async (session) => {
+        await session.stream.nextUntil("first answer", isTurnSettled);
+        await session.send("And yesterday's?");
+        const settled = await session.stream.nextUntil(
+          "second turn",
+          (event) => isTurnSettled(event) || event.type === "session.ended",
+        );
+        expect(filterEventsByType(settled, "session.ended")).toEqual([]);
+        expect(turnSettled(settled)).toMatchObject({
+          error: { code: "MODEL_CALL_FAILED", message: "Forbidden" },
+          outcome: "failed",
+        });
+      },
+      { bigFirstAnswer: true, forbidSummary: true },
+    );
+  });
+
   it.each([
-    ["403", 403, "Forbidden", "Forbidden"],
+    ["a 403", Object.assign(new Error("Forbidden"), { statusCode: 403 }), "Forbidden"],
     [
-      "400",
-      400,
-      "The number of function response parts must equal the number of function calls.",
-      "The number of function response parts must equal the number of function calls.",
+      "a 400 for a flagged prompt",
+      new APICallError({
+        isRetryable: false,
+        message: "Bad Request",
+        requestBodyValues: {},
+        responseBody: JSON.stringify({
+          error: {
+            code: "invalid_prompt",
+            message: "Your prompt was flagged as potentially violating our usage policy.",
+            type: "invalid_request_error",
+          },
+        }),
+        statusCode: 400,
+        url: "https://provider.example/v1/responses",
+      }),
+      "Your prompt was flagged as potentially violating our usage policy.",
     ],
     [
-      "402",
-      402,
-      "Project budget exceeded. Current spend: $1.01, limit: $1.00.",
+      "a 402 for a spent budget",
+      Object.assign(new Error("Project budget exceeded. Current spend: $1.01, limit: $1.00."), {
+        statusCode: 402,
+      }),
       "The AI Gateway project budget has been exceeded.",
     ],
+    [
+      "a model it doesn't know, with no status",
+      Object.assign(new Error("No such model: refusing/model"), { name: "AI_NoSuchModelError" }),
+      "The requested model is not available.",
+    ],
   ])(
-    "fails only the turn with the provider's error when it answers a %s",
-    async (status, statusCode, thrown, message) => {
+    "fails only the turn with the provider's error when it answers %s",
+    async (_case, thrown: Error, message) => {
       const refusing = defineModel({
         auth: { displayName: "Billing", getToken: async () => ({ token: "bob-token" }) },
         authKey: "refusing",
@@ -205,14 +247,15 @@ describe("a model that needs the caller's credential", () => {
           markMockModel(
             new MockLanguageModelV4({
               doStream: async () => {
-                throw Object.assign(new Error(thrown), { statusCode });
+                throw thrown;
               },
             }),
           ),
         id: "refusing/model",
       });
+      sessions += 1;
       await withAgent(
-        `model-sign-in-provider-${status}`,
+        `model-sign-in-provider-${String(sessions)}`,
         defineAgent({ model: refusing, modelContextWindowTokens: 200_000 }),
         async (session) => {
           const settled = await session.stream.nextUntil(
@@ -702,6 +745,7 @@ describe("a model sign-in that ends without a credential", () => {
 
 interface SessionOptions {
   readonly bigFirstAnswer?: boolean;
+  readonly forbidSummary?: boolean;
   readonly tools?: readonly ReturnType<typeof mockTool>[];
   readonly rejectStaleOnlyInSummary?: boolean;
   readonly scheduled?: boolean;
@@ -902,6 +946,8 @@ function billedModel(billing: BillingProvider, token: string, rejectEveryToken: 
       doStream: async ({ prompt }) => {
         if (JSON.stringify(prompt).includes("previous checkpoint")) {
           billing.summaryTokens.push(token);
+          if (billing.options.forbidSummary === true)
+            throw Object.assign(new Error("Forbidden"), { statusCode: 403 });
           if (token === "stale-token") throw rejected();
           return textStreamResult("Checkpoint: Alice asked for today's issues.");
         }

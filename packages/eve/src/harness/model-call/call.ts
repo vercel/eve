@@ -198,13 +198,13 @@ export class ModelCaller {
     await step.apply(retryRun({ attempt, error: modelCallErrorInfo(error), runId, usage }));
   }
 
-  async failIfCompactionFailed(): Promise<StepResult | undefined> {
+  async failIfCompactionFailed(canEndSession: boolean): Promise<StepResult | undefined> {
     if (this.compactionFailure === undefined) return undefined;
     const { error } = this.compactionFailure;
     if (error instanceof CompactionOverLimitError) {
       return reportCompactionFailure(this.step, error);
     }
-    return reportModelCallFailure(this.step, error);
+    return reportModelCallFailure(this.step, error, { canEndSession });
   }
 
   async abandon(): Promise<void> {

@@ -249,16 +249,6 @@ export function rejectsCredential(error: unknown): boolean {
   return readModelCallErrorSignals(error).statusCode === 401;
 }
 
-export function isTerminalClientError(error: unknown): boolean {
-  const status = readModelCallErrorSignals(error).statusCode;
-  return (
-    status !== undefined &&
-    status >= 400 &&
-    status < 500 &&
-    classifyModelCallError(error) === "terminal"
-  );
-}
-
 export function classifyModelCallError(error: unknown): "retry" | "recoverable" | "terminal" {
   if (isTurnCancellation(error) || credentialErrorIn(error) !== undefined) {
     return "terminal";
