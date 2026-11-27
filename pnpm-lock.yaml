@@ -317,12 +317,6 @@ importers:
       '@vercel/agent-eval':
         specifier: 3.0.0
         version: 3.0.0(supports-color@10.2.2)
-      '@vercel/sandbox':
-        specifier: 'catalog:'
-        version: 4.0.0
-      eve:
-        specifier: workspace:*
-        version: link:../../packages/eve
       jiti:
         specifier: 2.7.0
         version: 2.7.0

@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["extension/**/*.ts", "test/**/*.ts"]
+  "include": ["agent/**/*.ts", "extension/**/*.ts", "test/**/*.ts"]
 }

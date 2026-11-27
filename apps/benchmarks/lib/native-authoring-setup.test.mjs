@@ -78,7 +78,7 @@ test("bootstraps the selected source before a native agent starts", async () => 
   );
   assert.match(
     commands[4].args[1],
-    /npm install --save-dev --save-exact just-bash@3\.6\.0 vitest@5\.1\.0/u,
+    /npm install --save-dev --save-exact just-bash@3\.6\.0 vitest@5\.0\.2/u,
   );
   assert.match(commands[5].args[1], /mkdir -p agent\/lib/u);
   assert.match(commands[6].args[1], /rm -f AGENTS\.md CLAUDE\.md GEMINI\.md/u);
