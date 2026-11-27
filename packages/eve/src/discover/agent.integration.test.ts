@@ -589,6 +589,34 @@ describe("discoverAgent (memory)", () => {
     ]);
   });
 
+  it("suggests the intended name for misspelled agent directories", async () => {
+    const project = buildMemoryAgentProject({
+      agentFiles: {
+        "instructions.md": "You are a precise assistant.",
+        "tool/get_weather.ts": "export default {};",
+        "subagents/researcher/agent.ts": "export default {};",
+        "subagents/researcher/schedule/daily.md": "Run daily.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics.map(({ code, message }) => ({ code, message }))).toEqual([
+      {
+        code: DISCOVER_UNSUPPORTED_DIRECTORY,
+        message: 'Ignoring unsupported directory "tool/" in the agent root. Did you mean "tools/"?',
+      },
+      {
+        code: DISCOVER_UNSUPPORTED_DIRECTORY,
+        message: 'Ignoring unsupported directory "schedule/" in the local subagent root.',
+      },
+    ]);
+  });
+
   it("silently ignores generated runtime directories", async () => {
     const project = buildMemoryAgentProject({
       agentDirectories: [".devtools", ".eve", ".next", ".output", ".vercel", "node_modules"],

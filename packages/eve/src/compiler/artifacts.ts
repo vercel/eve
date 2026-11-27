@@ -23,6 +23,8 @@ import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { compileAgentManifestWithModuleGraph } from "#compiler/normalize-manifest.js";
 import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
+import { diagnoseAuthoredSources } from "#compiler/authored-checks.js";
+import { diagnoseProject } from "#compiler/project-checks.js";
 import { materializeWorkspaceResources } from "#compiler/workspace-resources.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared-artifacts.js";
@@ -187,6 +189,10 @@ export async function writeCompilerArtifacts(
     compileDirectoryPath: paths.compileDirectoryPath,
     manifest: compiled.manifest,
   });
+  diagnostics.push(
+    ...(await diagnoseAuthoredSources(compiledManifest)),
+    ...(await diagnoseProject(compiledManifest)),
+  );
   const modelMetadata = await modelCatalog.loadModelMetadata();
   const diagnosticsArtifact = createCompilerDiagnosticsArtifact(diagnostics);
   const compiledManifestJson = serializeArtifactJson(compiledManifest);

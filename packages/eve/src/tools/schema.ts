@@ -232,7 +232,19 @@ export function toModelSchema(
 
 function toModelJsonSchema(source: StandardSchemaV1, direction: SchemaDirection): JsonObject {
   const json = serializeSchema(source, direction) as JsonObject;
-  return plainJsonSchemas.has(source) ? json : (closeObjectSchemas(json) as JsonObject);
+  return plainJsonSchemas.has(source)
+    ? json
+    : typeRootObjectUnion(closeObjectSchemas(json) as JsonObject);
+}
+
+function typeRootObjectUnion(schema: JsonObject): JsonObject {
+  if (schema.type !== undefined) return schema;
+  const branches = schema.anyOf ?? schema.oneOf;
+  return Array.isArray(branches) &&
+    branches.length > 0 &&
+    branches.every((branch) => isObject(branch) && branch.type === "object")
+    ? { type: "object", ...schema }
+    : schema;
 }
 
 function closeObjectSchemas(schema: unknown): unknown {
