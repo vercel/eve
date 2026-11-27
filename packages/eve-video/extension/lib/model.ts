@@ -23,11 +23,11 @@ const MODEL_GUIDANCE: readonly [RegExp, string][] = [
   ],
   [
     /(?:^|\/)veo-3\.1.*lite/i,
-    "Resolutions: 720p or 1080p. Generation-only (no native video-to-video edit or extend).",
+    "Resolutions: 720p or 1080p. Aspect ratios: 16:9 or 9:16 only. Durations: 4, 6, or 8s only. Text-to-video only (no native video edit or extend).",
   ],
   [
     /(?:^|\/)veo-/i,
-    "Resolutions: 720p, 1080p, or 4k. Generation-only (no native video-to-video edit or extend).",
+    "Resolutions: 720p, 1080p, or 4k. Aspect ratios: 16:9 or 9:16 only. Durations: 4, 6, or 8s only. Supports `start`/`end` frames and up to 3 JPG/PNG image `references` (do not combine `references` with `start`/`end`); no native in-place video edit.",
   ],
   [
     /(?:^|\/)flux-3-video/i,

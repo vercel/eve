@@ -228,6 +228,10 @@ describe("model resolution, webhook verification, and in-memory storage", () => 
       /bytedance\/seedance-2\.5[\s\S]*480p, 720p, or 1080p[\s\S]*duration=6s, aspectRatio=16:9, resolution=1080p, audio=true[\s\S]*max duration 12s, max 2 video\(s\) per call/,
     );
     assert.match(
+      Mod.formatConfiguredModelGuidance({ model: "google/veo-3.1-generate-001" }),
+      /4, 6, or 8s only.*up to 3 JPG\/PNG image `references`/,
+    );
+    assert.match(
       Mod.formatConfiguredModelGuidance({ model: "acme/custom-video" }),
       /Active model: `acme\/custom-video`\./,
     );
