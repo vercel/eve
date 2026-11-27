@@ -1,4 +1,10 @@
-import { type AlsContext, contextStorage, loadContext } from "#context/container.js";
+import {
+  type AlsContext,
+  type ContextContainer,
+  contextStorage,
+  loadContext,
+} from "#context/container.js";
+import { ContextKey } from "#context/key.js";
 import {
   type ConnectionAuthorizationChallenge,
   ConnectionAuthorizationFailedError,
@@ -38,6 +44,24 @@ import {
 } from "#shared/connection-types.js";
 
 const LOCAL_HTTP_VERCEL_CONNECT_HOSTNAMES: ReadonlySet<string> = new Set(["127.0.0.1", "[::1]"]);
+
+type InFlightTokenMap = Map<string, Promise<TokenResult>>;
+
+const ConnectionAuthorizationInFlightTokensKey = new ContextKey<InFlightTokenMap>(
+  "eve.connectionAuthorizationInFlightTokens",
+);
+
+function inFlightTokenMap(ctx: AlsContext): InFlightTokenMap {
+  const existing = ctx.get(ConnectionAuthorizationInFlightTokensKey);
+  if (existing !== undefined) return existing;
+  const map: InFlightTokenMap = new Map();
+  (ctx as ContextContainer).setVirtualContext(ConnectionAuthorizationInFlightTokensKey, map);
+  return map;
+}
+
+function inFlightTokenKey(cacheScope: string, key: string): string {
+  return `${cacheScope}\0${key}`;
+}
 
 export interface ScopedAuthorization {
   readonly boundResponder?: SessionAuthContext;
@@ -249,9 +273,35 @@ export async function resolveScopedToken(input: ScopedAuthorization): Promise<To
   const cached = readCachedToken(ctx, cacheScope, key);
   if (cached !== undefined) return cached;
 
-  const result = await authorization.getToken({ connection, principal });
-  writeCachedToken(ctx, cacheScope, key, result);
-  return result;
+  const inflight = inFlightTokenMap(ctx);
+  const flightKey = inFlightTokenKey(cacheScope, key);
+  const existing = inflight.get(flightKey);
+  if (existing !== undefined) return await existing;
+
+  const flight = Promise.withResolvers<TokenResult>();
+  inflight.set(flightKey, flight.promise);
+  try {
+    const result = await authorization.getToken({ connection, principal });
+    if (
+      ctx.get(ConnectionAuthorizationInFlightTokensKey) === inflight &&
+      inflight.get(flightKey) === flight.promise
+    ) {
+      writeCachedToken(ctx, cacheScope, key, result);
+    }
+    flight.resolve(result);
+    return result;
+  } catch (error) {
+    flight.reject(error);
+    void flight.promise.catch(() => {});
+    throw error;
+  } finally {
+    if (
+      ctx.get(ConnectionAuthorizationInFlightTokensKey) === inflight &&
+      inflight.get(flightKey) === flight.promise
+    ) {
+      inflight.delete(flightKey);
+    }
+  }
 }
 
 export async function evictScopedToken(input: ScopedAuthorization): Promise<void> {
@@ -262,7 +312,9 @@ export async function evictScopedToken(input: ScopedAuthorization): Promise<void
   let principal;
   try {
     principal = resolveScopedPrincipal(input, ctx);
-    evictCachedToken(ctx, cacheScope, principalKey(principal));
+    const key = principalKey(principal);
+    ctx.get(ConnectionAuthorizationInFlightTokensKey)?.delete(inFlightTokenKey(cacheScope, key));
+    evictCachedToken(ctx, cacheScope, key);
   } catch {
     return;
   }
@@ -296,7 +348,10 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
       resume: result.resume,
       callback: result.callback,
     });
-    writeCachedToken(ctx, input.instanceId ?? scope, principalKey(principal), token);
+    const cacheScope = input.instanceId ?? scope;
+    const key = principalKey(principal);
+    ctx.get(ConnectionAuthorizationInFlightTokensKey)?.delete(inFlightTokenKey(cacheScope, key));
+    writeCachedToken(ctx, cacheScope, key, token);
   } catch (error) {
     await report?.(result, toError(error));
     throw error;
