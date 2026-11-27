@@ -279,7 +279,7 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
       { root: "/tmp/x", toolCount: 0 },
       { run: 1, mode: "dev", wallMs: 900, sessionAcceptedMs: 950, firstTurnMs: 1100 },
       { run: 1, mode: "dev-tui", wallMs: 920, promptVisibleMs: 300 },
-      { run: 1, mode: "build", wallMs: 3000, profile: profile(2800) },
+      { run: 1, mode: "build", wallMs: 3000, maxRssBytes: 1_100_000_000, profile: profile(2800) },
       {
         run: 1,
         mode: "start",
@@ -323,6 +323,13 @@ test("turns build, start, and dev-startup probes into framework records", (t) =>
     "build.phase_ms.sandbox.prewarm": { status: "measured", value: 1000 },
   });
   assert.equal(records[0].artifact_path, "raw/agent-tools/mock/postgres/1");
+  assert.deepEqual(records[3].metrics, {
+    "build.total_ms": { status: "measured", value: 2800 },
+    "build.without_sandbox_prewarm_ms": { status: "measured", value: 2100 },
+    "build.phase_ms.compile": { status: "measured", value: 1400 },
+    "build.phase_ms.sandbox.prewarm": { status: "measured", value: 700 },
+    "build.max_rss_bytes": { status: "measured", value: 1_100_000_000 },
+  });
   assert.deepEqual(records[2].metrics, {
     "dev_startup.prompt_visible_ms": { status: "measured", value: 300 },
     "dev_startup.ready_ms": { status: "measured", value: 900 },

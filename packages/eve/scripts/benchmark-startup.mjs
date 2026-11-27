@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -9,9 +9,13 @@ import { pathToFileURL } from "node:url";
 const packageRoot = resolve(process.argv[2] ?? "packages/eve");
 const runs = Number(process.argv[3] ?? 5);
 const toolCount = Number(process.argv[4] ?? 0);
+const project = process.argv[5] ?? "plain";
 if (!Number.isInteger(runs) || runs < 1) throw new Error("Expected a positive run count.");
 if (!Number.isInteger(toolCount) || toolCount < 0 || toolCount > 1000)
   throw new Error("Expected 0–1000 tools.");
+if (project !== "plain" && project !== "large")
+  throw new Error('Expected the project to be "plain" or "large".');
+const large = project === "large";
 const root = await mkdtemp(join(tmpdir(), "eve-startup-benchmark-"));
 await mkdir(join(root, "agent", "channels"), { recursive: true });
 await mkdir(join(root, "node_modules"));
@@ -29,15 +33,46 @@ await writeFile(
   join(root, "agent", "channels", "eve.ts"),
   'import { eveChannel } from "eve/channels/eve";\nimport { localDev } from "eve/channels/auth";\nexport default eveChannel({ auth: [localDev()] });\n',
 );
+if (large) {
+  await mkdir(join(root, "lib"));
+  const catalog = Array.from({ length: 16_000 }, (_, i) => ({
+    id: `item-${String(i).padStart(5, "0")}`,
+    name: `Catalog item ${i}`,
+    description: `Deterministic benchmark catalog entry ${i}. `.repeat(3).trim(),
+    tags: [`group-${i % 97}`, `tier-${i % 7}`, `region-${i % 13}`],
+    price: (i * 37) % 10_000,
+  }));
+  await writeFile(join(root, "lib", "catalog.json"), JSON.stringify(catalog));
+  await writeFile(
+    join(root, "lib", "catalog.ts"),
+    'import catalog from "./catalog.json" with { type: "json" };\nexport function lookup(index: number) {\n  return catalog[index % catalog.length];\n}\n',
+  );
+  await writeFile(
+    join(root, "agent", "sandbox.ts"),
+    'import { defineSandbox } from "eve/sandbox";\nimport { JustBashSandbox } from "eve/sandbox/just-bash";\nexport const environment = JustBashSandbox.environment({ autoInstall: false });\nexport default defineSandbox(() => environment.open());\n',
+  );
+  await symlink(
+    await realpath(join(packageRoot, "node_modules", "just-bash")),
+    join(root, "node_modules", "just-bash"),
+    "junction",
+  );
+}
 if (toolCount > 0) {
   await mkdir(join(root, "agent", "tools"));
   for (let i = 0; i < toolCount; i++) {
     await writeFile(
       join(root, "agent", "tools", `tool_${i}.ts`),
-      `export default { description: "Return fixture value ${i}.", execute: async () => ${i} };\n`,
+      large
+        ? `import { lookup } from "../../lib/catalog.ts";\nexport default { description: "Return catalog entry ${i}.", execute: async () => lookup(${i}) };\n`
+        : `export default { description: "Return fixture value ${i}.", execute: async () => ${i} };\n`,
     );
   }
 }
+const rssProbePath = join(root, "rss-probe.mjs");
+await writeFile(
+  rssProbePath,
+  'import { writeFileSync } from "node:fs";\nprocess.on("exit", () => writeFileSync(process.env.EVE_BENCHMARK_RSS_FILE, String(process.resourceUsage().maxRSS * 1024)));\n',
+);
 const env = {
   ...process.env,
   EVE_TELEMETRY_DISABLED: "1",
@@ -55,6 +90,7 @@ console.log(
     root,
     packageRoot,
     toolCount,
+    project,
     node: process.version,
     platform: process.platform,
     arch: process.arch,
@@ -72,6 +108,7 @@ for (let run = 1; run <= runs; run++) {
     if (mode === "dev-tui" && !ptyAvailable) continue;
     const port = await availablePort();
     const profilePath = join(root, `build-${run}.json`);
+    const rssPath = join(root, `build-${run}.rss`);
     const args =
       mode === "dev"
         ? ["dev", "--no-ui", "--host", "127.0.0.1", "--port", String(port)]
@@ -87,13 +124,19 @@ for (let run = 1; run <= runs; run++) {
       promptSeen = resolvePrompt;
     });
     const start = performance.now();
-    const eveArgv = [process.execPath, join(packageRoot, "bin", "eve.js"), ...args];
+    const eveArgv = [
+      process.execPath,
+      ...(mode === "build" ? ["--import", pathToFileURL(rssProbePath).href] : []),
+      join(packageRoot, "bin", "eve.js"),
+      ...args,
+    ];
     const child =
       mode === "dev-tui"
         ? spawnInTerminal(eveArgv, { cwd: root, env: { ...env, TERM: "xterm-256color" } })
         : spawn(eveArgv[0], eveArgv.slice(1), {
             cwd: root,
-            env,
+            detached: true,
+            env: mode === "build" ? { ...env, EVE_BENCHMARK_RSS_FILE: rssPath } : env,
             stdio: ["ignore", "pipe", "pipe"],
           });
     child.stdout.on("data", (data) => {
@@ -110,7 +153,7 @@ for (let run = 1; run <= runs; run++) {
       child.once("error", reject);
       child.once("exit", (code, signal) => resolveExit({ code, signal }));
     });
-    const timeout = setTimeout(() => child.kill("SIGKILL"), 60000);
+    const timeout = setTimeout(() => child.kill("SIGKILL"), mode === "build" ? 180000 : 60000);
     try {
       if (mode === "dev") {
         const probes = await waitReady(child, port, "/eve/v1/info", start, () => log);
@@ -143,6 +186,7 @@ for (let run = 1; run <= runs; run++) {
           run,
           mode,
           wallMs: Math.round(performance.now() - start),
+          maxRssBytes: Number(await readFile(rssPath, "utf8")),
           profile: JSON.parse(await readFile(profilePath, "utf8")),
         });
       }
@@ -159,6 +203,7 @@ for (let run = 1; run <= runs; run++) {
       const killer = setTimeout(() => child.kill("SIGKILL"), 10000);
       await exited;
       clearTimeout(killer);
+      if (mode !== "dev-tui") killProcessGroup(child);
       await writeFile(join(root, `${mode}-${run}.log`), log);
     }
   }
@@ -217,6 +262,15 @@ function waitReady(child, port, path, start, readLog) {
     timer = setInterval(probe, PROBE_INTERVAL_MS);
     void probe();
   });
+}
+
+function killProcessGroup(child) {
+  if (process.platform === "win32") return;
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch (error) {
+    if (error?.code !== "ESRCH") throw error;
+  }
 }
 
 function spawnInTerminal(argv, options) {
