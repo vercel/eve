@@ -67,6 +67,40 @@ describe("Vercel package deployment target", () => {
     expect(url).not.toContain("base=");
   });
 
+  test.each([
+    ["system PR ID", baseEnv, currentPull, "/pulls/123"],
+    [
+      "branch lookup",
+      { ...baseEnv, VERCEL_GIT_PULL_REQUEST_ID: "" },
+      [currentPull],
+      "/pulls?head=",
+    ],
+  ])(
+    "authenticates the GitHub request for the %s with GITHUB_TOKEN",
+    async (_, env, body, path) => {
+      const fetchImplementation = vi.fn().mockResolvedValue(githubResponse(body));
+      await resolveDeploymentTarget({ ...env, GITHUB_TOKEN: "ghs_secret" }, fetchImplementation);
+      const [url, init] = fetchImplementation.mock.calls[0];
+      expect(url).toContain(path);
+      expect(init.headers.Authorization).toBe("Bearer ghs_secret");
+    },
+  );
+
+  test.each([
+    ["undefined", undefined],
+    ["empty", ""],
+  ])("sends no Authorization header when GITHUB_TOKEN is %s", async (_, token) => {
+    const fetchImplementation = vi.fn().mockResolvedValue(githubResponse(currentPull));
+    await resolveDeploymentTarget({ ...baseEnv, GITHUB_TOKEN: token }, fetchImplementation);
+    expect(fetchImplementation.mock.calls[0][1].headers).not.toHaveProperty("Authorization");
+  });
+
+  test("names the failed action when GitHub rejects the request", async () => {
+    await expect(
+      resolveDeploymentTarget(baseEnv, vi.fn().mockResolvedValue(githubResponse({}, 403))),
+    ).rejects.toThrow("GitHub returned 403 while resolving package publication.");
+  });
+
   test("rejects local, fork, direct branch, and stale PR deployments", async () => {
     await expect(resolveDeploymentTarget({})).resolves.toBeUndefined();
     await expect(
