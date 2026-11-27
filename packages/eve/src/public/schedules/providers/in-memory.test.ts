@@ -71,4 +71,43 @@ describe("inMemoryScheduleProvider", () => {
     const recreated = await provider.create(context("create-2"), input);
     expect(recreated.scheduleId).not.toBe(first.scheduleId);
   });
+
+  const oneTimeNow = () => new Date("2026-09-28T12:00:00.000Z");
+
+  it.each([
+    { at: "2026-09-28T12:01", timezone: undefined, state: "active" },
+    { at: "2026-09-28T12:01", timezone: "UTC", state: "active" },
+    { at: "2026-09-28T11:59", timezone: "UTC", state: "completed" },
+    { at: "2026-09-28T14:01:00", timezone: "Europe/Berlin", state: "active" },
+    { at: "2026-09-28T13:59", timezone: "Europe/Berlin", state: "completed" },
+    { at: "2026-09-28T17:31", timezone: "Asia/Kolkata", state: "active" },
+    { at: "2026-09-28T17:29", timezone: "Asia/Kolkata", state: "completed" },
+  ])(
+    "reads one-time $at in $timezone as $state regardless of the process timezone",
+    async ({ at, timezone, state }) => {
+      const provider = inMemoryScheduleProvider({ now: oneTimeNow });
+      const expression =
+        timezone === undefined
+          ? { type: "single" as const, at }
+          : { type: "single" as const, at, timezone };
+      const created = await provider.create(context("create"), {
+        name: "once",
+        expression,
+        payload: {},
+      });
+      expect(created.state).toBe(state);
+    },
+  );
+
+  it("invokes a one-time schedule due one minute from now", async () => {
+    const deliver = vi.fn(async () => {});
+    const provider = inMemoryScheduleProvider({ now: oneTimeNow });
+    await provider.create(context("create", { key: "app", deliver }), {
+      name: "once",
+      expression: { type: "single", at: "2026-09-28T12:01", timezone: "UTC" },
+      payload: { request: "do work" },
+    });
+    await provider.invoke(context("invoke"), "once");
+    expect(deliver).toHaveBeenCalledOnce();
+  });
 });
