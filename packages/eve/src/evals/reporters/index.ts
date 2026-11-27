@@ -1,5 +1,6 @@
 export {
   braintrustReporter,
+  type BraintrustRepoInfo,
   type BraintrustReporterConfig,
 } from "#evals/runner/reporters/braintrust.js";
 export { consoleReporter, type ConsoleReporterConfig } from "#evals/runner/reporters/console.js";

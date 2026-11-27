@@ -1,4 +1,5 @@
 [
+  "BraintrustRepoInfo",
   "BraintrustReporterConfig",
   "ConsoleReporterConfig",
   "DatadogReporterConfig",

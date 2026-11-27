@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { braintrustReporter, type BraintrustReporterConfig } from "#evals/reporters/index.js";
-import type { EveEval, EveEvalResult, EveEvalTarget } from "#evals/types.js";
+import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
+import type { EveEval, EveEvalResult, EveEvalSessionResult, EveEvalTarget } from "#evals/types.js";
+import { emptySessionView } from "#protocol/session-projection/public-view.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 const braintrustMocks = vi.hoisted(() => ({
   close: vi.fn(),
@@ -14,6 +17,12 @@ vi.mock("braintrust", () => ({
   flush: braintrustMocks.flush,
   init: braintrustMocks.init,
 }));
+
+const gitMocks = vi.hoisted(() => ({
+  resolveLocalGitMetadata: vi.fn(),
+}));
+
+vi.mock("#evals/runner/resolve-git-metadata.js", () => gitMocks);
 
 function makeTarget(kind: "local" | "remote" = "local"): EveEvalTarget {
   const url = kind === "local" ? "http://127.0.0.1:3000" : "https://test.vercel.app";
@@ -83,6 +92,34 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
   };
 }
 
+function withUsage(
+  result: EveEvalResult,
+  usage: TokenUsage | undefined,
+  sessions?: readonly EveEvalSessionResult[],
+): EveEvalResult {
+  return {
+    ...result,
+    result: { ...result.result, derived: { ...result.result.derived, usage }, sessions },
+  };
+}
+
+function makeSession(
+  sessionId: string,
+  primary: boolean,
+  models: readonly string[],
+  usage: TokenUsage | undefined,
+): EveEvalSessionResult {
+  return {
+    view: emptySessionView(),
+    derived: { ...createEmptyDerivedFacts(), models, usage },
+    events: [],
+    primary,
+    sessionId,
+    state: undefined,
+    traceContexts: [],
+  };
+}
+
 function makeEval(): EveEval {
   return {
     _tag: "EveEval",
@@ -94,6 +131,7 @@ function makeEval(): EveEval {
 describe("braintrustReporter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    gitMocks.resolveLocalGitMetadata.mockReturnValue({ branch: "main", sha: "abc123" });
     braintrustMocks.init.mockResolvedValue({
       close: braintrustMocks.close,
       log: braintrustMocks.log,
@@ -283,6 +321,166 @@ describe("braintrustReporter", () => {
 
     expect(braintrustMocks.log).toHaveBeenCalledWith(
       expect.objectContaining({ scores: { grounding: 0.8, "gate:citation": 1 } }),
+    );
+  });
+
+  it("logs eval usage as Braintrust token and cost metrics", async () => {
+    const reporter = braintrustReporter(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    reporter.onEvalComplete(
+      withUsage(makeEvalResult(), {
+        inputTokens: 1200,
+        outputTokens: 300,
+        cacheReadTokens: 800,
+        cacheWriteTokens: 100,
+        costUsd: 0.0125,
+      }),
+    );
+
+    expect(braintrustMocks.log.mock.calls[0]?.[0].metrics).toEqual({
+      toolCallCount: 1,
+      subagentCallCount: 0,
+      messageCount: 1,
+      reasoningBlockCount: 0,
+      prompt_tokens: 1200,
+      completion_tokens: 300,
+      tokens: 1500,
+      prompt_cached_tokens: 800,
+      prompt_cache_creation_tokens: 100,
+      estimated_cost: 0.0125,
+    });
+  });
+
+  it("omits estimated_cost when the eval usage has no cost", async () => {
+    const reporter = braintrustReporter(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    reporter.onEvalComplete(
+      withUsage(makeEvalResult(), {
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      }),
+    );
+
+    const metrics = braintrustMocks.log.mock.calls[0]?.[0].metrics;
+    expect(metrics).toMatchObject({ prompt_tokens: 10, completion_tokens: 5, tokens: 15 });
+    expect(metrics).not.toHaveProperty("estimated_cost");
+  });
+
+  it("logs no token metrics when the eval recorded no usage", async () => {
+    const reporter = braintrustReporter(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    reporter.onEvalComplete(makeEvalResult());
+
+    expect(braintrustMocks.log.mock.calls[0]?.[0].metrics).toEqual({
+      toolCallCount: 1,
+      subagentCallCount: 0,
+      messageCount: 1,
+      reasoningBlockCount: 0,
+    });
+  });
+
+  it("logs eval models and per-session models and usage in row metadata", async () => {
+    const reporter = braintrustReporter(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+    const primaryUsage = {
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+      costUsd: 0.01,
+    };
+    const result = withUsage(makeEvalResult(), primaryUsage, [
+      makeSession("session-123", true, ["openai/gpt-5.5"], primaryUsage),
+      makeSession("session-456", false, ["anthropic/claude-sonnet-4.5"], undefined),
+    ]);
+
+    reporter.onEvalComplete({
+      ...result,
+      result: {
+        ...result.result,
+        derived: {
+          ...result.result.derived,
+          models: ["openai/gpt-5.5", "anthropic/claude-sonnet-4.5"],
+        },
+      },
+    });
+
+    const metadata = braintrustMocks.log.mock.calls[0]?.[0].metadata;
+    expect(metadata).toMatchObject({
+      eveModels: ["openai/gpt-5.5", "anthropic/claude-sonnet-4.5"],
+      eveSessions: [
+        {
+          sessionId: "session-123",
+          primary: true,
+          models: ["openai/gpt-5.5"],
+          usage: primaryUsage,
+        },
+        { sessionId: "session-456", primary: false, models: ["anthropic/claude-sonnet-4.5"] },
+      ],
+    });
+    expect(metadata.eveSessions[1]).not.toHaveProperty("usage");
+    expect(metadata).not.toHaveProperty("model");
+  });
+
+  it("merges configured metadata and tags over eve's experiment defaults", async () => {
+    const reporter = braintrustReporter(
+      makeConfig({
+        metadata: { release: "1.2.3", eveTargetKind: "override" },
+        tags: ["nightly", "eve"],
+      }),
+    );
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    const options = braintrustMocks.init.mock.calls[0]?.[0];
+    expect(options.metadata).toMatchObject({
+      eveEvalIds: ["eval-1"],
+      eveTargetUrl: "http://127.0.0.1:3000",
+      eveTargetKind: "override",
+      release: "1.2.3",
+    });
+    expect(options.tags).toEqual(["eve", "target:local", "eval:eval-1", "nightly"]);
+  });
+
+  it("reads git metadata from the configured cwd", async () => {
+    const reporter = braintrustReporter(makeConfig({ cwd: "/repo/agent" }));
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    expect(gitMocks.resolveLocalGitMetadata).toHaveBeenCalledWith("/repo/agent");
+    expect(braintrustMocks.init).toHaveBeenCalledWith(
+      expect.objectContaining({ repoInfo: { commit: "abc123", branch: "main" } }),
+    );
+  });
+
+  it("reads git metadata from process.cwd() by default", async () => {
+    const reporter = braintrustReporter(makeConfig());
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    expect(gitMocks.resolveLocalGitMetadata).toHaveBeenCalledWith(process.cwd());
+  });
+
+  it("reports a configured repoInfo without reading git", async () => {
+    const repoInfo = { commit: "def456", branch: "release", dirty: false };
+    const reporter = braintrustReporter(makeConfig({ repoInfo }));
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    expect(gitMocks.resolveLocalGitMetadata).not.toHaveBeenCalled();
+    const options = braintrustMocks.init.mock.calls[0]?.[0];
+    expect(options.repoInfo).toEqual(repoInfo);
+    expect(options).not.toHaveProperty("gitMetadataSettings");
+  });
+
+  it("reports no git metadata when repoInfo is null", async () => {
+    const reporter = braintrustReporter(makeConfig({ repoInfo: null }));
+    await reporter.onRunStart([makeEval()], makeTarget());
+
+    expect(gitMocks.resolveLocalGitMetadata).not.toHaveBeenCalled();
+    expect(braintrustMocks.init).toHaveBeenCalledWith(
+      expect.objectContaining({ repoInfo: null, gitMetadataSettings: { collect: "none" } }),
     );
   });
 });
