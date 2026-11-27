@@ -1187,6 +1187,15 @@ describe("compileAgentManifest source graph", () => {
       ).rejects.toThrow(/"experimental.compaction" must be a compaction strategy/);
     });
 
+    it("rejects a fallback that is not a function", async () => {
+      await expect(
+        compileWith({
+          experimental: { compaction: { fallback: "x", strategy: forOpenAI() } },
+          model: "openai/gpt-5.5",
+        }),
+      ).rejects.toThrow(/"experimental.compaction.fallback" must be a compaction strategy/);
+    });
+
     it("compiles a matching strategy and records only that the agent has one", async () => {
       const compiled = await compileWith({
         experimental: { compaction: { fallback: forOpenAI(), strategy: forOpenAI() } },

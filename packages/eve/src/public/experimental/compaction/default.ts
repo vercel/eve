@@ -9,6 +9,7 @@ import {
   DEFAULT_COMPACTION_THRESHOLD,
 } from "#shared/compaction-strategy.js";
 import type { StoredHistoryMessage } from "#shared/history-message.js";
+import { splitAtOpenAICompaction } from "#shared/openai-compaction-item.js";
 
 import {
   assertThreshold,
@@ -108,7 +109,10 @@ export function defaultCompaction(options: DefaultCompactionOptions = {}): Compa
     return messages as StoredHistoryMessage[];
   };
 
-  return async (history, ctx) => {
+  const compactOwn = async (
+    history: readonly StoredHistoryMessage[],
+    ctx: CompactionContext,
+  ): Promise<readonly StoredHistoryMessage[] | undefined> => {
     const window = ctx.model.contextWindowTokens;
     const own = budgetAt(window, fraction);
     const scope = { sessionId: ctx.session.id };
@@ -139,6 +143,17 @@ export function defaultCompaction(options: DefaultCompactionOptions = {}): Compa
         `The agent's system prompt, tools, memory and context leave no room for the conversation in this model's ~${window}-token context window. Shorten the instructions, remove tools or trim memory.`,
       );
     }
+  };
+
+  return async (history, ctx) => {
+    const { kept, rest } = splitAtOpenAICompaction(history);
+    if (kept.length === 0) return await compactOwn(history, ctx);
+    const summarized = await compactOwn(rest, {
+      ...ctx,
+      fixedTokens: ctx.fixedTokens + ctx.estimate(kept),
+    });
+    if (summarized === undefined) return undefined;
+    return [...kept, ...summarized];
   };
 }
 

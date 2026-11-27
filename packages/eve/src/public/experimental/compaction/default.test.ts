@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { checkHistory } from "#harness/compaction/check.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionCallRequest, CompactionContext } from "#shared/compaction-strategy.js";
@@ -81,6 +82,45 @@ describe("defaultCompaction()", () => {
     expect(requests[0]!.tools).toBeUndefined();
     expect(kept.slice(0, 2)).toEqual(checkpointHead("SUMMARY"));
     expect(kept.at(-1)).toEqual(user("Now."));
+  });
+
+  describe("when the history holds an OpenAI compaction record", () => {
+    const record: StoredHistoryMessage = {
+      content: [{ kind: "openai.compaction", type: "custom" }],
+      role: "assistant",
+    };
+
+    it("keeps the record and what came before it first, then the checkpoint over what follows", async () => {
+      const { ctx, requests } = context("manual");
+      const history = [user("First."), record, user("Second."), answer(filler), user("Now.")];
+
+      const kept = await compact(history, ctx);
+
+      expect(kept.slice(0, 2)).toEqual([user("First."), record]);
+      expect(kept.slice(2, 4)).toEqual(checkpointHead("SUMMARY"));
+      expect(kept.at(-1)).toEqual(user("Now."));
+      expect(() => checkHistory(history, kept, { limit: 100_000 })).not.toThrow();
+      expect(JSON.stringify(requests[0]!.messages)).not.toContain("openai.compaction");
+      expect(JSON.stringify(requests[0]!.messages)).not.toContain("First.");
+    });
+
+    it("keeps the last record when a second compaction follows the first", async () => {
+      const first = await compact(
+        [user("First."), record, user("Second."), answer(filler), user("Now.")],
+        context("manual").ctx,
+      );
+      const again = [...first, answer(filler), user("Later.")];
+
+      const second = await compact(again, context("manual").ctx);
+
+      expect(
+        second.filter((message) => JSON.stringify(message).includes("openai.compaction")),
+      ).toEqual([record]);
+      expect(second.at(-1)).toEqual(user("Later."));
+      expect(second.slice(0, 2)).toEqual([user("First."), record]);
+      expect(second.slice(2, 4)).toEqual(checkpointHead("SUMMARY"));
+      expect(() => checkHistory(again, second, { limit: 100_000 })).not.toThrow();
+    });
   });
 
   it("adds the author's instructions to eve's checkpoint prompt", async () => {

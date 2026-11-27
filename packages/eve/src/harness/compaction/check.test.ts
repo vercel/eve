@@ -42,6 +42,18 @@ describe("checkHistory", () => {
     ).toThrow("checkpoint after other messages");
   });
 
+  it("accepts a checkpoint right after the last OpenAI compaction record, and nowhere later", () => {
+    const record: HarnessModelMessage = {
+      content: [{ kind: "openai.compaction", type: "custom" }],
+      role: "assistant",
+    } as HarnessModelMessage;
+    const onRecord = [earlier, record, ...checkpoint("Alice got her report."), latest];
+    expect(checkHistory(history, onRecord, automatic)).toEqual(onRecord);
+    expect(() =>
+      checkHistory(history, [earlier, record, latest, ...checkpoint("Late.")], manual),
+    ).toThrow("checkpoint after other messages");
+  });
+
   it("rejects a call kept without its result, and a result kept without its call", () => {
     const call: HarnessModelMessage = {
       content: [{ input: {}, toolCallId: "call-1", toolName: "search", type: "tool-call" }],

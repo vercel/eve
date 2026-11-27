@@ -72,7 +72,7 @@ Without a strategy on the agent, a provider rejection fails the turn.
 
 ## What eve checks
 
-eve checks every result before it applies it, for every strategy. A result fails the compaction, and leaves the history as it was, when it drops a tool call's result or a call, puts a checkpoint after other messages, removes a user message's `kind`, or doesn't fit within the model's context window beside the instructions, tools and recall. In development and tests, a strategy that compacts what it already returned fails too. A failed strategy compacts with the [fallback](#fall-back-when-a-strategy-fails), and a failure of both leaves the history as it was.
+eve checks every result before it applies it, for every strategy. A result fails the compaction, and leaves the history as it was, when it drops a tool call's result or a call, puts a checkpoint after other messages (a checkpoint goes first, or right after the last OpenAI compaction record), removes a user message's `kind`, or doesn't fit within the model's context window beside the instructions, tools and recall. In development and tests, a strategy that compacts what it already returned fails too. A failed strategy compacts with the [fallback](#fall-back-when-a-strategy-fails), and a failure of both leaves the history as it was.
 
 What the model answers next is up to the strategy. Keep the turn's latest user message, or carry it in the summary and add a message, such as an `"execution.continuation"`, that tells the model to go on.
 
@@ -81,3 +81,24 @@ What the model answers next is up to the strategy. Keep the turn's latest user m
 `defaultCompaction({ model?, instructions?, threshold? })` is eve's compaction when you set none. It caps oversized tool results in older history, and summarizes the older history when capping doesn't fit. `model` writes the summary with another model, `instructions` adds to eve's checkpoint prompt, and `threshold` is the fraction of the window at which it compacts, 0.9 by default. It counts the checkpoint prompt it adds, so it starts before the conversation alone reaches the threshold.
 
 `withoutInjected(history)` removes the messages eve adds to every request (memory, instructions, state and the previous checkpoint) from a history you send. eve adds them again after the compaction.
+
+## Compact with OpenAI's own compaction
+
+`openaiCompaction({ threshold? })` compacts with OpenAI's compaction instead of a text summary. eve sends the turn's request with OpenAI's `compaction_trigger`, and OpenAI answers with an encrypted record of the history. eve stores the record, followed by the latest user message, as the history and sends both with every later request, so the model keeps its working state where a summary would drop it. `threshold` is the fraction of the window at which it compacts, 0.9 by default.
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { openaiCompaction } from "eve/experimental/compaction";
+
+export default defineAgent({
+  model: "openai/gpt-5",
+  experimental: { compaction: openaiCompaction({ threshold: 0.8 }) },
+});
+```
+
+- It works with an AI Gateway id such as `"openai/gpt-5"`, and with a model from the AI SDK's OpenAI Responses provider. TypeScript rejects another Gateway id, and `eve build` rejects an agent whose model it can read as another one. For a model eve can't read until it runs, eve throws on the turn's first model call and on `session.compact()` when it is not an OpenAI Responses model, so a mismatch never compacts quietly with a summary. Through AI Gateway, eve sets `providerOptions.gateway.only` to `["openai"]` on the compaction request and on every later request that holds the record, because another provider can't read it. A `gateway.only` you set in `modelOptions` is narrowed to `["openai"]` on those requests, so `["openai", "azure"]` never fails over to Azure with the record. If your list excludes `openai`, eve doesn't send the history to another provider: the compaction request runs the fallback, and a later request that holds the record fails the turn with an error that names `gateway.only`.
+- A failed call, or an answer without a record, is a failure of the strategy, so eve [runs the fallback](#fall-back-when-a-strategy-fails), which is `defaultCompaction()` unless you set `fallback`. The default fallback keeps the record and what precedes it first, then adds the checkpoint that summarizes only what follows, so a text summary never drops what the record holds. A session that switches to another model after a compaction logs a warning on each request and sends the history without the record.
+- The compaction request is the stored history plus the trigger. It holds none of the memory, client context or announcements eve projects into each request, so the record holds no stale copies of them, and eve adds them again after the compaction.
+- eve puts the latest user message after the record, because the record folds in every earlier message, and with `store: false` OpenAI rejects a request that holds no user message with a 400, "At least one user message is required in the input". The model then carries on with the task from where it stopped.
+- The agent's `store` setting applies to the compaction call and to every later request. When the provider keeps the response, eve refers to the record by id for as long as it is kept. With `modelOptions: { providerOptions: { openai: { store: false } } }`, eve sends the record inline with its encrypted content, so the session stays resumable after the provider's retention.
+- On `openai/gpt-6.1-sol` through AI Gateway, the first two requests after a compaction read only the instructions and tools from the prompt cache, 2,553 tokens in each of two compactions, and the third read 10,908 of 18,461 input tokens, and every later request read nearly everything the one before it sent. eve sends the same instructions, tools, cache key and record on the first two requests, so the miss is on OpenAI's side. OpenAI's [prompt caching guide](https://developers.openai.com/api/docs/guides/prompt-caching) says only that compaction "can prevent reuse from the first changed token onward".

@@ -66,6 +66,7 @@ import {
   type TokenUsageDelta,
 } from "#harness/model-call/usage.js";
 import { modelIdentity, resolveModelProfile } from "#harness/model-profile.js";
+import { readsOpenAICompaction, withoutOpenAICompaction } from "#shared/openai-compaction-item.js";
 import { markUsageReported, NO_USAGE } from "#harness/session-usage.js";
 import { addTokenUsage } from "#shared/token-usage-math.js";
 import { controlDeliveryFor } from "#harness/session-machine/transitions.js";
@@ -571,6 +572,7 @@ async function modelExecutor(
         ? await input.turnModel()
         : await compactionModel(step, reference!);
   const profile = resolveModelProfile(model);
+  const readsRecord = readsOpenAICompaction(modelIdentity(model));
   const attempt = step.instrumentation?.prepareAttempt({
     attempt: 0,
     runId: input.change.runId,
@@ -616,6 +618,7 @@ async function modelExecutor(
               ...call,
               ...rest,
               ...(maxOutputTokens !== undefined && { maxOutputTokens }),
+              ...(!readsRecord && { messages: withoutOpenAICompaction(rest.messages) }),
               providerOptions: mergeProviderOptions(call.providerOptions, providerOptions),
               ...(tools !== undefined && { tools: withoutExecutors(tools) }),
             }),
@@ -655,7 +658,20 @@ function mergeProviderOptions(
   for (const [provider, options] of Object.entries(extra)) {
     merged[provider] = { ...merged[provider], ...options };
   }
+  const allowed = narrowedGatewayOnly(base?.gateway?.only, extra.gateway?.only);
+  if (allowed !== undefined) merged.gateway = { ...merged.gateway, only: allowed };
   return merged as Parameters<typeof streamText>[0]["providerOptions"];
+}
+
+function narrowedGatewayOnly(configured: unknown, requested: unknown): unknown[] | undefined {
+  if (!Array.isArray(configured) || !Array.isArray(requested)) return undefined;
+  const allowed = requested.filter((provider) => configured.includes(provider));
+  if (allowed.length === 0) {
+    throw new Error(
+      `The compaction request needs AI Gateway provider ${requested.join(", ")}, which this agent's gateway.only (${configured.join(", ")}) excludes, so eve did not send the history.`,
+    );
+  }
+  return allowed;
 }
 
 function withoutExecutors(tools: ToolSet): ToolSet {
