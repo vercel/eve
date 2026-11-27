@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { startsNewAddress, type StartsNewAddressOption } from "#channel/channel-address.js";
 import {
   createChannelOperations,
   type ChannelReceiveContext,
@@ -701,11 +702,82 @@ describe("slackChannel thread history", () => {
 
     expect(repliesCount).toBe(1);
     expect(send).toHaveBeenCalledTimes(1);
-    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    const [, input] = send.mock.calls[0]! as [
+      string,
+      ObservedChannelDelivery<SlackChannelState> & StartsNewAddressOption,
+    ];
+    expect(input[startsNewAddress]).toBe(true);
     expect(input.state?.audience).toBe("public");
     expect("history" in input ? input.history : undefined).toEqual([
       expect.objectContaining({ id: threadTs, role: "user" }),
     ]);
+  });
+
+  it("does not mark a thread reply as starting a new address when resolveSession finds an existing session", async () => {
+    const threadTs = "1700000000.000100";
+    const replyTs = "1700000000.000200";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = String(input);
+        if (url.includes("/conversations.info")) {
+          return Response.json({
+            channel: { id: "C01", is_channel: true, is_private: false },
+            ok: true,
+          });
+        }
+        if (url.includes("/conversations.replies")) {
+          return Response.json({
+            messages: [
+              { text: "Original", ts: threadTs, user: "U01" },
+              { text: "<@UBOT> follow up", ts: replyTs, user: "U01" },
+            ],
+            ok: true,
+          });
+        }
+        if (url.includes("/users.info")) {
+          return Response.json({
+            ok: true,
+            user: { id: "U01", name: "alice", profile: { display_name: "Alice" } },
+          });
+        }
+        return Response.json({ ok: true });
+      }),
+    );
+
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      threadContext: {},
+    });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+    await firePost(
+      channel,
+      signed(
+        JSON.stringify({
+          authorizations: [{ user_id: "UBOT" }],
+          event: {
+            channel: "C01",
+            text: "<@UBOT> follow up",
+            thread_ts: threadTs,
+            ts: replyTs,
+            type: "app_mention",
+            user: "U01",
+          },
+          event_id: "EvExistingThread",
+          team_id: "T01",
+          type: "event_callback",
+        }),
+      ),
+      send,
+      () => Promise.resolve({ id: "s1" }),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, input] = send.mock.calls[0]! as [
+      string,
+      ObservedChannelDelivery<SlackChannelState> & StartsNewAddressOption,
+    ];
+    expect(input[startsNewAddress]).toBeUndefined();
   });
 
   it("passes every send option from a generic event's send", async () => {

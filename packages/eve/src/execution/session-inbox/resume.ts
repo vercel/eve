@@ -175,16 +175,20 @@ export function requireSessionId(metadata: unknown): string {
 }
 
 export async function resolveSessionInbox(token: string): Promise<{ sessionId: string }> {
+  const physicalToken = sessionInboxHookToken(token);
   let hook: Hook | undefined;
   try {
-    hook = await getHookByToken(sessionInboxHookToken(token));
-    return { sessionId: requireSessionId(await hook.metadata) };
+    hook = await getHookByToken(physicalToken);
+    const sessionId = requireSessionId(await hook.metadata);
+    rememberInboxOwner(hook, sessionId);
+    return { sessionId };
   } catch (error) {
     if (hook !== undefined) {
       const stranded = await strandedIfDeploymentDeleted(error, hook);
       if (stranded !== error) throw stranded;
     }
     if (!HookNotFoundError.is(error)) throw error;
+    forgetInboxOwner(physicalToken);
     const target = await resolveLegacyInbox(token);
     return { sessionId: target.sessionId };
   }
