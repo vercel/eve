@@ -16,11 +16,11 @@ vi.mock("node:module", async (importOriginal) => ({
 }));
 vi.mock("node:fs/promises", () => ({ readFile }));
 
+import { dynamicEvaluate } from "#dynamic/definition.js";
 import { readTerminalHeadlessEvent, runEveAdd } from "./extension/eve-add.js";
-import {
+import localRegistryAdd, {
   addLocalRegistryItem,
   handoffMessage,
-  resolveRegistryAddTool,
   unsetEnvVars,
 } from "./extension/subagents/modify/tools/registry_add.js";
 import { clearRegistryIndexCache } from "./extension/subagents/modify/tools/search_registry.js";
@@ -136,11 +136,11 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("resolveRegistryAddTool", () => {
-  it("resolves the local lifecycle with only local arguments and outcomes", () => {
+describe("local registry_add tool", () => {
+  it("resolves the local lifecycle with only local arguments and outcomes", async () => {
     process.env.EVE_DEV = "1";
 
-    const tool = resolveRegistryAddTool({ localEnabled: true });
+    const tool = await dynamicEvaluate(localRegistryAdd)({} as never);
 
     expect(tool).toMatchObject({
       description: expect.stringContaining("configured eve registry"),

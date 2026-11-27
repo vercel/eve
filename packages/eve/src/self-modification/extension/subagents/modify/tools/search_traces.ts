@@ -1,10 +1,10 @@
-import { access, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { defineTool } from "eve/tools";
 
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
+import { pathExists } from "#shared/path-exists.js";
 import {
   localTraceConversationMarker,
   localTraceIndexedMarker,
@@ -14,8 +14,7 @@ import { listLocalTraceIds, readLocalTraceActivityMs } from "#tracing/local/trac
 import { resolveLocalTraceSchemaDirectory } from "#tracing/local/trace-span-processor.js";
 import { summarizeLocalTrace, type LocalTraceSummary } from "#tracing/local/trace-summary.js";
 
-import type { ResolvedSelfModificationConfig } from "../../../../config.js";
-import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js";
+import { defineLocalOnlyDynamic } from "../../../local-only.js";
 import {
   readTraceSources,
   requireLocalTraceAppRoot,
@@ -58,6 +57,7 @@ const searchTracesTool = defineTool({
   outputSchema: { type: "object", additionalProperties: true },
   async execute(input, ctx) {
     const parsed = parseInput(input);
+    if (ctx.abortSignal.aborted) throw new Error("Trace search was cancelled.");
     const currentTraceId = trace.getSpan(context.active())?.spanContext().traceId;
     const conversationId = resolveConversationId(
       ctx.session.parent?.rootSessionId ?? ctx.session.id,
@@ -65,41 +65,38 @@ const searchTracesTool = defineTool({
     const appRoot = requireLocalTraceAppRoot();
     const schemaDirectory = resolveLocalTraceSchemaDirectory(appRoot);
     const rawIds = await listLocalTraceIds(appRoot);
-    const stored = (
-      await Promise.all(
-        rawIds.map(async (traceId) => ({
-          activityMs: await traceActivityMs(appRoot, schemaDirectory, traceId),
-          traceId,
-        })),
-      )
-    )
-      .sort(
-        (left, right) =>
-          right.activityMs - left.activityMs || left.traceId.localeCompare(right.traceId),
-      )
-      .map(({ traceId }) => traceId);
-
-    const eligible = stored.filter((traceId) => traceId !== currentTraceId);
     const indexedMarker = localTraceIndexedMarker();
     const conversationMarker = localTraceConversationMarker(conversationId);
-    const markerChecks = await Promise.all(
-      eligible.map(async (traceId) => {
-        const traceDirectory = join(schemaDirectory, traceId);
-        const [indexed, matchesConversation] = await Promise.all([
-          pathExists(join(traceDirectory, indexedMarker)),
-          pathExists(join(traceDirectory, conversationMarker)),
-        ]);
-        return { indexed, matchesConversation, traceId };
-      }),
+    const entries = (
+      await Promise.all(
+        rawIds
+          .filter((traceId) => traceId !== currentTraceId)
+          .map(async (traceId) => {
+            const traceDirectory = join(schemaDirectory, traceId);
+            const [activityMs, markers] = await Promise.all([
+              readLocalTraceActivityMs(appRoot, traceId).catch(() => undefined),
+              Promise.all([
+                pathExists(join(traceDirectory, indexedMarker)),
+                pathExists(join(traceDirectory, conversationMarker)),
+              ]).catch(() => [false, false] as const),
+            ]);
+            return {
+              activityMs: activityMs ?? 0,
+              indexed: markers[0],
+              matchesConversation: markers[1],
+              traceId,
+            };
+          }),
+      )
+    ).sort(
+      (left, right) =>
+        right.activityMs - left.activityMs || left.traceId.localeCompare(right.traceId),
     );
 
-    const indexedIds = new Set(
-      markerChecks.filter((entry) => entry.indexed).map((entry) => entry.traceId),
-    );
     const matchingIds = new Set(
-      markerChecks.filter((entry) => entry.matchesConversation).map((entry) => entry.traceId),
+      entries.filter((entry) => entry.matchesConversation).map((entry) => entry.traceId),
     );
-    const unindexed = eligible.filter((traceId) => !indexedIds.has(traceId));
+    const unindexed = entries.filter((entry) => !entry.indexed).map((entry) => entry.traceId);
     const scannedUnindexed = unindexed.slice(0, MAX_UNINDEXED_TRACES);
     const digests = new Map<string, LocalTraceSummary>();
     let readFailures = 0;
@@ -128,7 +125,7 @@ const searchTracesTool = defineTool({
       );
     }
 
-    const matched = eligible.filter((traceId) => matchingIds.has(traceId));
+    const matched = entries.map((entry) => entry.traceId).filter((id) => matchingIds.has(id));
     const considered = matched.slice(0, MAX_ANALYZED_TRACES);
     const summaries: LocalTraceSummary[] = [];
     for (const traceId of considered) {
@@ -159,7 +156,7 @@ const searchTracesTool = defineTool({
       complete: omitted === 0 && readFailures === 0,
       considered: considered.length,
       matched: matched.length,
-      stored: stored.length,
+      stored: rawIds.length,
     };
     const warnings = [];
     if (omitted !== 0) warnings.push("Some older traces could not be included.");
@@ -173,29 +170,6 @@ const searchTracesTool = defineTool({
     };
   },
 });
-
-async function traceActivityMs(
-  appRoot: string,
-  schemaDirectory: string,
-  traceId: string,
-): Promise<number> {
-  const activity = await readLocalTraceActivityMs(appRoot, traceId);
-  if (activity !== undefined) return activity;
-  try {
-    return (await stat(join(schemaDirectory, traceId))).mtimeMs;
-  } catch {
-    return 0;
-  }
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function parseInput(value: unknown): SearchInput {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -227,10 +201,6 @@ function contains(
   expected: string,
 ): boolean {
   return sources.some(({ span }) => span.attributes[attribute] === expected);
-}
-
-export function resolveSearchTracesTool(config: ResolvedSelfModificationConfig) {
-  return resolveLocalOnly(config, searchTracesTool);
 }
 
 export default defineLocalOnlyDynamic(searchTracesTool);

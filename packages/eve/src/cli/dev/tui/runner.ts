@@ -15,6 +15,7 @@ import { attachSessionStore, detachSessionStore, SessionStore } from "#client/se
 import { isAbortError } from "#client/session-store-helpers.js";
 import { formatStrandedSessionNotice } from "./stranded-session.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
+import { isSelfModificationAgent } from "./tool-presentation.js";
 import { isTaskAdmissionRefused } from "#protocol/task-tools.js";
 import type { SendTurnPayload } from "#client/types.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
@@ -1504,7 +1505,7 @@ export function registryHandoffAddress(
   toolName: string | undefined,
   output: unknown,
 ): string | undefined {
-  const isPackagedChild = subagentName === "self__modify" && toolName === "registry_add";
+  const isPackagedChild = isSelfModificationAgent(subagentName) && toolName === "registry_add";
   if (!isPackagedChild || typeof output !== "object" || output === null) {
     return undefined;
   }

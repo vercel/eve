@@ -189,6 +189,46 @@ describe("initialPromptPlaceholder", () => {
     ).toBe("Send a message…");
   });
 
+  it("recognizes preserved legacy self-modification mounts", () => {
+    const info = scaffold();
+    const legacy: AgentInfoResult = {
+      ...info,
+      subagents: {
+        total: 1,
+        local: [
+          {
+            ...info.subagents.local[0]!,
+            name: "self-modification__modify",
+            nodeId: "self-modification__modify",
+            owner: {
+              kind: "extension",
+              mountId: "extensions/self-modification",
+              namespace: "self-modification",
+              packageName: "eve",
+            },
+          },
+        ],
+      },
+    };
+    expect(initialPromptPlaceholder(legacy, true)).toBe(
+      process.platform === "win32"
+        ? "Send a message…"
+        : "Ask me to connect a channel, edit instructions, add a tool…",
+    );
+  });
+
+  it("stays neutral on Windows hosts where local self-modification is disabled", () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+    try {
+      expect(initialPromptPlaceholder(scaffold(), true)).toBe("Send a message…");
+    } finally {
+      if (originalPlatform !== undefined) {
+        Object.defineProperty(process, "platform", originalPlatform);
+      }
+    }
+  });
+
   it.each([
     "remote",
     "production",

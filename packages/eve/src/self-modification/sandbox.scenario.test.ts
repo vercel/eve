@@ -158,35 +158,15 @@ describe("self-modification sandbox", () => {
     },
   );
 
-  it.each([
-    { config: {}, dev: undefined, label: "outside eve dev", platform: process.platform },
-    {
-      config: { local: { enabled: false } },
-      dev: "1",
-      label: "when disabled",
-      platform: process.platform,
-    },
-    { config: {}, dev: "1", label: "on Windows hosts", platform: "win32" },
-  ])(
-    "binds a no-op disabled provider $label so prewarm succeeds without HostSandbox",
-    async ({ config, dev, platform }) => {
-      vi.stubEnv("EVE_DEV", dev);
-      const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
-      Object.defineProperty(process, "platform", { configurable: true, value: platform });
-      try {
-        const selector = defineSelfModificationSandbox({ config });
-        const environment = getBoundSandboxEnvironment(selector);
-        expect(environment?.provider).toBe("self-modification-disabled");
-        const harness = createSandboxEnvironmentHarness(environment!);
-        await expect(harness.prepare({ appRoot: "/virtual" })).resolves.toEqual({});
-        await expect(
-          harness.start({ appRoot: "/virtual", sandboxName: "self-mod-session" }),
-        ).rejects.toThrow("Self-modification sandbox is disabled");
-      } finally {
-        if (originalPlatform !== undefined) {
-          Object.defineProperty(process, "platform", originalPlatform);
-        }
-      }
-    },
-  );
+  it("binds a no-op disabled provider when local self-modification is inactive", async () => {
+    vi.stubEnv("EVE_DEV", undefined);
+    const selector = defineSelfModificationSandbox();
+    const environment = getBoundSandboxEnvironment(selector);
+    expect(environment?.provider).toBe("self-modification-disabled");
+    const harness = createSandboxEnvironmentHarness(environment!);
+    await expect(harness.prepare({ appRoot: "/virtual" })).resolves.toEqual({});
+    await expect(
+      harness.start({ appRoot: "/virtual", sandboxName: "self-mod-session" }),
+    ).rejects.toThrow("Self-modification sandbox is disabled");
+  });
 });

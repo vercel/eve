@@ -151,22 +151,6 @@ describe("self-modification local agent", () => {
       await expect(Promise.resolve(dynamicEvaluate(agent)(context))).resolves.toBeNull();
     });
   });
-
-  it("does not expose the editor on Windows hosts", async () => {
-    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
-    Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
-    try {
-      await withDevHost(async () => {
-        const agent = defineSelfModificationAgent({ config: { local: { enabled: true } } });
-
-        await expect(Promise.resolve(dynamicEvaluate(agent)(context))).resolves.toBeNull();
-      });
-    } finally {
-      if (originalPlatform !== undefined) {
-        Object.defineProperty(process, "platform", originalPlatform);
-      }
-    }
-  });
 });
 
 describe("self-modification local agent on a parent's provider model", () => {

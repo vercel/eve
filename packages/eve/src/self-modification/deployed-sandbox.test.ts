@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provider-harness.js";
 import {
   getBoundSandboxEnvironment,
-  getSandboxEnvironmentRuntime,
   type SandboxSelectorContext,
 } from "#shared/sandbox-environment.js";
-import { createSandboxPrepareContext } from "#execution/sandbox/prewarm.js";
 
 import type { DeployedSelfModificationConfig } from "./remote/config.js";
 import { defineDeployedSelfModificationSandbox } from "./deployed-sandbox.js";
@@ -29,17 +28,9 @@ describe("deployed self-modification sandbox", () => {
     );
 
     expect(environment?.provider).toBe("vercel");
-    const runtime = getSandboxEnvironmentRuntime(environment!);
-    const prepareContext = createSandboxPrepareContext({
-      appRoot: "/app",
-      files: { list: async () => [], read: vi.fn(), readText: vi.fn() },
-      log: () => {},
-      provider: runtime,
-      resources: {},
-      sourceRevision: "revision",
-      storagePath: "/app/.eve/sandbox",
-    });
-    await expect(runtime.implementation.prepare(prepareContext)).resolves.toEqual({});
+    await expect(
+      createSandboxEnvironmentHarness(environment!).prepare({ appRoot: "/app" }),
+    ).resolves.toEqual({});
     expect(isDeployedOnVercel).not.toHaveBeenCalled();
   });
 
@@ -52,24 +43,12 @@ describe("deployed self-modification sandbox", () => {
     ).rejects.toThrow("Deployed self-modification requires deploying on Vercel");
   });
 
-  it("does not probe the host during eve dev", async () => {
+  it("does not probe the host during eve dev", () => {
     vi.stubEnv("EVE_DEV", "1");
     const isDeployedOnVercel = vi.fn(() => false);
     const selector = defineDeployedSelfModificationSandbox(connectConfig, isDeployedOnVercel);
     expect(selector).toBeTypeOf("function");
-    const environment = getBoundSandboxEnvironment(selector);
-    expect(environment?.provider).toBe("self-modification-disabled");
-    const runtime = getSandboxEnvironmentRuntime(environment!);
-    const prepareContext = createSandboxPrepareContext({
-      appRoot: "/app",
-      files: { list: async () => [], read: vi.fn(), readText: vi.fn() },
-      log: () => {},
-      provider: runtime,
-      resources: {},
-      sourceRevision: "revision",
-      storagePath: "/app/.eve/sandbox",
-    });
-    await expect(runtime.implementation.prepare(prepareContext)).resolves.toEqual({});
+    expect(getBoundSandboxEnvironment(selector)?.provider).toBe("self-modification-disabled");
     expect(isDeployedOnVercel).not.toHaveBeenCalled();
   });
 });

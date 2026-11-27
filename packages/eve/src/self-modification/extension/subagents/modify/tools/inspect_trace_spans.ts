@@ -1,7 +1,6 @@
 import { defineTool } from "eve/tools";
 
-import type { ResolvedSelfModificationConfig } from "../../../../config.js";
-import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js";
+import { defineLocalOnlyDynamic } from "../../../local-only.js";
 import { detailFields, readTraceSources, SPAN_ID, TRACE_ID } from "../../../trace-inspection.js";
 
 const FIELDS = ["arguments", "result", "error"] as const;
@@ -71,10 +70,6 @@ const inspectTraceSpansTool = defineTool({
     return { traceId, spans, truncated };
   },
 });
-
-export function resolveInspectTraceSpansTool(config: ResolvedSelfModificationConfig) {
-  return resolveLocalOnly(config, inspectTraceSpansTool);
-}
 
 export default defineLocalOnlyDynamic(inspectTraceSpansTool);
 

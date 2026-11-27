@@ -1,7 +1,6 @@
 import { defineSkill } from "eve/skills";
 
-import type { ResolvedSelfModificationConfig } from "../../../../config.js";
-import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js";
+import { defineLocalOnlyDynamic } from "../../../local-only.js";
 
 const traceAnalysisSkill = defineSkill({
   description:
@@ -26,9 +25,5 @@ Search and inspection share the same summary. Its durationMs is elapsed time; in
 For latency, distinguish tool execution time from model round-trip time. Repeated tool counts are leads, not proof that calls are independent; inspect the compact timeline before recommending batching. Report the highest-impact opportunities first.
 `,
 });
-
-export function resolveTraceAnalysisSkill(config: ResolvedSelfModificationConfig) {
-  return resolveLocalOnly(config, traceAnalysisSkill);
-}
 
 export default defineLocalOnlyDynamic(traceAnalysisSkill);

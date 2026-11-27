@@ -1,5 +1,5 @@
-import { access } from "node:fs/promises";
-import { join } from "node:path";
+import { access, readFile, rmdir, unlink } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import { confirm, select, text } from "#setup/ask.js";
 import {
@@ -9,6 +9,7 @@ import {
   defaultSelfModificationSetupOperations,
   directoryError,
   gitRefError,
+  LEGACY_SELF_MODIFICATION_CONFIG_PATHS,
   renderSelfModificationConfig,
   repositoryPartError,
   SELF_MODIFICATION_CONFIG_PATH,
@@ -42,8 +43,8 @@ const SELF_MODIFICATION_PRODUCTION_DEPENDENCIES = {
 };
 
 type SelfModificationSetupPlan =
-  | { readonly kind: "authored" }
-  | { readonly kind: "local" }
+  | { readonly kind: "authored"; readonly removeDuplicateStockMount?: boolean }
+  | { readonly kind: "local"; readonly removeDuplicateStockMount?: boolean }
   | {
       readonly kind: "deployed";
       readonly connectorName: string;
@@ -189,11 +190,17 @@ export async function applySelfModificationSetup(
   deps: SelfModificationApplyDependencies = defaultApplyDependencies,
 ) {
   if (plan.kind === "authored") {
+    if (plan.removeDuplicateStockMount === true) {
+      await removeDuplicateStockSelfMount(context.appRoot);
+    }
     return {
       facts: [{ label: "Self-modification", value: "manual configuration update required" }],
     };
   }
   if (plan.kind === "local") {
+    if (plan.removeDuplicateStockMount === true) {
+      await removeDuplicateStockSelfMount(context.appRoot);
+    }
     return { facts: [] };
   }
 
@@ -236,15 +243,46 @@ export async function prepareLocalSelfModificationSetup(
 ): Promise<SelfModificationSetupPlan> {
   await assertCurrentLayout(context.appRoot);
   const existing = await operations.readLocalConfig();
+  const removeDuplicateStockMount = await hasDuplicateStockSelfMount(context.appRoot);
   if (classifySelfModificationConfig(existing) === "authored") {
     context.presenter.note(
-      `The existing ${SELF_MODIFICATION_CONFIG_PATH} contains authored configuration and was not overwritten.`,
+      "The existing local self-modification mount contains authored configuration and was not overwritten.",
       "Manual update required",
       { tone: "warning" },
     );
-    return { kind: "authored" };
+    return removeDuplicateStockMount
+      ? { kind: "authored", removeDuplicateStockMount: true }
+      : { kind: "authored" };
   }
-  return { kind: "local" };
+  return removeDuplicateStockMount
+    ? { kind: "local", removeDuplicateStockMount: true }
+    : { kind: "local" };
+}
+
+async function hasDuplicateStockSelfMount(appRoot: string): Promise<boolean> {
+  const stockPath = join(appRoot, SELF_MODIFICATION_CONFIG_PATH);
+  let stockContent: string;
+  try {
+    stockContent = await readFile(stockPath, "utf8");
+  } catch {
+    return false;
+  }
+  if (classifySelfModificationConfig(stockContent) !== "local") return false;
+  for (const legacy of LEGACY_SELF_MODIFICATION_CONFIG_PATHS) {
+    try {
+      await access(join(appRoot, legacy));
+      return true;
+    } catch {}
+  }
+  return false;
+}
+
+async function removeDuplicateStockSelfMount(appRoot: string): Promise<void> {
+  const stockPath = join(appRoot, SELF_MODIFICATION_CONFIG_PATH);
+  try {
+    await unlink(stockPath);
+    await rmdir(dirname(stockPath));
+  } catch {}
 }
 
 function describeEnvironment(environment: SetupPrepareContext["environment"]): string {

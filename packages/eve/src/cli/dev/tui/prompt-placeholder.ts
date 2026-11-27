@@ -1,7 +1,7 @@
 import type { AgentInfoResult, AgentInfoSource } from "#client/agent-info-schema.js";
 import { AGENT_INSTRUCTIONS_TEMPLATE } from "#setup/scaffold/create/instructions-template.js";
 import { SCAFFOLDED_AGENT_PATHS } from "#setup/scaffold/create/agent-paths.js";
-import { SELF_MODIFICATION_AGENT_NAME } from "./tool-presentation.js";
+import { isSelfModificationAgent } from "./tool-presentation.js";
 
 const MESSAGE = "Send a message…";
 const scaffoldedSourcePaths = new Set(
@@ -33,11 +33,12 @@ export function initialPromptPlaceholder(
 ): string {
   if (
     !localDevelopment ||
+    process.platform === "win32" ||
     info === undefined ||
     info.mode !== "development" ||
     info.diagnostics.discoveryErrors > 0 ||
     !info.subagents.local.some(
-      (entry) => entry.name === SELF_MODIFICATION_AGENT_NAME && isSelfModification(entry),
+      (entry) => isSelfModificationAgent(entry.name) && isSelfModification(entry),
     )
   ) {
     return MESSAGE;

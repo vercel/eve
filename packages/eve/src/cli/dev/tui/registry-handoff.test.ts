@@ -5,9 +5,12 @@ import { registryHandoffAddress } from "./runner.js";
 const handoff = { address: "eve/slack", status: "needs-terminal" };
 
 describe("registry terminal handoff", () => {
-  it("accepts the packaged self-modification subagent's registry install", () => {
-    expect(registryHandoffAddress("self__modify", "registry_add", handoff)).toBe("eve/slack");
-  });
+  it.each(["self__modify", "self-modification__modify"])(
+    "accepts the packaged self-modification subagent %s registry install",
+    (subagentName) => {
+      expect(registryHandoffAddress(subagentName, "registry_add", handoff)).toBe("eve/slack");
+    },
+  );
 
   it.each([
     ["self__modify", "selfmod__registry_add"],

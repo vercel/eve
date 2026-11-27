@@ -1,7 +1,5 @@
-import { defineDynamic, defineInstructions } from "eve/instructions";
+import { defineInstructions } from "eve/instructions";
 
-import { resolveSelfModificationConfig } from "../../../config.js";
-import { isLocalSelfModificationEnabled } from "../../../mode.js";
 import { renderLocalSelfModificationExtension } from "../../../scaffold.js";
 import {
   documentationInstructions,
@@ -13,7 +11,7 @@ import {
   toolAuthoringInstructions,
   workingInstructions,
 } from "../../../subagent-guidance.js";
-import selfModification from "../../extension.js";
+import { defineLocalOnlyDynamic } from "../../local-only.js";
 
 const localReportingGuidance = `## Report results
 
@@ -36,12 +34,8 @@ Only when the requester explicitly names the self-modification subagent, edit wh
 \`\`\`ts
 ${renderLocalSelfModificationExtension()}\`\`\``;
 
-export default defineDynamic(() => {
-  if (!isLocalSelfModificationEnabled(resolveSelfModificationConfig(selfModification.config))) {
-    return null;
-  }
-
-  return defineInstructions({
+export default defineLocalOnlyDynamic(
+  defineInstructions({
     content: renderInstructions([
       roleInstructions,
       sourceWorkspaceInstructions("agent"),
@@ -54,5 +48,5 @@ export default defineDynamic(() => {
       selfModificationSubagentGuidance,
       localReportingGuidance,
     ]),
-  });
-});
+  }),
+);

@@ -1,35 +1,40 @@
-import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { dynamicEvaluate, type DynamicSentinel } from "#dynamic/definition.js";
+import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { installLocalDevCapabilityEnvironment } from "#runtime/local-dev-capability.js";
 import { indexLocalTraceConversation } from "#tracing/local/trace-discovery-index.js";
 
-import { resolveTraceAnalysisSkill } from "./extension/subagents/modify/skills/trace_analysis.js";
-import { resolveInspectTraceTool } from "./extension/subagents/modify/tools/inspect_trace.js";
-import { resolveInspectTraceSpansTool } from "./extension/subagents/modify/tools/inspect_trace_spans.js";
-import { resolveSearchTracesTool } from "./extension/subagents/modify/tools/search_traces.js";
+import traceAnalysisSkill from "./extension/subagents/modify/skills/trace_analysis.js";
+import inspectTraceTool from "./extension/subagents/modify/tools/inspect_trace.js";
+import inspectTraceSpansTool from "./extension/subagents/modify/tools/inspect_trace_spans.js";
+import searchTracesTool from "./extension/subagents/modify/tools/search_traces.js";
 
 const traceId = "1".repeat(32);
 const otherTraceId = "2".repeat(32);
 const spanId = "a".repeat(16);
 const toolSpanId = "b".repeat(16);
-const originalEveDev = process.env.EVE_DEV;
-const temporaryRoots: string[] = [];
+const createTemporaryDirectory = useTemporaryDirectories();
 
 beforeEach(() => {
-  process.env.EVE_DEV = "1";
+  vi.stubEnv("EVE_DEV", "1");
 });
 
-afterEach(async () => {
-  if (originalEveDev === undefined) delete process.env.EVE_DEV;
-  else process.env.EVE_DEV = originalEveDev;
-  await Promise.all(
-    temporaryRoots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
-  );
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
+
+async function resolveLocal<T, C>(sentinel: DynamicSentinel<T | null, C>): Promise<T> {
+  const value = await dynamicEvaluate(sentinel)({} as C);
+  if (value === null) throw new Error("Expected local trace definition to resolve.");
+  return value;
+}
+const searchTraces = () => resolveLocal(searchTracesTool);
+const inspectTrace = () => resolveLocal(inspectTraceTool);
+const inspectTraceSpans = () => resolveLocal(inspectTraceSpansTool);
 
 function segment(
   input: {
@@ -102,8 +107,7 @@ async function withTraceStore<T>(
   traces: Readonly<Record<string, string | TraceFixtureEntry>>,
   callback: (ctx: never) => Promise<T>,
 ): Promise<T> {
-  const appRoot = await mkdtemp(join(tmpdir(), "eve-self-mod-traces-"));
-  temporaryRoots.push(appRoot);
+  const appRoot = await createTemporaryDirectory("eve-self-mod-traces-");
   for (const [id, entry] of Object.entries(traces)) {
     const normalized: TraceFixtureEntry = typeof entry === "string" ? { content: entry } : entry;
     const traceDir = join(appRoot, ".eve/traces/v1", id);
@@ -140,100 +144,23 @@ async function withTraceStore<T>(
 }
 
 describe("self-modification trace inspection tools", () => {
-  it("resolves trace analysis only in local mode on POSIX hosts", () => {
-    delete process.env.EVE_DEV;
-    expect(resolveSearchTracesTool({ localEnabled: true })).toBeNull();
-    expect(resolveInspectTraceTool({ localEnabled: true })).toBeNull();
-    expect(resolveInspectTraceSpansTool({ localEnabled: true })).toBeNull();
-    expect(resolveTraceAnalysisSkill({ localEnabled: true })).toBeNull();
-
-    process.env.EVE_DEV = "1";
-    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
-    Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
-    try {
-      expect(resolveSearchTracesTool({ localEnabled: true })).toBeNull();
-      expect(resolveInspectTraceTool({ localEnabled: true })).toBeNull();
-      expect(resolveInspectTraceSpansTool({ localEnabled: true })).toBeNull();
-      expect(resolveTraceAnalysisSkill({ localEnabled: true })).toBeNull();
-    } finally {
-      if (originalPlatform !== undefined) {
-        Object.defineProperty(process, "platform", originalPlatform);
-      }
-    }
+  it("resolves trace analysis only in local mode", () => {
+    vi.stubEnv("EVE_DEV", undefined);
+    expect(dynamicEvaluate(searchTracesTool)({} as never)).toBeNull();
+    expect(dynamicEvaluate(inspectTraceTool)({} as never)).toBeNull();
+    expect(dynamicEvaluate(inspectTraceSpansTool)({} as never)).toBeNull();
+    expect(dynamicEvaluate(traceAnalysisSkill)({} as never)).toBeNull();
   });
 
   describe.skipIf(process.platform === "win32")("on POSIX hosts", () => {
-    it("defaults an omitted search limit", async () => {
-      await withTraceStore(
-        {
-          [traceId]: {
-            content: segment({ id: traceId, toolName: "read", status: { code: 2 } }),
-            mtimeMs: 2_000,
-          },
-          [otherTraceId]: {
-            content: segment({ id: otherTraceId }),
-            mtimeMs: 1_000,
-          },
-        },
-        async (ctx) => {
-          const search = resolveSearchTracesTool({ localEnabled: true })!;
-          const defaultSearch = await search.execute({}, ctx);
-          const sortedSearch = await search.execute({ sortBy: "failures" }, ctx);
-
-          expect(defaultSearch).toMatchObject({
-            matches: [{ traceId }, { traceId: otherTraceId }],
-          });
-          expect(sortedSearch).toMatchObject({
-            matches: [
-              { traceId, errorSpanCount: 1 },
-              { traceId: otherTraceId, errorSpanCount: 0 },
-            ],
-          });
-        },
-      );
-    });
-
-    it("ranks summed step usage and returns the same summary from search and paged inspection", async () => {
-      await withTraceStore(
-        {
-          [traceId]: segment({
-            stepInputTokens: [100, 100],
-            toolName: "read",
-            status: { code: 2 },
-          }),
-          [otherTraceId]: segment({ id: otherTraceId, stepInputTokens: [150] }),
-        },
-        async (ctx) => {
-          const search = await resolveSearchTracesTool({ localEnabled: true })!.execute(
-            { sortBy: "inputTokens", limit: 1 },
-            ctx,
-          );
-          const inspection = await resolveInspectTraceTool({ localEnabled: true })!.execute(
-            { traceId, limit: 1 },
-            ctx,
-          );
-          if (!("matches" in search) || !("summary" in inspection)) {
-            throw new Error("Expected non-streaming trace tools.");
-          }
-          expect(search).toMatchObject({
-            matches: [{ traceId, inputTokens: 200, errorSpanCount: 1, toolNames: ["read"] }],
-            truncated: true,
-          });
-          expect(inspection).toMatchObject({ summary: search.matches[0], hasMore: true });
-          expect(inspection.summary).toEqual(search.matches[0]);
-          expect(inspection).not.toHaveProperty("totals");
-          expect(inspection.summary).not.toHaveProperty("failedOperations");
-        },
-      );
-    });
-
-    it("searches indexed and unindexed trace metadata within the invoking conversation", async () => {
+    it("searches indexed and unindexed conversation traces with summary parity against inspect_trace", async () => {
       await withTraceStore(
         {
           [traceId]: {
             content: segment({
               id: traceId,
               runId: "target",
+              stepInputTokens: [100, 100],
               toolName: "deploy",
               status: { code: 2, message: "failed" },
             }),
@@ -241,28 +168,44 @@ describe("self-modification trace inspection tools", () => {
             mtimeMs: 2_000,
           },
           [otherTraceId]: {
-            content: segment({ id: otherTraceId, runId: "other" }),
+            content: segment({ id: otherTraceId, runId: "other", stepInputTokens: [150] }),
             mtimeMs: 1_000,
           },
         },
         async (ctx) => {
-          const result = await resolveSearchTracesTool({ localEnabled: true })!.execute(
-            { limit: 10 },
-            ctx,
-          );
-
-          expect(result).toMatchObject({
+          const all = await (await searchTraces()).execute({}, ctx);
+          expect(all).toMatchObject({
             coverage: { complete: true, considered: 2, matched: 2, stored: 2 },
             matches: [
               {
                 traceId,
                 errorSpanCount: 1,
+                inputTokens: 200,
                 sessionIds: ["target"],
                 toolNames: ["deploy"],
               },
-              { traceId: otherTraceId, errorSpanCount: 0, sessionIds: ["other"], toolNames: [] },
+              {
+                traceId: otherTraceId,
+                errorSpanCount: 0,
+                inputTokens: 150,
+                sessionIds: ["other"],
+                toolNames: [],
+              },
             ],
           });
+
+          const topByTokens = await (
+            await searchTraces()
+          ).execute({ sortBy: "inputTokens", limit: 1 }, ctx);
+          const inspection = await (await inspectTrace()).execute({ traceId, limit: 1 }, ctx);
+          if (!("matches" in topByTokens) || !("summary" in inspection)) {
+            throw new Error("Expected non-streaming trace tools.");
+          }
+          expect(topByTokens).toMatchObject({ matches: [{ traceId }], truncated: true });
+          expect(inspection).toMatchObject({ summary: topByTokens.matches[0], hasMore: true });
+          expect(inspection.summary).toEqual(topByTokens.matches[0]);
+          expect(inspection).not.toHaveProperty("totals");
+          expect(inspection.summary).not.toHaveProperty("failedOperations");
         },
       );
     });
@@ -275,10 +218,7 @@ describe("self-modification trace inspection tools", () => {
         }),
       );
       await withTraceStore(entries, async (ctx) => {
-        const result = await resolveSearchTracesTool({ localEnabled: true })!.execute(
-          { limit: 10 },
-          ctx,
-        );
+        const result = await (await searchTraces()).execute({ limit: 10 }, ctx);
 
         expect(result).toMatchObject({
           coverage: {
@@ -295,10 +235,7 @@ describe("self-modification trace inspection tools", () => {
 
     it("treats a missing trace directory as an empty result", async () => {
       await withTraceStore({}, async (ctx) => {
-        const result = await resolveSearchTracesTool({ localEnabled: true })!.execute(
-          { limit: 10 },
-          ctx,
-        );
+        const result = await (await searchTraces()).execute({ limit: 10 }, ctx);
 
         expect(result).toMatchObject({ coverage: { complete: true, stored: 0 }, matches: [] });
       });
@@ -312,10 +249,7 @@ describe("self-modification trace inspection tools", () => {
           [traceId]: segment({ id: traceId }),
         },
         async (ctx) => {
-          const result = await resolveSearchTracesTool({ localEnabled: true })!.execute(
-            { limit: 10 },
-            ctx,
-          );
+          const result = await (await searchTraces()).execute({ limit: 10 }, ctx);
 
           expect(result).toMatchObject({
             coverage: {
@@ -334,10 +268,7 @@ describe("self-modification trace inspection tools", () => {
       await withTraceStore(
         { [traceId]: segment({ id: traceId, toolName: "bash" }) },
         async (ctx) => {
-          const result = await resolveInspectTraceTool({ localEnabled: true })!.execute(
-            { traceId, limit: 2 },
-            ctx,
-          );
+          const result = await (await inspectTrace()).execute({ traceId, limit: 2 }, ctx);
 
           expect(result).toMatchObject({
             timeline: [
@@ -352,10 +283,7 @@ describe("self-modification trace inspection tools", () => {
             summary: { modelCalls: 1, toolCalls: 1 },
           });
 
-          const page = await resolveInspectTraceTool({ localEnabled: true })!.execute(
-            { limit: 1, offset: 1, traceId },
-            ctx,
-          );
+          const page = await (await inspectTrace()).execute({ limit: 1, offset: 1, traceId }, ctx);
           expect(page).toMatchObject({
             hasMore: false,
             offset: 1,
@@ -370,7 +298,9 @@ describe("self-modification trace inspection tools", () => {
       await withTraceStore(
         { [traceId]: segment({ id: traceId, toolName: "bash" }) },
         async (ctx) => {
-          const result = await resolveInspectTraceSpansTool({ localEnabled: true })!.execute(
+          const result = await (
+            await inspectTraceSpans()
+          ).execute(
             { include: ["arguments", "result"], spanIds: [toolSpanId, "c".repeat(16)], traceId },
             ctx,
           );
@@ -394,17 +324,13 @@ describe("self-modification trace inspection tools", () => {
     });
 
     it("validates the focused tool inputs", async () => {
+      const traceTool = await inspectTrace();
+      const spansTool = await inspectTraceSpans();
       await expect(
-        resolveInspectTraceTool({ localEnabled: true })!.execute(
-          { operation: "summary", traceId },
-          {} as never,
-        ),
+        traceTool.execute({ operation: "summary", traceId }, {} as never),
       ).rejects.toThrow();
       await expect(
-        resolveInspectTraceSpansTool({ localEnabled: true })!.execute(
-          { include: ["prompt"], spanIds: [spanId], traceId },
-          {} as never,
-        ),
+        spansTool.execute({ include: ["prompt"], spanIds: [spanId], traceId }, {} as never),
       ).rejects.toThrow("include must contain arguments, result, or error.");
     });
   });

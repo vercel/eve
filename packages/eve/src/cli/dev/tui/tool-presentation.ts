@@ -215,13 +215,19 @@ export function toolDisplayTitle(toolName: string): string {
 
 export const SELF_MODIFICATION_AGENT_NAME = "self__modify";
 
+const SELF_MODIFICATION_AGENT_NAMES = new Set([
+  SELF_MODIFICATION_AGENT_NAME,
+  "self-modification__modify",
+]);
+
 const AGENT_DISPLAY_NAMES: ReadonlyMap<string, string> = new Map([
   ["agent", "subagent"],
   [SELF_MODIFICATION_AGENT_NAME, "agent editor"],
+  ["self-modification__modify", "agent editor"],
 ]);
 
 export function isSelfModificationAgent(toolName: string): boolean {
-  return toolBaseName(toolName) === SELF_MODIFICATION_AGENT_NAME;
+  return SELF_MODIFICATION_AGENT_NAMES.has(toolBaseName(toolName));
 }
 
 export function agentTaskLabel(name: string): string {

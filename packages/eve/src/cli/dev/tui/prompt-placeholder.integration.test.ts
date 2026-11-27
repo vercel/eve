@@ -28,6 +28,8 @@ it("recognizes scaffold instructions and bundled capabilities through compiled a
   );
 
   expect(initialPromptPlaceholder(info, true)).toBe(
-    "Ask me to connect a channel, edit instructions, add a tool…",
+    process.platform === "win32"
+      ? "Send a message…"
+      : "Ask me to connect a channel, edit instructions, add a tool…",
   );
 });

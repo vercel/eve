@@ -220,11 +220,14 @@ describe("presentTool", () => {
     expect(presentTool("stock-price", { message: "x" }).title).toBe("Stock price");
   });
 
-  it("names the self-modification subagent without its extension namespace", () => {
-    expect(
-      presentTool("self__modify", { message: "Add a tool." }, { isSubagent: true }).title,
-    ).toBe("Delegate agent editor");
-  });
+  it.each(["self__modify", "self-modification__modify"])(
+    "names the self-modification subagent %s without its extension namespace",
+    (name) => {
+      expect(presentTool(name, { message: "Add a tool." }, { isSubagent: true }).title).toBe(
+        "Delegate agent editor",
+      );
+    },
+  );
 
   it("keeps unknown tools on the generic formatter", () => {
     const presentation = presentTool("linear__list_issues", { teamId: "T1" });

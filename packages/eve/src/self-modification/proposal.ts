@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { SandboxSession } from "eve/sandbox";
 
+import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
 import { shellQuote } from "#shared/shell-quote.js";
 
 import type { PreparedSelfModificationWorkspace } from "./git-workspace.js";
@@ -187,11 +188,13 @@ export function assertAllowedChange(
     path.startsWith(".github/workflows/") ||
     path.startsWith(`${agentRoot}subagents/self-modification/`) ||
     path.startsWith(`${agentRoot}extensions/self/`) ||
-    path === `${appRoot}agent/extensions/self.ts` ||
+    isAuthoredModulePath(path, `${agentRoot}extensions/self`) ||
     path.startsWith(`${agentRoot}extensions/self-modification/`) ||
-    path === `${appRoot}agent/extensions/self-modification.ts` ||
+    isAuthoredModulePath(path, `${agentRoot}extensions/self-modification`) ||
+    path.startsWith(`${agentRoot}extensions/self-modification-remote/`) ||
+    isAuthoredModulePath(path, `${agentRoot}extensions/self-modification-remote`) ||
     protectedMounts.some((mount) => path === mount || path.startsWith(`${mount}/`)) ||
-    path === `${appRoot}agent/extensions/selfmod.ts` ||
+    isAuthoredModulePath(path, `${agentRoot}extensions/selfmod`) ||
     path === `${appRoot}agent/self-modification.config.ts`
   ) {
     throw new Error(
@@ -210,7 +213,7 @@ async function selfModificationMountPaths(input: {
   const extensionsRoot = `${appRoot}agent/extensions`;
   const matches = await gitOutput(
     input.sandbox,
-    `git -C ${quote(input.repositoryPath)} grep -l -z -F -- "eve/self-modification" ${quote(input.tree)} -- ${quote(extensionsRoot)}`,
+    `git -C ${quote(input.repositoryPath)} grep -l -z -F -e "eve/extensions/self-modification" -e "eve/self-modification" ${quote(input.tree)} -- ${quote(extensionsRoot)}`,
     false,
   ).catch((error: unknown) => {
     if (error instanceof Error && error.message.includes("failed with exit 1:")) return "";
@@ -225,14 +228,15 @@ async function selfModificationMountPaths(input: {
           const path = match.slice(match.indexOf(":") + 1);
           if (!path.startsWith(`${extensionsRoot}/`)) return [];
           const relativePath = path.slice(extensionsRoot.length + 1);
-          if (relativePath.endsWith("/extension.ts")) {
-            return [`${extensionsRoot}/${relativePath.slice(0, -"/extension.ts".length)}`];
-          }
           if (!relativePath.includes("/")) return [path];
           return [`${extensionsRoot}/${relativePath.split("/")[0]}`];
         }),
     ),
   ];
+}
+
+function isAuthoredModulePath(path: string, prefix: string): boolean {
+  return SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS.some((ext) => path === `${prefix}${ext}`);
 }
 
 function isSafePath(path: string): boolean {
