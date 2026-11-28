@@ -70,6 +70,7 @@ export default withEve(config);
         "agent/sandbox.ts": `import { DefaultSandbox, defineSandbox } from "eve/sandbox";
 import { defineSandboxProvider } from "eve/sandbox/provider";
 import { DockerSandbox } from "eve/sandbox/docker";
+import { HostSandbox } from "eve/sandbox/host";
 import { JustBashSandbox } from "eve/sandbox/just-bash";
 import { VercelSandbox } from "eve/sandbox/vercel";
 
@@ -95,6 +96,7 @@ async function verifyMutableNetworkCapability() {
 }
 void verifyMutableNetworkCapability;
 void DockerSandbox.image("ghcr.io/acme/agent:latest");
+void HostSandbox.environment({ cwd: "/tmp", inheritEnv: false }).open({ cwd: "/tmp", env: { FOO: "bar", DROP: undefined } });
 void JustBashSandbox.environment();
 
 export default defineSandbox(() => environment.open());
@@ -106,6 +108,7 @@ export default defineSandbox(() => environment.open());
       "src/public/sandbox/index.ts",
       "src/public/sandbox/provider.ts",
       "src/public/sandbox/docker.ts",
+      "src/public/sandbox/host.ts",
       "src/public/sandbox/just-bash.ts",
       "src/public/sandbox/vercel.ts",
     ],
@@ -119,6 +122,9 @@ export default defineSandbox(() => environment.open());
       },
       "./sandbox/docker": {
         types: "./dist/src/public/sandbox/docker.d.ts",
+      },
+      "./sandbox/host": {
+        types: "./dist/src/public/sandbox/host.d.ts",
       },
       "./sandbox/just-bash": {
         types: "./dist/src/public/sandbox/just-bash.d.ts",

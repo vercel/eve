@@ -12,20 +12,19 @@ import {
   resolveBenchmarkRequest,
 } from "./resolve-benchmark-request.mjs";
 
-const models = { anthropic: "anthropic/claude-sonnet-5.5", openai: "openai/gpt-6.1-sol" };
+const models = { anthropic: "anthropic/claude-sonnet-5.5", openai: "openai/gpt-6.2-sol" };
 const anthropic = { family: "anthropic", model: models.anthropic };
 const openai = { family: "openai", model: models.openai };
 const sweLean = { dataset: "swe-lean", reasoning: "low", attempts: "5" };
 const deepsweLean = { dataset: "deepswe-lean", reasoning: "high", attempts: "3" };
 const defaults = {
-  harness: "eve-code,opencode,pi,fx",
-  slug: "eve-code+opencode+pi+fx",
+  harness: "eve,opencode,pi,fx",
+  slug: "eve+opencode+pi+fx",
   agentSource: true,
   ...sweLean,
   models: [anthropic],
 };
-const workflow = () =>
-  readFile(new URL("../workflows/eve-code-benchmark.yml", import.meta.url), "utf8");
+const workflow = () => readFile(new URL("../workflows/eve-benchmark.yml", import.meta.url), "utf8");
 
 const sha = "a".repeat(40);
 const pull = {
@@ -78,8 +77,8 @@ function fixture({
 
 const resolve = (input) => resolveBenchmarkRequest(input);
 
-test("automatic PR runs compare eve-code with opencode, pi, and fx at the exact current PR head", async () => {
-  assert.deepEqual(DEFAULT_HARNESSES, ["eve-code", "opencode", "pi", "fx"]);
+test("automatic PR runs compare eve with opencode, pi, and fx at the exact current PR head", async () => {
+  assert.deepEqual(DEFAULT_HARNESSES, ["eve", "opencode", "pi", "fx"]);
   assert.equal(DEFAULT_MODEL_FAMILY, "anthropic");
   const input = fixture({ eventName: "pull_request" });
   assert.deepEqual(await resolve(input), { ...defaults, sha, pr: "42" });
@@ -100,7 +99,7 @@ for (const harness of BENCHMARK_HARNESSES) {
     assert.deepEqual(await resolve(fixture({ body: `/benchmark ${harness}` })), {
       harness,
       slug: harness,
-      agentSource: harness === "eve-code",
+      agentSource: harness === "eve",
       ...sweLean,
       models: [anthropic],
       sha,
@@ -110,14 +109,10 @@ for (const harness of BENCHMARK_HARNESSES) {
 }
 
 test("a comment can select several harnesses, comma- or space-separated, deduplicated in order", async () => {
-  for (const body of [
-    "/benchmark pi,eve-code",
-    "/benchmark pi eve-code",
-    "/benchmark pi, eve-code,pi",
-  ]) {
+  for (const body of ["/benchmark pi,eve", "/benchmark pi eve", "/benchmark pi, eve,pi"]) {
     const result = await resolve(fixture({ body }));
-    assert.equal(result.harness, "pi,eve-code");
-    assert.equal(result.slug, "pi+eve-code");
+    assert.equal(result.harness, "pi,eve");
+    assert.equal(result.slug, "pi+eve");
   }
 });
 
@@ -149,14 +144,14 @@ test("a comment can select a dataset, with the default harnesses or its own list
     pr: "42",
   });
   for (const body of [
-    "/benchmark deepswe-lean eve-code,pi",
-    "/benchmark eve-code pi deepswe-lean",
-    "/benchmark eve-code, deepswe-lean, pi",
+    "/benchmark deepswe-lean eve,pi",
+    "/benchmark eve pi deepswe-lean",
+    "/benchmark eve, deepswe-lean, pi",
   ]) {
     const result = await resolve(fixture({ body }));
     assert.deepEqual(
       [result.dataset, result.reasoning, result.attempts, result.harness, result.slug],
-      ["deepswe-lean", "high", "3", "eve-code,pi", "eve-code+pi"],
+      ["deepswe-lean", "high", "3", "eve,pi", "eve+pi"],
     );
   }
   assert.equal((await resolve(fixture({ body: "/benchmark swe-lean pi" }))).dataset, "swe-lean");
@@ -326,11 +321,11 @@ test("manual dispatch can publish a deepswe-lean result and rejects unknown data
   await assert.rejects(resolve(input), /Supported benchmark datasets: swe-lean, deepswe-lean/u);
 });
 
-test("only a run with eve-code passes the agent source, which eve-bench rejects otherwise", async () => {
+test("only a run with eve passes the agent source, which eve-bench rejects otherwise", async () => {
   const input = fixture({ eventName: "workflow_dispatch" });
   input.context.payload.inputs = { harness: "opencode", dataset: "deepswe-lean" };
   assert.equal((await resolve(input)).agentSource, false);
-  input.context.payload.inputs.harness = "opencode,eve-code";
+  input.context.payload.inputs.harness = "opencode,eve";
   assert.equal((await resolve(input)).agentSource, true);
 });
 
@@ -377,10 +372,10 @@ test("other events never run a benchmark", async () => {
 
 test("workflow names and concurrency preserve independent authorized harness runs", async () => {
   const workflow = await readFile(
-    new URL("../workflows/eve-code-benchmark.yml", import.meta.url),
+    new URL("../workflows/eve-benchmark.yml", import.meta.url),
     "utf8",
   );
-  assert.match(workflow, /^name: eve-code\n/u);
+  assert.match(workflow, /^name: eve\n/u);
   assert.match(workflow, /issue_comment:\n\s+types: \[created\]/u);
   assert.match(
     workflow,
@@ -398,7 +393,7 @@ test("workflow names and concurrency preserve independent authorized harness run
 
 test("the consumer tracks eve-bench main and owns its model selection", async () => {
   const workflow = await readFile(
-    new URL("../workflows/eve-code-benchmark.yml", import.meta.url),
+    new URL("../workflows/eve-benchmark.yml", import.meta.url),
     "utf8",
   );
   assert.match(workflow, /repository: vercel-labs\/eve-bench\n\s+ref: main\n/u);
@@ -410,7 +405,11 @@ test("the consumer tracks eve-bench main and owns its model selection", async ()
   assert.match(workflow, /dataset: \$\{\{ needs\.request\.outputs\.dataset \}\}\n/u);
   assert.match(
     workflow,
-    /contenders: \$\{\{ needs\.request\.outputs\.agent-source == 'true' && 'eve-code@baseline,eve-code@head' \|\| '' \}\}\n/u,
+    /contenders: \$\{\{ needs\.request\.outputs\.agent-source == 'true' && 'eve@baseline,eve@head' \|\| '' \}\}\n/u,
+  );
+  assert.match(
+    workflow,
+    /agent-paths: \$\{\{ needs\.request\.outputs\.agent-source == 'true' && '\["apps\/bench-agent"\]' \|\| '' \}\}\n/u,
   );
   assert.doesNotMatch(workflow, /^\s+task:/mu);
   assert.equal((workflow.match(/uses: \.\/\.eve-bench-action/gu) ?? []).length, 1);

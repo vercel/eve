@@ -142,9 +142,22 @@ export function createConnectionSession<Extensions extends object>(
     );
   }
   const combined = { ...extensions, ...session } as SandboxSession & Extensions;
+  const connectionJobsRoot = fastPaths?.jobsRoot;
   const connectionRunFast = fastPaths?.runFast;
+  const connectionSkillsRoot = fastPaths?.skillsRoot;
   const connectionSpawnBounded = fastPaths?.spawnBounded;
+  if (connectionJobsRoot !== undefined && !posix.isAbsolute(connectionJobsRoot)) {
+    throw new Error(
+      `Sandbox connection jobsRoot must be an absolute path, but received "${connectionJobsRoot}".`,
+    );
+  }
+  if (connectionSkillsRoot !== undefined && !posix.isAbsolute(connectionSkillsRoot)) {
+    throw new Error(
+      `Sandbox connection skillsRoot must be an absolute path, but received "${connectionSkillsRoot}".`,
+    );
+  }
   withSessionFastPaths(combined, {
+    ...(connectionJobsRoot !== undefined && { jobsRoot: connectionJobsRoot }),
     runFast: async (options: InternalCommandOptions) => {
       if (connectionRunFast !== undefined) {
         const result = await connectionRunFast({
@@ -170,6 +183,7 @@ export function createConnectionSession<Extensions extends object>(
         resolveInternalMaxOutputBytes(options.maxOutputBytes),
       );
     },
+    ...(connectionSkillsRoot !== undefined && { skillsRoot: connectionSkillsRoot }),
     ...(connectionSpawnBounded !== undefined && {
       spawnBounded: async (options) =>
         await connectionSpawnBounded({

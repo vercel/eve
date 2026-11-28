@@ -29,13 +29,23 @@ describe("local self-modification configuration", () => {
     );
   });
 
-  it("enables local editing only inside eve dev", () => {
+  it("enables local editing only inside eve dev on POSIX hosts", () => {
     const config = resolveSelfModificationConfig();
     expect(isLocalSelfModificationEnabled(config)).toBe(false);
     expect(isDeployedRuntime()).toBe(true);
     process.env.EVE_DEV = "1";
-    expect(isLocalSelfModificationEnabled(config)).toBe(true);
+    expect(isLocalSelfModificationEnabled(config)).toBe(process.platform !== "win32");
     expect(isLocalSelfModificationEnabled({ localEnabled: false })).toBe(false);
     expect(isDeployedRuntime()).toBe(false);
+
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+    try {
+      expect(isLocalSelfModificationEnabled(config)).toBe(false);
+    } finally {
+      if (originalPlatform !== undefined) {
+        Object.defineProperty(process, "platform", originalPlatform);
+      }
+    }
   });
 });

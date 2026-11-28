@@ -1,4 +1,4 @@
-import type { CatalogEntry } from "./subagents/agent/tools/search_registry.js";
+import type { CatalogEntry } from "./subagents/modify/tools/search_registry.js";
 
 export function classifyCatalogEntry(
   entry: CatalogEntry,

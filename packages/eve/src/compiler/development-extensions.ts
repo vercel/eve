@@ -21,7 +21,7 @@ import {
 
 const SELF_MODIFICATION_CONFIG = { local: { enabled: true } };
 
-const DEVELOPMENT_EXTENSION_IDS = ["self-modification"] as const;
+const DEVELOPMENT_EXTENSION_IDS = ["self"] as const;
 
 export type DevelopmentExtensionId = (typeof DEVELOPMENT_EXTENSION_IDS)[number];
 
@@ -38,7 +38,7 @@ function getBundledExtensionById(): ReadonlyMap<string, BundledExtensionMount> {
       (
         [
           {
-            namespace: "self-modification",
+            namespace: "self",
             importSpecifier: "eve/extensions/self-modification/local",
             entryPath: resolvePackageSourceFilePath("src/self-modification/extension/extension.ts"),
             config: SELF_MODIFICATION_CONFIG,
@@ -87,6 +87,9 @@ export async function prepareDevelopmentExtensions(input: {
     ...input.manifest.extensions.map((extension) => mountRefNamespace(extension.logicalPath)),
     ...input.manifest.resolvedExtensions.map((extension) => extension.namespace),
   ]);
+  const existingSpecifiers = new Set(
+    input.manifest.resolvedExtensions.map((extension) => extension.specifier),
+  );
   const selected = new Map<string, BundledExtensionMount>();
   const extensionsById =
     input.selection.enabled.length === 0 ? undefined : getBundledExtensionById();
@@ -100,7 +103,12 @@ export async function prepareDevelopmentExtensions(input: {
         `Development extensions use namespace "${extension.namespace}" more than once.`,
       );
     }
-    if (existingNamespaces.has(extension.namespace)) continue;
+    if (
+      existingNamespaces.has(extension.namespace) ||
+      existingSpecifiers.has(extension.importSpecifier)
+    ) {
+      continue;
+    }
     existingNamespaces.add(extension.namespace);
     selected.set(extension.namespace, extension);
   }

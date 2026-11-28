@@ -64,7 +64,7 @@ function completedTurn(sessionId, events = [], { input = {}, interactions = [] }
 
 /** The parent events of an agent call that starts task `taskId` and opens `childSessionId`. */
 function agentCallEvents(childSessionId, taskId = "agent-1") {
-  const name = "self-modification__agent";
+  const name = "self__modify";
   const callId = `call-${taskId}`;
   return [
     {

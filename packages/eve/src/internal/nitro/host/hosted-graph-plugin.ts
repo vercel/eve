@@ -31,11 +31,11 @@ const OPTIONAL_ENGINE_INSTALL_SOURCE_RE = new RegExp(
 
 const PRUNED_LOCAL_SANDBOX_ID = "\0eve-pruned-local-sandbox-providers";
 const PRUNED_LOCAL_SANDBOX_PROVIDER_ID = "\0eve-pruned-local-sandbox-provider-constructors";
-const LOCAL_BINDING_SOURCE_RE = /[/\\]bindings[/\\](?:docker|just-bash|local)\.(?:js|ts)$/;
+const LOCAL_BINDING_SOURCE_RE = /[/\\]bindings[/\\](?:docker|host|just-bash|local)\.(?:js|ts)$/;
 const LOCAL_PROVIDER_SOURCE_RE =
-  /(?:^|[/\\#])sandbox[/\\]providers[/\\](?:docker|just-bash)\.(?:js|ts)$/;
+  /(?:^|[/\\#])sandbox[/\\]providers[/\\](?:docker|host|just-bash)\.(?:js|ts)$/;
 const LOCAL_SANDBOX_SOURCE_FILTER = new RegExp(
-  String.raw`(?:[/\\]bindings[/\\](?:docker|just-bash|local)|(?:^|[/\\#])sandbox[/\\]providers[/\\](?:docker|just-bash))\.(?:js|ts)` +
+  String.raw`(?:[/\\]bindings[/\\](?:docker|host|just-bash|local)|(?:^|[/\\#])sandbox[/\\]providers[/\\](?:docker|host|just-bash))\.(?:js|ts)` +
     QUERY_SUFFIX,
 );
 
@@ -58,6 +58,7 @@ const PRUNED_LOCAL_SANDBOX_PROVIDER_SOURCE = [
   '  throw new Error("Local sandbox providers are pruned from hosted server bundles.");',
   "}",
   'export const DockerSandbox = { name: "docker", environment: pruned, dockerfile: pruned, image: pruned };',
+  'export const HostSandbox = { name: "host", environment: pruned };',
   'export const JustBashSandbox = { name: "just-bash", environment: pruned };',
   "",
 ].join("\n");
@@ -67,9 +68,11 @@ const PRUNED_LOCAL_SANDBOX_SOURCE = [
   '  throw new Error("Local sandbox providers are pruned from hosted server bundles.");',
   "}",
   "export const createDockerSandboxProvider = pruned;",
+  "export const createHostSandboxProvider = pruned;",
   "export const createJustBashSandboxProvider = pruned;",
   'export const DOCKER_PROVIDER_NAME = "docker";',
   'export const DOCKER_TEMPLATE_IMAGE_REPOSITORY = "eve-sandbox-template";',
+  'export const HOST_PROVIDER_NAME = "host";',
   'export const JUST_BASH_PROVIDER_NAME = "just-bash";',
   "export const isLinuxDockerDaemonAvailableSync = () => false;",
   "export const pruneDockerSandboxTemplates = pruned;",

@@ -328,7 +328,7 @@ describe("createDevelopmentServer", () => {
     const server = await startDevelopmentServer("/tmp/eve-test");
 
     expect(mocks.prepareDevelopmentApplicationHost).toHaveBeenCalledWith("/tmp/eve-test", {
-      developmentExtensions: { enabled: ["self-modification"] },
+      developmentExtensions: { enabled: ["self"] },
     });
     expect(mocks.pruneLocalSandboxTemplatesInBackground).toHaveBeenCalledWith("/tmp/eve-test");
     expect(mocks.createParentDevelopmentWorkflowWorld).toHaveBeenCalledWith(

@@ -14,6 +14,7 @@ import {
 
 const LOCAL_SANDBOX_BACKEND_NAMES = new Set([
   "docker",
+  "host",
   ...Object.keys(OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME),
 ]);
 

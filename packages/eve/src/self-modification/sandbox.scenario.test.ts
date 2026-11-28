@@ -1,17 +1,23 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import * as justBash from "just-bash";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { installLocalDevCapabilityEnvironment } from "#runtime/local-dev-capability.js";
+import {
+  getBoundSandboxEnvironment,
+  runWithSandboxConstructorRuntime,
+  type SandboxSelectorContext,
+} from "#shared/sandbox-environment.js";
 
-import { createSelfModificationFilesystem } from "./filesystem.js";
+import { defineSelfModificationSandbox } from "./sandbox.js";
 
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(
     temporaryDirectories
       .splice(0)
@@ -31,96 +37,136 @@ async function withLocalDevCapability<T>(appRoot: string, callback: () => Promis
   }
 }
 
-async function createAppRoot(options: { traces?: boolean; logs?: boolean } = {}): Promise<string> {
+async function createAppRoot(): Promise<string> {
   const appRoot = await mkdtemp(join(tmpdir(), "eve-self-modification-sandbox-"));
   temporaryDirectories.push(appRoot);
   await mkdir(join(appRoot, "agent"), { recursive: true });
+  await mkdir(join(appRoot, ".eve/traces/v1/trace-1/segments"), { recursive: true });
+  await mkdir(join(appRoot, ".eve/logs"), { recursive: true });
   await mkdir(join(appRoot, "node_modules/eve/docs"), { recursive: true });
-  if (options.traces !== false) {
-    await mkdir(join(appRoot, ".eve/traces/v1/trace-1/segments"), { recursive: true });
-    await writeFile(join(appRoot, ".eve/traces/v1/trace-1/segments/span.otlp.json"), "trace\n");
-  }
-  if (options.logs !== false) {
-    await mkdir(join(appRoot, ".eve/logs"), { recursive: true });
-    await writeFile(join(appRoot, ".eve/logs/dev-test.log"), "diagnostic log\n");
-  }
+  await writeFile(join(appRoot, "package.json"), '{"name":"self-mod-app"}\n');
+  await writeFile(join(appRoot, ".eve/traces/v1/trace-1/segments/span.otlp.json"), "trace\n");
+  await writeFile(join(appRoot, ".eve/logs/dev-test.log"), "diagnostic log\n");
   await writeFile(join(appRoot, "node_modules/eve/docs/README.md"), "installed eve docs\n");
   return appRoot;
 }
 
-describe("self-modification filesystem", () => {
-  it("mounts authored source read-write and traces, logs, and eve docs read-only", async () => {
-    const appRoot = await createAppRoot();
-    await withLocalDevCapability(appRoot, async () => {
-      const filesystem = await createSelfModificationFilesystem({
-        appRoot,
-        defaultFilesystem: new justBash.InMemoryFs(),
-        justBash,
-      });
+const selectorContext: SandboxSelectorContext = {
+  session: {
+    auth: { current: null, initiator: null },
+    id: "self-mod-session",
+    turn: { id: "turn-1", sequence: 0 },
+  },
+};
 
-      expect(await filesystem.readFile("/traces/trace-1/segments/span.otlp.json")).toBe("trace\n");
-      await expect(
-        filesystem.writeFile("/traces/trace-1/segments/span.otlp.json", "changed\n"),
-      ).rejects.toThrow(/read-only file system/u);
-
-      expect(await filesystem.readFile("/logs/dev-test.log")).toBe("diagnostic log\n");
-      await expect(filesystem.writeFile("/logs/dev-test.log", "changed\n")).rejects.toThrow(
-        /read-only file system/u,
-      );
-
-      expect(await filesystem.readFile("/eve-docs/README.md")).toBe("installed eve docs\n");
-      await expect(filesystem.writeFile("/eve-docs/README.md", "changed\n")).rejects.toThrow(
-        /read-only file system/u,
-      );
-
-      await filesystem.writeFile("/source/instructions.md", "authored\n");
-      expect(await readFile(join(appRoot, "agent/instructions.md"), "utf8")).toBe("authored\n");
-    });
+async function openSelfModificationSandbox(input: {
+  readonly runtimeRoot: string;
+  readonly storagePath: string;
+}) {
+  const selector = defineSelfModificationSandbox();
+  const environment = getBoundSandboxEnvironment(selector);
+  expect(environment?.provider).toBe("host");
+  const harness = createSandboxEnvironmentHarness(environment!);
+  const prepared = await harness.prepare({
+    appRoot: input.runtimeRoot,
+    storagePath: input.storagePath,
   });
-
-  it("uses the capability's authored root instead of the runtime snapshot", async () => {
-    const authoredRoot = await createAppRoot();
-    const runtimeRoot = await createAppRoot();
-
-    await withLocalDevCapability(authoredRoot, async () => {
-      const filesystem = await createSelfModificationFilesystem({
-        appRoot: runtimeRoot,
-        defaultFilesystem: new justBash.InMemoryFs(),
-        justBash,
-      });
-
-      await filesystem.writeFile("/source/instructions.md", "authored\n");
-    });
-
-    expect(await readFile(join(authoredRoot, "agent/instructions.md"), "utf8")).toBe("authored\n");
-    await expect(readFile(join(runtimeRoot, "agent/instructions.md"), "utf8")).rejects.toThrow(
-      /ENOENT/u,
-    );
-  });
-
-  it("mounts empty trace and log directories when nothing has been captured", async () => {
-    const appRoot = await createAppRoot({ traces: false, logs: false });
-    await withLocalDevCapability(appRoot, async () => {
-      const filesystem = await createSelfModificationFilesystem({
-        appRoot,
-        defaultFilesystem: new justBash.InMemoryFs(),
-        justBash,
-      });
-
-      expect(await filesystem.readdir("/traces")).toEqual([]);
-      expect(await filesystem.readdir("/logs")).toEqual([]);
-    });
-  });
-
-  it("rejects mounting authored files without eve dev facilities", async () => {
-    const appRoot = await createAppRoot();
-
-    await expect(
-      createSelfModificationFilesystem({
-        appRoot,
-        defaultFilesystem: new justBash.InMemoryFs(),
-        justBash,
+  let sessionState: unknown;
+  const opened = await runWithSandboxConstructorRuntime(
+    {
+      async open({ options }) {
+        const started = await harness.start({
+          appRoot: input.runtimeRoot,
+          options,
+          prepared,
+          sandboxName: "self-mod-session",
+        });
+        sessionState = started.state;
+        return started.sandbox as never;
+      },
+    },
+    () => selector(selectorContext),
+  );
+  return {
+    cleanup: () =>
+      harness.endSession({
+        appRoot: input.runtimeRoot,
+        sandboxName: "self-mod-session",
+        state: sessionState as never,
       }),
-    ).rejects.toThrow("Self-modification requires eve dev facilities");
+    sandbox: opened,
+  };
+}
+
+describe("self-modification sandbox", () => {
+  it.skipIf(process.platform === "win32")(
+    "opens HostSandbox in the capability's authored root instead of the runtime snapshot",
+    async () => {
+      vi.stubEnv("EVE_DEV", "1");
+      const authoredRoot = await createAppRoot();
+      const runtimeRoot = await createAppRoot();
+      const storagePath = await mkdtemp(join(tmpdir(), "eve-self-modification-storage-"));
+      temporaryDirectories.push(storagePath);
+
+      await withLocalDevCapability(authoredRoot, async () => {
+        const { cleanup, sandbox } = await openSelfModificationSandbox({
+          runtimeRoot,
+          storagePath,
+        });
+        try {
+          expect(sandbox.resolvePath(".")).toBe(authoredRoot);
+          expect(await sandbox.readTextFile({ path: "package.json" })).toBe(
+            '{"name":"self-mod-app"}\n',
+          );
+          expect(
+            await sandbox.readTextFile({ path: ".eve/traces/v1/trace-1/segments/span.otlp.json" }),
+          ).toBe("trace\n");
+          expect(await sandbox.readTextFile({ path: ".eve/logs/dev-test.log" })).toBe(
+            "diagnostic log\n",
+          );
+          expect(await sandbox.readTextFile({ path: "node_modules/eve/docs/README.md" })).toBe(
+            "installed eve docs\n",
+          );
+
+          await sandbox.writeTextFile({ content: "authored\n", path: "agent/instructions.md" });
+          const pwd = await sandbox.run({ command: "pwd -P" });
+          expect(pwd.exitCode).toBe(0);
+          expect(pwd.stdout.trim()).toBe(await realpath(authoredRoot));
+        } finally {
+          await cleanup();
+        }
+      });
+
+      expect(await readFile(join(authoredRoot, "agent/instructions.md"), "utf8")).toBe(
+        "authored\n",
+      );
+      await expect(readFile(join(runtimeRoot, "agent/instructions.md"), "utf8")).rejects.toThrow(
+        /ENOENT/u,
+      );
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects opening without eve dev facilities",
+    async () => {
+      vi.stubEnv("EVE_DEV", "1");
+      const selector = defineSelfModificationSandbox();
+
+      await expect(Promise.resolve().then(() => selector(selectorContext))).rejects.toThrow(
+        "Self-modification requires eve dev facilities",
+      );
+    },
+  );
+
+  it("binds a no-op disabled provider when local self-modification is inactive", async () => {
+    vi.stubEnv("EVE_DEV", undefined);
+    const selector = defineSelfModificationSandbox();
+    const environment = getBoundSandboxEnvironment(selector);
+    expect(environment?.provider).toBe("self-modification-disabled");
+    const harness = createSandboxEnvironmentHarness(environment!);
+    await expect(harness.prepare({ appRoot: "/virtual" })).resolves.toEqual({});
+    await expect(
+      harness.start({ appRoot: "/virtual", sandboxName: "self-mod-session" }),
+    ).rejects.toThrow("Self-modification sandbox is disabled");
   });
 });

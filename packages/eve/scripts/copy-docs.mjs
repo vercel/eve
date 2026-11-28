@@ -18,14 +18,13 @@ const page = await readFile(benchmarkPage, "utf8").catch((error) => {
   throw error;
 });
 if (page !== null) {
-  const { renderBenchmarkMarkdown } =
-    await import("../../../apps/docs/lib/evals/eve-code-format.ts");
+  const { renderBenchmarkMarkdown } = await import("../../../apps/docs/lib/evals/eve-format.ts");
   const snapshot = JSON.parse(
-    await readFile(join(monorepoRoot, "apps/docs/lib/evals/eve-code-benchmark.json"), "utf8"),
+    await readFile(join(monorepoRoot, "apps/docs/lib/evals/eve-benchmark.json"), "utf8"),
   );
   await writeFile(
     benchmarkPage,
-    page.replace(/<EveCodeBenchmark dataset="([^"]+)" \/>/gu, (_, dataset) =>
+    page.replace(/<EveBenchmark dataset="([^"]+)" \/>/gu, (_, dataset) =>
       renderBenchmarkMarkdown(snapshot.datasets[dataset], dataset),
     ),
   );

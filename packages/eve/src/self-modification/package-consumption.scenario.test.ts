@@ -67,31 +67,31 @@ describe("packed package consumption", () => {
       access(
         join(
           packageRoot,
-          "dist/src/self-modification/extension/subagents/agent/skills/trace_analysis.js",
+          "dist/src/self-modification/extension/subagents/modify/skills/trace_analysis.js",
         ),
       ),
       access(
         join(
           packageRoot,
-          "dist/src/self-modification/extension/subagents/agent/tools/edit_file.js",
+          "dist/src/self-modification/extension/subagents/modify/tools/search_registry.js",
         ),
       ),
       access(
         join(
           packageRoot,
-          "dist/src/self-modification/extension/subagents/agent/tools/inspect_trace.js",
+          "dist/src/self-modification/extension/subagents/modify/tools/inspect_trace.js",
         ),
       ),
       access(
         join(
           packageRoot,
-          "dist/src/self-modification/extension/subagents/agent/tools/inspect_trace_spans.js",
+          "dist/src/self-modification/extension/subagents/modify/tools/inspect_trace_spans.js",
         ),
       ),
       access(
         join(
           packageRoot,
-          "dist/src/self-modification/extension/subagents/agent/tools/search_traces.js",
+          "dist/src/self-modification/extension/subagents/modify/tools/search_traces.js",
         ),
       ),
     ]);
@@ -122,7 +122,6 @@ describe("packed package consumption", () => {
           dependencies: {
             "@vercel/connect": "2.2.0",
             eve: `file:${eveTarball}`,
-            "just-bash": "3.1.0",
           },
         },
         null,
@@ -171,8 +170,13 @@ import { createAgentSourceManifest } from "./node_modules/eve/dist/src/discover/
 
 const manifest = createAgentSourceManifest({ agentId: "packed-dev", agentRoot: "/virtual/agent", appRoot: "/virtual" });
 const compiled = await compileAgentManifest(manifest, { developmentExtensions: defaultDevelopmentExtensions() });
-const subagent = compiled.subagents.find((entry) => entry.name === "self-modification__agent");
-if (compiled.subagents.length !== 1 || subagent === undefined || !subagent.agent.tools.some((tool) => tool.name === "edit_file" && !tool.sourceId.startsWith("eve:defaults:"))) {
+const subagent = compiled.subagents.find((entry) => entry.name === "self__modify");
+if (
+  compiled.subagents.length !== 1 ||
+  subagent === undefined ||
+  !subagent.agent.tools.some((tool) => tool.name === "edit_file" && tool.sourceId.startsWith("eve:defaults:")) ||
+  !subagent.agent.tools.some((tool) => tool.name === "search_registry" && !tool.sourceId.startsWith("eve:defaults:"))
+) {
   throw new Error("Packed eve did not discover the bundled self-modification extension.");
 }
 `,
@@ -188,7 +192,7 @@ import { compileAgentManifest } from "./node_modules/eve/dist/src/compiler/norma
 const discovered = await discoverAgent({ appRoot: process.cwd(), agentRoot: process.cwd() + "/agent" });
 assert.deepEqual(discovered.diagnostics.filter((entry) => entry.severity === "error"), []);
 const compiled = await compileAgentManifest(discovered.manifest);
-assert.deepEqual(compiled.subagents.map((entry) => entry.name), ["self-modification-remote__agent"]);
+assert.deepEqual(compiled.subagents.map((entry) => entry.name), ["self-modification-remote__modify"]);
 const slugs = compiled.subagents[0].agent.definitions.filter((entry) => entry.kind === "tool").map((tool) => tool.slug);
 assert.ok(slugs.includes("publish") && slugs.includes("registry_add"));
 `,

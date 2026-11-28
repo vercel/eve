@@ -102,10 +102,10 @@ export function agent(options: AgentToolOptions = {}): AgentTool | AgentModelsTo
       defineWorkflowTool({
         availableInSubagents: false,
         description: [
-          "Delegate a focused subtask to a copy of yourself, optionally on another model.",
-          "Each call starts a task, so start independent tasks before waiting for them.",
+          "Delegate an independent, self-contained subtask to a copy of yourself, optionally on another model.",
+          "Prefer doing routine file reads, targeted edits, and test runs directly; delegate only when isolated exploration, a different model, or genuinely independent work saves effort.",
           "A task keeps the model it started with.",
-          "In message, state the goal, what to return, and whether it may change files.",
+          "Specify the goal, expected output, and whether it may edit files (if so, give it a non-overlapping scope).",
         ].join(" "),
         inputSchema,
         serve: agentModelsServeWorkflow,

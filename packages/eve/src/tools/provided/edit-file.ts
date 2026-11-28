@@ -43,14 +43,15 @@ const EDIT_FILE_INPUT_SCHEMA = prepareJsonSchema<EditFileToolInput>(
           properties: {
             oldText: {
               type: "string",
-              description: "Exact, unique, non-overlapping text in the original file.",
+              description:
+                "Exact text to replace. It must be unique in the original file and must not overlap any other edits[].oldText.",
             },
             newText: { type: "string", description: "Replacement text." },
           },
           required: ["oldText", "newText"],
         },
         description:
-          "Targeted replacements matched against the original file (not incrementally). Merge nearby changes into one edit.",
+          "One or more targeted replacements, each matched against the original file, not incrementally.",
       },
     },
     required: ["path", "edits"],
@@ -78,7 +79,7 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
         typeof input.path === "string" ? `Edit ${input.path}` : "Edit",
     },
     description:
-      "Edit a file by replacing exact, unique, non-overlapping `edits[].oldText` blocks against the original file. Batch edits to one file in a single call and keep matches concise.",
+      "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. Make all changes to one file in a single call, and merge changes to the same block or nearby lines into one edit. Do not include large unchanged regions just to connect distant changes.",
     inputSchema: EDIT_FILE_INPUT_SCHEMA,
     outputSchema: EDIT_FILE_OUTPUT_SCHEMA,
     async execute(input, ctx): Promise<EditFileToolOutput> {

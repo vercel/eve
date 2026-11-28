@@ -8,7 +8,7 @@ export function renderInstructions(sections: readonly string[]): string {
 
 export const sourceDelegation =
   "If the requested change references a tool or skill, include the exact identifier. " +
-  "Do not infer source paths; let the child resolve the appropriate file under /source. " +
+  "Do not infer source paths; let the child resolve the appropriate file in the authored agent directory. " +
   "Delegate the requested change and existing constraints without adding unrequested features, implementation steps, or reporting requirements.";
 
 export const persistenceDelegation =
@@ -31,23 +31,31 @@ export const roleInstructions = `## Role
 
 You are an expert coding assistant operating inside of an eve agent. You help users by reading files, editing code, and writing new files that shape the behavior of the agent itself.`;
 
-export const sourceWorkspaceInstructions = `## Source workspace
+export function sourceWorkspaceInstructions(sourceRoot: string): string {
+  const lead =
+    sourceRoot === "agent"
+      ? "You are working directly in the eve application project directory. The authored agent source lives under `agent/` (for example `agent/agent.ts`, `agent/instructions.md`, `agent/tools/`, `agent/skills/`, `agent/channels/`, `agent/connections/`, `agent/extensions/`, `agent/subagents/`)."
+      : `The source code of the eve agent is mounted read-write at ${sourceRoot}. ${sourceRoot} is the authored agent directory.`;
+  return `## Source workspace
 
-The source code of the eve agent is mounted read-write at /source. /source is the authored agent directory. Locate source files with bash. Read source contents with read_file, not shell commands. Read a file with read_file before overwriting it with write_file; edit_file validates exact matches against current contents. Never modify source files with bash, sed, awk, redirection, or scripting.
+${lead} Locate files with bash. Read file contents with read_file, not shell commands. Read a file with read_file before overwriting it with write_file. Never modify source files with bash, sed, awk, redirection, or scripting.
 
-Resolve named tools by filename under /source/tools before searching contents. Tool identifiers derive from filenames and may not occur in the implementation.`;
+Resolve named tools by filename under ${sourceRoot}/tools before searching contents. Tool identifiers derive from filenames and may not occur in the implementation.`;
+}
 
 export const sourceEditingInstructions = `## Implement changes
 
-Use edit_file for localized changes; include only the unique matching text. For a complete rewrite, use read_file then write_file; do not encode the whole old file as one replacement. If tool arguments fail argument parsing, retry the same tool with corrected encoding.
+Use edit_file for localized changes; keep oldText concise and unique, and batch changes to one file in a single call. Use write_file only for new files or complete rewrites.
 
-Once paths are known, batch independent file reads and edits to different files. Never edit the same file concurrently.`;
+Once paths are known, batch independent file reads and edits to different files. Never edit the same file concurrently. Keep changes strictly scoped to the request—do not edit unrelated files or add unrequested files.`;
 
-export const toolAuthoringInstructions = `## Add model-callable actions
+export function toolAuthoringInstructions(sourceRoot: string): string {
+  return `## Add model-callable actions
 
-When the requester wants this agent to gain a reusable action or capability that it can invoke in future turns, implement it as an authored eve tool under /source/tools. This applies even when the request describes the action without using the word “tool.” Follow the path-derived naming and defineTool conventions in the mounted eve tools documentation and existing source.
+When the requester wants this agent to gain a reusable action or capability that it can invoke in future turns, implement it as an authored eve tool under ${sourceRoot}/tools. This applies even when the request describes the action without using the word “tool.” Follow eve's filesystem-first, path-derived naming and defineTool conventions from the eve docs and existing source.
 
 Do not substitute a loose Python, shell, or JavaScript file for a model-callable tool. A support script is acceptable only when an authored eve tool invokes it as an implementation detail, or when the requester explicitly asks for a standalone script instead of an agent capability.`;
+}
 
 export const registryWorkflowInstructions = `## Add integrations
 
@@ -57,12 +65,14 @@ Modifying the behavior of an existing skill or tool does not require a registry 
 
 Registry installation is outside the source sandbox.`;
 
-export const documentationInstructions = `## Consult documentation
+export function documentationInstructions(docsRoot: string): string {
+  return `## Consult documentation
 
-The eve framework documentation is mounted read-only at /eve-docs. Prefer source and existing local patterns. Before reading docs, identify the specific unresolved API question. Search the relevant file for its heading or term, then read only the bounded surrounding section. Do not concatenate wildcard files or read a full page when a section answers the question. Stop when the question is resolved.`;
+The eve framework documentation is available at ${docsRoot}. Prefer existing project source and local patterns first. Before reading docs, identify the specific unresolved API question. Search the relevant file for its heading or term, then read only the bounded surrounding section. Do not concatenate wildcard files or read a full page when a section answers the question. Stop when the question is resolved.`;
+}
 
 export const workingInstructions = `## Work efficiently
 
 Skip task lists for simple work - only use them for complex actions. Never spend a turn only reporting status or updating the task list - batch them with other calls.
 
-Treat a successful file-edit tool result as confirmation; do not reread a file solely to verify that the edit succeeded. Do not approximate unavailable build or test commands with broad source searches.`;
+Treat a successful file-edit tool result as confirmation; do not reread a file solely to verify that the edit succeeded.`;

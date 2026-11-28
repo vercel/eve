@@ -446,7 +446,7 @@ Sessions saved by eve 0.68 or earlier store extension state per package, not per
 ## What to read next
 
 - [Integrations](/integrations): browse ready-to-install extensions using the Extensions filter
-- [Code extension](/docs/code-extension): mount eve-code, the coding extension that ships in `eve`, and see its benchmark results
+- [Code extension](/docs/code-extension): mount eve-code, the coding extension that ships in `eve`, and see the latest `eve` benchmark results
 - [Video generation](/docs/extensions/video): generate videos with AI SDK and AI Gateway video models, provider-agnostic storage, and sandbox output
 - [Tools](/docs/tools): static tools, approval, and tool output
 - [Dynamic capabilities](/docs/guides/dynamic-capabilities): dynamic connections, tools, skills, and instructions

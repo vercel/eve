@@ -3,7 +3,7 @@ title: "Self-Modification"
 description: "Ask your agent to update its own authored files during local development, or let a deployed agent propose changes as draft pull requests."
 ---
 
-Self-modification lets you ask your agent to change its own instructions, tools, skills, or other files under `agent/`. When `eve dev` starts a local server, it mounts the bundled `eve/extensions/self-modification/local` extension, which delegates the source work to the `self-modification__agent` subagent. `eve remote connect --url <url>` doesn't add it to the server it connects to.
+Self-modification lets you ask your agent to change its own instructions, tools, skills, or other files under `agent/`. When `eve dev` starts a local server, it mounts the bundled `eve/extensions/self-modification/local` extension under `self`, which delegates the source work to the `self__modify` subagent. `eve remote connect --url <url>` doesn't add it to the server it connects to.
 
 The local extension is not included in production builds. To let a deployed agent propose source changes, mount the separate [`eve/extensions/self-modification/remote`](#propose-changes-from-a-deployed-agent) extension.
 
@@ -17,11 +17,11 @@ For example, ask the agent to add a reusable action:
 Add a tool that converts temperatures between Celsius and Fahrenheit.
 ```
 
-The subagent edits the authored files in your project, and `eve dev` reloads them. Review the diff and test the change as you would any other source change.
+The subagent edits the authored files in your project directly through [`HostSandbox`](../sandbox/host) on Linux and macOS (or WSL2 on Windows), and `eve dev` reloads them. Review the diff and test the change as you would any other source change.
 
 The subagent is offered only to sessions authenticated by [`localDev()`](./auth-and-route-protection#localdev) or by the Vercel development token the dev TUI sends for a linked project. Sessions authenticated any other way, such as Slack users or HTTP Basic operator credentials, don't see it, and the local mount has no `authorize` override.
 
-A tunnel or reverse proxy on the same machine can forward callers that `localDev()` accepts as the local developer. Those callers can use the subagent. Before exposing `eve dev` through a tunnel, require authentication at the tunnel or proxy, or remove `localDev()` from the exposed channel's auth chain. Another authenticator placed before `localDev()` doesn't help, because callers it skips still fall through to `localDev()`.
+A tunnel or reverse proxy on the same machine can forward callers that `localDev()` accepts as the local developer, giving them host shell and filesystem access through the subagent. Before exposing `eve dev` through a tunnel, require authentication at the tunnel or proxy, or remove `localDev()` from the exposed channel's auth chain. Another authenticator placed before `localDev()` doesn't help, because callers it skips still fall through to `localDev()`.
 
 ## Change the self-modification model
 
@@ -31,10 +31,10 @@ The subagent uses your agent's model by default. To give it a different model or
 Switch the self-modification subagent to openai/gpt-6-sol with low reasoning.
 ```
 
-This creates or edits `agent/extensions/self-modification/extension.ts`. You can also edit the file yourself; it accepts `model`, `reasoning`, and `local.enabled`.
+This creates or edits `agent/extensions/self/extension.ts`. You can also edit the file yourself; it accepts `model`, `reasoning`, and `local.enabled`.
 
 ```ts
-// agent/extensions/self-modification/extension.ts
+// agent/extensions/self/extension.ts
 import selfModification from "eve/extensions/self-modification/local";
 
 export default selfModification({
@@ -92,9 +92,9 @@ This disables every bundled default extension for that server, including self-mo
 
 ## Troubleshooting
 
-| What you see                                                                             | What to do                                                                                                                                                                                    |
-| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `The legacy agent/subagents/self-modification layout is no longer supported.` from setup | Keep any authored changes, remove `agent/subagents/self-modification/`, then run `eve add eve/self-modification` to mount the extension at `agent/extensions/self-modification/extension.ts`. |
+| What you see                                                                             | What to do                                                                                                                                                                       |
+| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `The legacy agent/subagents/self-modification layout is no longer supported.` from setup | Keep any authored changes, remove `agent/subagents/self-modification/`, then run `eve add eve/self-modification` to mount the extension at `agent/extensions/self/extension.ts`. |
 
 ## What to read next
 

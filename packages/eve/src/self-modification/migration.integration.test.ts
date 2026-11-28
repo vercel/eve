@@ -7,7 +7,10 @@ import type { SelfModificationSetupOperations } from "#self-modification/setup.j
 import { headlessAsker, withAnswers } from "#setup/ask.js";
 import { integrationSetupEnvironment } from "#setup/integrations/shared/environment.js";
 import { createSetupContexts } from "#setup/integrations/shared/ui.js";
-import { prepareLocalSelfModificationSetup } from "#setup/integrations/self-modification/setup.js";
+import {
+  applySelfModificationSetup,
+  prepareLocalSelfModificationSetup,
+} from "#setup/integrations/self-modification/setup.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -46,4 +49,42 @@ it("rejects the retired layout with mount guidance without deleting authored fil
   );
   expect(await readFile(join(directory, "notes.md"), "utf8")).toBe(notes);
   expect(operations.writeConfig).not.toHaveBeenCalled();
+});
+
+it("detects an authored legacy self-modification mount even when a stock self mount exists", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eve-legacy-self-modification-mount-"));
+  roots.push(root);
+  await mkdir(join(root, "agent/extensions/self"), { recursive: true });
+  await mkdir(join(root, "agent/extensions/self-modification"), { recursive: true });
+  await writeFile(
+    join(root, "agent/extensions/self/extension.ts"),
+    'import selfModification from "eve/extensions/self-modification/local";\n\nexport default selfModification({\n  // model: "provider/model",\n  // reasoning: "high",\n});\n',
+  );
+  await writeFile(
+    join(root, "agent/extensions/self-modification/extension.ts"),
+    'import selfModification from "eve/extensions/self-modification/local";\nexport default selfModification({ model: "openai/gpt-6-sol" });\n',
+  );
+  const fake = createFakePrompter();
+  const contexts = createSetupContexts({
+    appRoot: root,
+    asker: headlessAsker(),
+    environment: integrationSetupEnvironment("unavailable", { kind: "unresolved" }),
+    prompter: fake.prompter,
+    resolveVercelProject: async () => ({ orgId: "team", projectId: "project" }),
+  });
+
+  const plan = await prepareLocalSelfModificationSetup(contexts.prepare);
+  expect(plan).toEqual({ kind: "authored", removeDuplicateStockMount: true });
+  expect(fake.prompter.note).toHaveBeenCalledWith(
+    expect.stringContaining("authored configuration"),
+    "Manual update required",
+    { tone: "warning" },
+  );
+  await applySelfModificationSetup(plan, contexts.apply);
+  await expect(readFile(join(root, "agent/extensions/self/extension.ts"), "utf8")).rejects.toThrow(
+    /ENOENT/u,
+  );
+  expect(
+    await readFile(join(root, "agent/extensions/self-modification/extension.ts"), "utf8"),
+  ).toContain("openai/gpt-6-sol");
 });

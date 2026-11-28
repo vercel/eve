@@ -47,7 +47,7 @@ export const SERVE_TOOL_DESCRIPTION =
   "Runs asynchronously as a task (start independent calls together). Pass taskId to send more input; omit to start a new task.";
 
 export const AGENT_SERVE_TOOL_DESCRIPTION =
-  "Runs asynchronously as a task (start independent calls together) with no prior conversation context. Pass taskId to continue/correct it; omit to start a new agent.";
+  "Runs asynchronously as a task with no prior conversation context. Batch independent calls before waiting; pass taskId only to follow up with an existing agent, or omit to start a new one.";
 
 export const TASK_ID_INPUT_DESCRIPTION = `Existing task id (${TASK_ID_SOURCE}) to continue; omit to start a new task.`;
 

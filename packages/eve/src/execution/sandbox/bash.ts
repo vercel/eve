@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import { bashJobTaskWorkflowReference } from "#execution/sandbox/bash-job-reference.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
-import { runInternalCommand, spawnBoundedCommand } from "#execution/sandbox/internal-shell.js";
+import {
+  getSessionJobsRoot,
+  runInternalCommand,
+  spawnBoundedCommand,
+} from "#execution/sandbox/internal-shell.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import {
   capLineLength,
@@ -56,9 +60,11 @@ set -m
 ) < /dev/null > /dev/null 2>&1 &
 pid=$!
 set +m
+trap 'kill -TERM -- -"$pid" 2>/dev/null; sleep 0.1; kill -KILL -- -"$pid" 2>/dev/null; exit 143' TERM HUP
 echo "$pid" > "$_eve_d/pid"
 wait "$pid" 2> /dev/null
 code=$?
+trap - TERM HUP
 mkdir "$_eve_d/claimed" 2> /dev/null || exit 0
 _eve_keep=0 _eve_out_lines=0 _eve_err_lines=0
 if [ -s "$_eve_d/stdout" ]; then
@@ -360,7 +366,7 @@ async function runCommand(
 ): Promise<BashResult> {
   signal?.throwIfAborted();
   const jobId = randomUUID().slice(0, 8);
-  const directory = `${JOB_ROOT}/${jobId}`;
+  const directory = `${getSessionJobsRoot(sandbox) ?? JOB_ROOT}/${jobId}`;
   const controller = new AbortController();
   const cancel = () => {
     controller.abort(signal?.reason);

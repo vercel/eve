@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provider-harness.js";
 import {
   getBoundSandboxEnvironment,
-  getSandboxEnvironmentRuntime,
   type SandboxSelectorContext,
 } from "#shared/sandbox-environment.js";
-import { createSandboxPrepareContext } from "#execution/sandbox/prewarm.js";
 
 import type { DeployedSelfModificationConfig } from "./remote/config.js";
 import { defineDeployedSelfModificationSandbox } from "./deployed-sandbox.js";
@@ -29,17 +28,9 @@ describe("deployed self-modification sandbox", () => {
     );
 
     expect(environment?.provider).toBe("vercel");
-    const runtime = getSandboxEnvironmentRuntime(environment!);
-    const prepareContext = createSandboxPrepareContext({
-      appRoot: "/app",
-      files: { list: async () => [], read: vi.fn(), readText: vi.fn() },
-      log: () => {},
-      provider: runtime,
-      resources: {},
-      sourceRevision: "revision",
-      storagePath: "/app/.eve/sandbox",
-    });
-    await expect(runtime.implementation.prepare(prepareContext)).resolves.toEqual({});
+    await expect(
+      createSandboxEnvironmentHarness(environment!).prepare({ appRoot: "/app" }),
+    ).resolves.toEqual({});
     expect(isDeployedOnVercel).not.toHaveBeenCalled();
   });
 
@@ -55,9 +46,9 @@ describe("deployed self-modification sandbox", () => {
   it("does not probe the host during eve dev", () => {
     vi.stubEnv("EVE_DEV", "1");
     const isDeployedOnVercel = vi.fn(() => false);
-    expect(defineDeployedSelfModificationSandbox(connectConfig, isDeployedOnVercel)).toBeTypeOf(
-      "function",
-    );
+    const selector = defineDeployedSelfModificationSandbox(connectConfig, isDeployedOnVercel);
+    expect(selector).toBeTypeOf("function");
+    expect(getBoundSandboxEnvironment(selector)?.provider).toBe("self-modification-disabled");
     expect(isDeployedOnVercel).not.toHaveBeenCalled();
   });
 });

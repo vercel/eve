@@ -5,7 +5,10 @@ import { join, relative } from "node:path";
 import { promisify } from "node:util";
 
 import { discoverAgent } from "#discover/discover-agent.js";
-import { stripLogicalPathExtension } from "#discover/filesystem.js";
+import {
+  stripLogicalPathExtension,
+  SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS,
+} from "#discover/filesystem.js";
 import { sourcesOf } from "#discover/manifest.js";
 import {
   captureVercel,
@@ -16,7 +19,19 @@ import type { VercelProjectReference } from "#setup/project-resolution.js";
 
 import { renderLocalSelfModificationExtension } from "./scaffold.js";
 
-export const SELF_MODIFICATION_CONFIG_PATH = "agent/extensions/self-modification/extension.ts";
+export const SELF_MODIFICATION_CONFIG_PATH = "agent/extensions/self/extension.ts";
+export const LEGACY_SELF_MODIFICATION_CONFIG_PATHS: readonly string[] =
+  SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS.flatMap((ext) => [
+    `agent/extensions/self-modification/extension${ext}`,
+    `agent/extensions/self-modification${ext}`,
+  ]);
+const LOCAL_SELF_MODIFICATION_CONFIG_PATHS: readonly string[] = [
+  ...SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS.flatMap((ext) => [
+    `agent/extensions/self/extension${ext}`,
+    `agent/extensions/self${ext}`,
+  ]),
+  ...LEGACY_SELF_MODIFICATION_CONFIG_PATHS,
+];
 export const DEPLOYED_SELF_MODIFICATION_CONFIG_PATH =
   "agent/extensions/self-modification-remote/extension.ts";
 
@@ -191,7 +206,16 @@ export function defaultSelfModificationSetupOperations(
       };
     },
     readConfig: () => readOptionalFile(configPath),
-    readLocalConfig: () => readOptionalFile(join(appRoot, SELF_MODIFICATION_CONFIG_PATH)),
+    async readLocalConfig() {
+      let fallback: string | undefined;
+      for (const candidate of LOCAL_SELF_MODIFICATION_CONFIG_PATHS) {
+        const content = await readOptionalFile(join(appRoot, candidate));
+        if (content === undefined) continue;
+        if (classifySelfModificationConfig(content) === "authored") return content;
+        fallback ??= content;
+      }
+      return fallback;
+    },
     async writeConfig(source) {
       await mkdir(join(configPath, ".."), { recursive: true });
       await writeFile(configPath, source, "utf8");

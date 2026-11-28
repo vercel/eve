@@ -102,8 +102,8 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
   defineTool({
     label: { start: (input) => toolLabel("Read", input.filePath) },
     description: [
-      "Read a file from the local filesystem. Returns line-numbered text (`<line>: <content>`, lines over 2000 chars truncated, up to 2000 lines / 50 KB per call). Use larger `offset` to read further, and read larger windows instead of tiny slices.",
-      "Also displays PNG, JPEG, GIF, and WebP images (up to 3 MiB) and PDFs (up to 20 MiB), including `Attached file <path>` references.",
+      "Read the contents of a file. Supports text files, images (PNG, JPEG, GIF, WebP), and PDFs, including `Attached file <path>` references. Images and PDFs are sent as attachments.",
+      "Text is returned with a `<line>: ` prefix on each line; the prefix is not part of the file. Output stops at `limit` lines or 50 KB, whichever is hit first. Use `offset` and `limit` for large files, in large windows rather than tiny slices. When you need the full file, continue with `offset` until complete.",
     ].join("\n"),
     async execute(input, ctx) {
       return await executeReadFileOnSandbox(await ctx.getSandbox(), input as ReadFileInput);

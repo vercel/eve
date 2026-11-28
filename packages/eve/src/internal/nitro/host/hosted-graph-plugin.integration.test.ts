@@ -198,7 +198,7 @@ describe("hosted graph substitutions", () => {
     }
   });
 
-  it.each(["docker.ts", "just-bash.ts", "local.js", "local.ts"])(
+  it.each(["docker.ts", "host.ts", "just-bash.ts", "local.js", "local.ts"])(
     "stubs the local sandbox binding %s with every export of the local facade",
     async (fileName) => {
       const code = await bundleImport(
@@ -211,13 +211,16 @@ describe("hosted graph substitutions", () => {
     },
   );
 
-  it("stubs local sandbox provider constructors reached by path", async () => {
+  it.each([
+    ["docker.ts", "DockerSandbox"],
+    ["host.ts", "HostSandbox"],
+  ] as const)("stubs local sandbox provider constructor %s reached by path", async (file, name) => {
     expect(
       await bundleImport(
         hostedGraph({ pruneSandboxProviders: true }),
-        "/repo/packages/eve/src/sandbox/providers/docker.ts",
+        `/repo/packages/eve/src/sandbox/providers/${file}`,
       ),
-    ).toContain("DockerSandbox");
+    ).toContain(name);
   });
 
   it("keeps unconfigured optional engines as plain externals and leaves other packages alone", async () => {
