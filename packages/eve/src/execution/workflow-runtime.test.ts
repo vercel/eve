@@ -718,6 +718,27 @@ describe("createWorkflowRuntime#createSession", () => {
     });
   });
 
+  it("rejects creating a dynamic subagent session without a selected config", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      compiledArtifactsSource,
+      resolvedAgent: { config: {} },
+      turnAgent: { ...createTestTurnAgent(), configResolver: true },
+    } as never);
+
+    await expect(
+      createWorkflowRuntime({
+        compiledArtifactsSource,
+        nodeId: "subagents/researcher",
+      }).createSession({
+        adapter,
+        auth: null,
+        input: { message: "research this" },
+      }),
+    ).rejects.toThrow("Dynamic subagent execution requires a selected concrete agent config.");
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
   it("serializes a ctx.agent model override for the child workflow", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource, 86_400_000);

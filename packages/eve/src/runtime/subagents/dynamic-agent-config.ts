@@ -29,6 +29,15 @@ export interface DynamicSubagentAgentConfig {
 
 export type DynamicSubagentModelReference = RuntimeModelReference;
 
+export function assertDynamicSubagentConfigSelected(
+  configResolver: boolean | undefined,
+  config: unknown,
+): void {
+  if (configResolver === true && config === undefined) {
+    throw new Error("Dynamic subagent execution requires a selected concrete agent config.");
+  }
+}
+
 export async function normalizeDynamicSubagentAgentConfig(input: {
   readonly modelMetadata: () => Promise<ModelMetadata>;
   readonly name: string;
