@@ -238,6 +238,193 @@ describe("dynamic skill files", () => {
       "/home/user/.agents/skills/policy/references/first.md",
     ]);
   });
+
+  it("writes multiple dynamic skills in a single writeFiles call after removals settle and retries cleanly", async () => {
+    const writeBatches: string[][] = [];
+    const events: string[] = [];
+    let removeGate: PromiseWithResolvers<void> | undefined;
+    let alphaThrown: PromiseWithResolvers<void> | undefined;
+    let failAlphaRemoval = false;
+    let failFirstWrite = true;
+    let queue: Promise<void> = Promise.resolve();
+    const state: { id: string; generation?: string } = { id: "batch-box" };
+    const open = async () => ({
+      removePath: async ({ path }: { readonly path: string }) => {
+        events.push(`rm:start:${path}`);
+        if (failAlphaRemoval && path.endsWith("/alpha")) {
+          failAlphaRemoval = false;
+          alphaThrown?.resolve();
+          throw new Error("rm alpha failed");
+        }
+        if (removeGate !== undefined && path.endsWith("/beta")) {
+          await removeGate.promise;
+        }
+        events.push(`rm:done:${path}`);
+      },
+      run: async () => ({ exitCode: 0, stderr: "", stdout: "/home/user\n" }),
+      writeFiles: async ({ files }: { readonly files: readonly { readonly path: string }[] }) => {
+        events.push(`write:${files.length}`);
+        if (failFirstWrite) {
+          failFirstWrite = false;
+          throw new Error("write failed");
+        }
+        writeBatches.push(files.map((file) => file.path));
+      },
+    });
+    const access = {
+      captureState: async () => ({ session: { ...state } }),
+      get: async () => {
+        await queue;
+        return await open();
+      },
+      open,
+      prepare(work?: (open: () => Promise<unknown>) => Promise<void>) {
+        queue = queue.then(() => work?.(open));
+      },
+      settle: () => queue,
+      stop: async () => {},
+    };
+    const alpha = {
+      evaluate: () =>
+        defineSkill({
+          content: "# Alpha",
+          description: "Alpha",
+          files: { "references/a.md": "a" },
+        }),
+      logicalPath: "skills/alpha.ts",
+      slug: "alpha",
+      sourceId: "skills/alpha.ts",
+    };
+    const beta = {
+      evaluate: () =>
+        defineSkill({
+          content: "# Beta",
+          description: "Beta",
+          files: { "references/b.md": "b" },
+        }),
+      logicalPath: "skills/beta.ts",
+      slug: "beta",
+      sourceId: "skills/beta.ts",
+    };
+
+    const ctx = session([alpha, beta]);
+    ctx.set(SandboxKey, access as never);
+
+    await contextStorage.run(ctx, () => evaluateValues(ctx, { conversation: [] }));
+    await expect(access.settle()).rejects.toThrow("write failed");
+    expect(writeBatches).toEqual([]);
+
+    events.length = 0;
+    failAlphaRemoval = true;
+    alphaThrown = Promise.withResolvers<void>();
+    removeGate = Promise.withResolvers<void>();
+    queue = Promise.resolve();
+    await contextStorage.run(ctx, () => installDefinitions(ctx));
+    const failedPrepare = access.settle();
+    let settledEarly = false;
+    void failedPrepare.catch(() => {
+      settledEarly = true;
+      events.push("prepare:rejected");
+    });
+    await alphaThrown.promise;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settledEarly).toBe(false);
+    removeGate.resolve();
+    await expect(failedPrepare).rejects.toThrow("rm alpha failed");
+    expect(events).toContain("rm:done:/home/user/.agents/skills/beta");
+    expect(events.indexOf("rm:done:/home/user/.agents/skills/beta")).toBeLessThan(
+      events.indexOf("prepare:rejected"),
+    );
+
+    events.length = 0;
+    removeGate = undefined;
+    alphaThrown = undefined;
+    queue = Promise.resolve();
+    await contextStorage.run(ctx, () => installDefinitions(ctx));
+    await access.settle();
+    expect(writeBatches).toEqual([
+      [
+        "/home/user/.agents/skills/alpha/SKILL.md",
+        "/home/user/.agents/skills/alpha/references/a.md",
+        "/home/user/.agents/skills/beta/SKILL.md",
+        "/home/user/.agents/skills/beta/references/b.md",
+      ],
+    ]);
+    expect(events.lastIndexOf("rm:done:/home/user/.agents/skills/beta")).toBeLessThan(
+      events.lastIndexOf("write:4"),
+    );
+  });
+
+  it("bounds removal concurrency to 8 and halts before later chunks when an earlier chunk fails", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const removed: string[] = [];
+    let failSkill2 = false;
+    let failWrite = true;
+    let queue: Promise<void> = Promise.resolve();
+    const state = { id: "chunk-box" };
+    const open = async () => ({
+      removePath: async ({ path }: { readonly path: string }) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        removed.push(path.split("/").at(-1)!);
+        try {
+          await Promise.resolve();
+          if (failSkill2 && path.endsWith("/skill-2")) {
+            failSkill2 = false;
+            throw new Error("chunk 1 failure");
+          }
+        } finally {
+          active -= 1;
+        }
+      },
+      run: async () => ({ exitCode: 0, stderr: "", stdout: "/home/user\n" }),
+      writeFiles: async () => {
+        if (failWrite) throw new Error("block initial write");
+      },
+    });
+    const access = {
+      captureState: async () => ({ session: { ...state } }),
+      get: async () => {
+        await queue;
+        return await open();
+      },
+      open,
+      prepare(work?: (open: () => Promise<unknown>) => Promise<void>) {
+        queue = queue.then(() => work?.(open));
+      },
+      settle: () => queue,
+      stop: async () => {},
+    };
+    const many = Array.from({ length: 10 }, (_, i) => ({
+      evaluate: () =>
+        defineSkill({
+          content: `# Skill ${i}`,
+          description: `Skill ${i}`,
+          files: { [`references/r${i}.md`]: `ref ${i}` },
+        }),
+      logicalPath: `skills/skill-${i}.ts`,
+      slug: `skill-${i}`,
+      sourceId: `skills/skill-${i}.ts`,
+    }));
+
+    const ctx = session(many);
+    ctx.set(SandboxKey, access as never);
+    await contextStorage.run(ctx, () => evaluateValues(ctx, { conversation: [] }));
+    await access.settle().catch(() => undefined);
+
+    removed.length = 0;
+    maxActive = 0;
+    failWrite = false;
+    failSkill2 = true;
+    queue = Promise.resolve();
+    await contextStorage.run(ctx, () => installDefinitions(ctx));
+    await expect(access.settle()).rejects.toThrow("chunk 1 failure");
+    expect(maxActive).toBeLessThanOrEqual(8);
+    expect(removed).toHaveLength(8);
+    expect(removed).not.toContain("skill-8");
+    expect(removed).not.toContain("skill-9");
+  });
 });
 
 const skill = (description = "The tenant policy.") =>

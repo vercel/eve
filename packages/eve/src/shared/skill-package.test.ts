@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import {
   normalizeSkillPackage,
   removeSkillPackageFromSandbox,
+  writeSkillPackagesToSandbox,
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
 
@@ -105,6 +106,48 @@ describe("writeSkillPackageToSandbox", () => {
     await writeSkillPackageToSandbox({ sandbox: sandbox.session, skill });
 
     expect(sandbox.files.get("/workspace/skills/tenant/SKILL.md")).toBe("Follow tenant policy.");
+  });
+});
+
+describe("writeSkillPackagesToSandbox", () => {
+  it("skips writeFiles for empty skill lists and skills with no files", async () => {
+    const sandbox = mockSandbox();
+    const writeFiles = vi.spyOn(sandbox.session, "writeFiles");
+
+    await writeSkillPackagesToSandbox({ sandbox: sandbox.session, skills: [] });
+    await writeSkillPackagesToSandbox({
+      sandbox: sandbox.session,
+      skills: [{ content: "", description: "Empty", files: [], name: "empty" }],
+    });
+
+    expect(writeFiles).not.toHaveBeenCalled();
+  });
+
+  it("writes multiple skill packages in a single writeFiles call", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+    });
+    const writeFiles = vi.spyOn(sandbox.session, "writeFiles");
+    const alpha = normalizeSkillPackage({
+      content: "Alpha",
+      description: "Alpha",
+      files: { "references/a.md": "a" },
+      name: "alpha",
+    });
+    const beta = normalizeSkillPackage({
+      content: "Beta",
+      description: "Beta",
+      files: { "references/b.md": "b" },
+      name: "beta",
+    });
+
+    await writeSkillPackagesToSandbox({ sandbox: sandbox.session, skills: [alpha, beta] });
+
+    expect(writeFiles).toHaveBeenCalledTimes(1);
+    expect(sandbox.files.get("/home/agent/.agents/skills/alpha/references/a.md")).toBe("a");
+    expect(sandbox.files.get("/home/agent/.agents/skills/beta/references/b.md")).toBe("b");
   });
 });
 
