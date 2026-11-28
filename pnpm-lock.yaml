@@ -932,6 +932,9 @@ importers:
         specifier: 2.9.0
         version: 2.9.0
     devDependencies:
+      '@eve/video':
+        specifier: workspace:*
+        version: link:../../packages/eve-video
       eve:
         specifier: workspace:*
         version: link:../../packages/eve
@@ -2396,6 +2399,28 @@ importers:
       tsx:
         specifier: 4.23.15
         version: 4.23.15
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
+  packages/eve-video:
+    dependencies:
+      '@vercel/blob':
+        specifier: 2.9.0
+        version: 2.9.0
+      ai:
+        specifier: 'catalog:'
+        version: 7.0.177(zod@4.6.7)
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      eve:
+        specifier: workspace:*
+        version: link:../eve
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

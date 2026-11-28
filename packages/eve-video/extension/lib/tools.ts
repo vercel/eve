@@ -1,0 +1,103 @@
+import type { ApprovalConfiguration, ApprovalPromptContext } from "eve/tools/approval";
+import { z } from "zod";
+
+import { MAX_REFERENCE_COUNT } from "./media.ts";
+import { describeDefaultModel } from "./model.ts";
+import type * as t from "./types.ts";
+
+const str = () => z.string().trim().min(1);
+
+export const VIDEO_TOOL_DESCRIPTION =
+  "Generate a video from a text prompt, optionally guided by start/end frames or references, or edit/extend an existing video via video (set extend: true to continue from the last frame). Only call when explicitly requested (video generation takes seconds to minutes and incurs per-second charges). Runs in the background as a task and delivers the result automatically; do not sleep, poll, or regenerate while it runs. Do not combine video with start or end.";
+
+export const generateVideoInputSchema = z.object({
+  prompt: str().describe("Visual description of the video to generate, edit, or extend."),
+  video: str()
+    .optional()
+    .describe(
+      "Existing video to edit/extend (https:// URL, storageKey from this session, or sandbox path).",
+    ),
+  extend: z
+    .boolean()
+    .optional()
+    .describe("Continue from the video's last frame instead of editing in place. Requires video."),
+  start: str().optional().describe("Opening frame image (https:// URL or sandbox path)."),
+  end: str().optional().describe("Closing frame image (https:// URL or sandbox path)."),
+  references: z
+    .array(str())
+    .min(1)
+    .max(MAX_REFERENCE_COUNT)
+    .optional()
+    .describe("Reference images, videos, or audio clips."),
+  duration: z.number().positive().optional().describe("Target duration in seconds."),
+  aspectRatio: str().optional().describe('Aspect ratio such as "16:9", "9:16", "1:1", or "auto".'),
+  resolution: str()
+    .optional()
+    .describe('Resolution: "480p", "720p", "1080p", "4k", or "1280x720".'),
+  audio: z.boolean().optional().describe("Generate synchronized audio alongside the video."),
+  n: z.number().int().min(1).optional().describe("Number of video variations. Defaults to 1."),
+  fps: z.number().positive().optional().describe("Target frame rate in frames per second."),
+  seed: z.number().int().optional().describe("Deterministic integer seed when supported."),
+  path: str().optional().describe("Sandbox file path where the generated video should be written."),
+});
+
+export function createGenerateApproval(
+  getConfig: () => t.VideoExtensionConfig,
+): ApprovalConfiguration<t.GenerateVideoToolInput> {
+  return {
+    request(ctx) {
+      const a = getConfig().approval;
+      return a === undefined ? "not-applicable" : typeof a === "function" ? a(ctx) : a.request(ctx);
+    },
+    prompt(ctx) {
+      const a = getConfig().approval;
+      return typeof a === "object" && a !== null && a.prompt
+        ? a.prompt(ctx)
+        : formatApprovalPrompt(getConfig(), ctx);
+    },
+    get response() {
+      const a = getConfig().approval;
+      return typeof a === "object" && a !== null ? a.response : undefined;
+    },
+  };
+}
+
+export const formatGenerateProgressLabel = (
+  p: Readonly<t.GenerateVideoToolProgress | t.GenerateVideoToolOutput>,
+): string =>
+  p.status === "completed"
+    ? countLabel(p.videos.length)
+    : p.elapsedSeconds > 0
+      ? `Generating video (${p.elapsedSeconds}s)`
+      : "Generating video";
+
+export const formatGenerateCompleteLabel = (
+  o: Readonly<t.GenerateVideoToolProgress | t.GenerateVideoToolOutput>,
+): string => (o.status === "completed" ? countLabel(o.videos.length) : "Generated video");
+
+const countLabel = (n: number) => (n === 1 ? "Generated video" : `Generated ${n} videos`);
+
+function formatApprovalPrompt(
+  config: t.VideoExtensionConfig,
+  { input }: ApprovalPromptContext<t.GenerateVideoToolInput>,
+): string {
+  const isEdit = input.video !== undefined && !input.extend;
+  const action =
+    input.video === undefined ? "Generate video" : input.extend ? "Extend video" : "Edit video";
+  const def = config.defaults;
+  const dur = isEdit ? undefined : (input.duration ?? def?.duration);
+  const ratio = isEdit ? undefined : (input.aspectRatio ?? def?.aspectRatio);
+  const audio = input.audio ?? def?.audio;
+  const details = [
+    input.video !== undefined ? `video: ${input.video.trim()}` : "",
+    dur !== undefined ? `${dur}s` : "",
+    ratio ?? "",
+    input.resolution ?? def?.resolution ?? "",
+    audio !== undefined ? (audio ? "audio" : "silent") : "",
+    input.n !== undefined && input.n > 1 ? `${input.n} videos` : "",
+    input.path !== undefined ? `path: ${input.path}` : "",
+  ].filter(Boolean);
+  const trimmed = input.prompt.trim();
+  const promptText = trimmed.length <= 300 ? trimmed : `${trimmed.slice(0, 297)}...`;
+  return `${action} with ${describeDefaultModel(config)}${details.length ? ` (${details.join(", ")})` : ""}: "${promptText}"`;
+}

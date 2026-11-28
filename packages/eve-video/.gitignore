@@ -1,0 +1,13 @@
+LICENSE
+NOTICE
+node_modules
+.env*
+.eve
+.vercel
+.output
+.nitro
+.tmp-test-*
+.eve-extension-build-*
+dist
+.DS_Store
+*.tsbuildinfo
