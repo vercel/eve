@@ -295,14 +295,9 @@ export class BlobStore implements Storage {
       await this.objects.write(sample.index, "{}", null, this.ttl(sample.expiresAt) + 1);
   }
   async observe(value: Observation): Promise<void> {
-    const path = this.samplePath(value.id),
-      previous = await this.objects.read(path);
-    if (previous) {
-      await this.index(JSON.parse(previous.text));
-      return;
-    }
     const sample: Sample = { value, expiresAt: value.at + this.retentionDays * DAY, index: "" };
     if (sample.expiresAt <= this.now()) return;
+    const path = this.samplePath(value.id);
     sample.index = this.indexPath(value, sample.expiresAt);
 
     if (await this.objects.write(path, JSON.stringify(sample), null, this.ttl(sample.expiresAt))) {

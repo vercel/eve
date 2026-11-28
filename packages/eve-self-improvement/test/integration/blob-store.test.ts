@@ -10,10 +10,12 @@ const DAY = 86400000,
   epoch = Date.UTC(2026, 10, 15, 12);
 class Objects implements BlobObjects {
   values = new Map<string, { text: string; etag: string }>();
+  reads = 0;
   version = 0;
   failBefore?: string;
   loseResponse?: string;
   async read(path: string) {
+    this.reads++;
     const value = this.values.get(path);
     return value ? { ...value } : null;
   }
@@ -179,7 +181,9 @@ test("Blob namespaces isolate evidence, history and leases; list prefixes remain
   ]);
   assert.deepEqual(await db.list("experiment:foo_%"), [{ id: 2, updatedAt: 3 }]);
   assert.deepEqual(await db.list("experiment:", 1), [{ id: 2, updatedAt: 3 }]);
+  const readsBefore = objects.reads;
   await db.observe(observation(1, { at: epoch }));
+  assert.equal(objects.reads, readsBefore, "New observation writes must not pre-read Blob");
   assert.deepEqual(await other.observations(0, epoch + 1), { values: [], complete: true });
   assert.deepEqual(await other.list("experiment:"), []);
   assert.ok(await db.acquire("one"));
