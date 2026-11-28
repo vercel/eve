@@ -1,5 +1,62 @@
 # eve
 
+## 1.6.0
+
+Released 2026-11-28 · [Compare with 1.5.0](https://github.com/vercel/eve/compare/eve%401.5.0...eve%401.6.0)
+
+### Features
+
+- Add durable event subscriptions for channels, discovered with `eve__search`, and unify subscription tools across channels and MCP connections. ([#6638](https://github.com/vercel/eve/pull/6638))
+
+  - Custom channels can define `experimental.subscriptions` on `defineChannel` to let sessions subscribe, with `catalog`, the events the channel emits (each with a `name`, `description`, and a Zod `inputSchema`) as a list or a sync or async function that returns one, as the required registry, `onEvent`, and call `experimental.subscriptions.emit(event, input, { id, data })` from route handlers. `onEvent` returns a message or `null`. `onSubscribe` can deny a subscription by throwing, or narrow its scope. The types are exported from `eve/experimental/channels`.
+  - The root agent now uses one fixed `eve__subscribe` and `eve__subscription_stop` for both channels and MCP `experimental.events` connections, and finds the events with `eve__search`. `eve__subscribe` takes a flat `{ source, event, input, ttlMs }`, does not list sources or events in its description or schema, and rejects an unknown event with the closest names. Subagents do not get these tools.
+  - **Breaking for MCP `experimental.events`.** `eve__subscription_get`, the per-connection `events_get_subscription` and `events_unsubscribe` tools, and the generated `events_subscribe_<hash>` tools are removed. A connection's events appear in `eve__search` results, and eve calls the server's `events/list` only when a search covers the connection or a subscribe runs. `tools.allow` and `tools.block` filter a connection's events by the name `events_subscribe_<event name>` or the hashed `events_subscribe_<hash>` name that earlier versions generated, so an allow list that names other tools offers no events. To migrate, call `eve__search` for the event and then `eve__subscribe` with `{ source, event, input, ttlMs }`.
+  - `githubChannel({ experimental: { subscriptions: { onEvent, events } } })` enables subscriptions to GitHub webhook events, each scoped by the `owner`, `repo` and issue or pull request `number` that the event has, with `onEvent` filtering and formatting each delivery and the optional `events` narrowing which of GitHub's events `eve__search` offers and `eve__subscribe` accepts. `eve__subscribe` rejects an event whose webhook the GitHub App does not receive, naming the webhook. Pass `onComment: () => null` if you also want to disable default `@mention` comment sessions.
+  - A session's subscriptions, for channels and MCP connections, retire when the session finishes, is ended, expires, or fails, instead of at `ttlMs` or on the next delivery. Each connection subscription is closed upstream.
+- Add `TurnFailedError` and `SessionFailedError` to `eve/client`, so callers can distinguish recorded turn and session failures with `is()`.
+  `SessionStore` and `useEveAgent` expose these failures through `error` and report live failures through `onError`. Both errors keep the recorded message and keep the recorded failure code in `name`. Both carry the full recorded `ErrorInfo` on `info`, and `TurnFailedError` also carries `turnId`. Fetch errors and retry behavior are unchanged. ([#6902](https://github.com/vercel/eve/pull/6902))
+- Evals can start a session from fixed prior conversation with `t.session({ history })`, then send and grade the next turn without running earlier turns through a model.
+  `history` accepts ordered user and assistant text (`SessionHistoryMessage`, exported from `eve/evals` alongside `EveEvalSessionOptions`) and joins model history with the first message without running earlier turns, tools, or hooks. It works out of the box with local `eve eval` through a dev-only route that is omitted from production builds, leaving `eve/client` and `POST /eve/v1/session` unchanged.
+  Thanks @matchai for raising this eval gap and prototyping the initial proposal in #6854. ([#6891](https://github.com/vercel/eve/pull/6891))
+- Export `MAX_MESSAGE_PARTS` from `eve/channels/eve` and `eve/client` so clients can cap attachments at the eve channel's 64-part message limit without hard-coding it.
+  Thanks @muratsu for reporting this in #6650. ([#6825](https://github.com/vercel/eve/pull/6825))
+- Support `"use workflow"` and `"use step"` directives in eve extensions, including `defineWorkflowTool` (`execute`, `task`, and `serve`) and mount-scoped workflow IDs, step IDs, and `extension.config`.
+  Thanks @dretanacr for reporting the restriction in #4821. ([#6906](https://github.com/vercel/eve/pull/6906))
+- Add `HostSandbox` (`eve/sandbox/host`) for running eve agents directly against a POSIX host directory and shell without container or VM isolation, with eve-private skill materialization under `$EVE_SKILLS_DIR` and current working directory context in base instructions when sandbox tools are present. ([#6942](https://github.com/vercel/eve/pull/6942))
+- Run local self-modification directly in the project directory with `HostSandbox` and eve's default `edit_file` tool instead of a custom `just-bash` mountable filesystem, mounted in `eve dev` under `self` with subagent `modify` (`self__modify`).
+  Local self-modification now requires a POSIX host (Linux, macOS, or WSL2 on Windows) and renames the subagent from `agent` to `modify` (`self__modify` for the default local mount, `self-modification-remote__modify` for the default remote mount). Existing authored `agent/extensions/self-modification/` mounts remain supported without duplicating the bundled `self` mount. ([#6945](https://github.com/vercel/eve/pull/6945))
+- User entries in session `history` now accept `{ type: "file" }` parts alongside text, reusing eve's attachment resolution and sandbox staging.
+  Supply `{ type: "file", mediaType, filename?, data }` (`SessionHistoryFilePart`, exported from `eve/channels` and `eve/evals`) inside a user message's `parts` on channel `create()`, `send()`, `onMessage.history`, or local eval `t.session({ history })`. Imported files resolve through the channel's `fetchFile` hook or SSRF-safe public HTTPS download under a shared 10-download cap, enforce `uploadPolicy`, stage into the sandbox during turn intake and interrupted-turn recovery, record safe metadata (`ImportedFilePart` from `eve/events`) on `delivery.consumed` without persisting inline bytes, and render as `{ type: "file" }` parts in frontend `EveMessage`.
+  Thanks @FranciscoMoretti for the request and ChatJS fork reference in #5340. ([#6907](https://github.com/vercel/eve/pull/6907))
+- Session `history` entries can carry ordered `parts` with text and completed tool exchanges, so sessions and local evals can start from conversations that used tools.
+  Supply either `text` (unchanged shorthand) or `parts` (`{ type: "text", text }` and `{ type: "tool", name, input?, output | error }`) on `SessionHistoryMessage`. Consecutive tool parts lower into parallel calls and results in order without running tools, hooks, or `call.*` events, and frontend `EveMessage` renders them as completed or failed tool parts. `delivery.consumed` keeps `text` populated alongside the new `parts` field (`ImportedPart`, `ImportedTextPart`, `ImportedToolPart` from `eve/events`).
+  Thanks @FranciscoMoretti for the request and prototype in #5340, and @matchai for the eval tool-history proposal in #6855. ([#6891](https://github.com/vercel/eve/pull/6891))
+- Promote dynamic schedules to `eve/schedules`, with providers at `eve/schedules/vercel` and `eve/schedules/testing`.
+  Existing imports from `eve/experimental/schedules` and its provider subpaths continue to work. ([#5348](https://github.com/vercel/eve/pull/5348))
+- Determine a session's stream version from its workflow run attributes (`$eve.stream_version` and `$eve.version`) before falling back to reading line 0, avoiding full-history stream replays on cold instances. ([#6915](https://github.com/vercel/eve/pull/6915))
+- Speed up sandbox shell, `glob`, and `grep` execution by running Vercel Sandbox `run()`, internal commands, and the bounded `bash` launcher over a single streaming request, folding `glob` and `grep` probes into one command, trimming the `bash` launcher, and running internal sandbox commands in a non-login shell. ([#6889](https://github.com/vercel/eve/pull/6889))
+- Cache Slack `conversations.info` channel kind lookups per workspace and channel so warm `app_mention` webhooks skip a serial Slack API round trip before starting or resuming a turn. ([#6879](https://github.com/vercel/eve/pull/6879))
+- Start Slack's first-reply `chat.getPermalink` thread-root check on the first streamed text delta or alongside any in-flight status write instead of awaiting it serially after status flushes. ([#6881](https://github.com/vercel/eve/pull/6881))
+- Overlap independent Slack pre-turn lookups (`conversations.info`, `conversations.replies`, `users.info`, and session resolution) instead of awaiting them serially before starting or resuming a turn. ([#6880](https://github.com/vercel/eve/pull/6880))
+- Promote long-running `bash` commands into durable background tasks via a generic inline-to-task handoff primitive, kill commands that exceed an explicit `timeout` up to 120s, offer `eve__task_wait` and `eve__task_cancel` from step 0 whenever `bash` is present, and defer task instructions into an append-only context message once a session starts its first task. ([#6890](https://github.com/vercel/eve/pull/6890))
+
+### Bug Fixes
+
+- `eve dev` and the framework hosts now reuse a recorded dev server only when the server answering on its port is the one that wrote the record, because each server stamps the record with a random id. ([#6833](https://github.com/vercel/eve/pull/6833))
+- Preserve the target channel namespace on dynamic schedule continuation tokens so follow-up thread replies resolve and continue the scheduled session. ([#6910](https://github.com/vercel/eve/pull/6910))
+- Preserve `stderr` on promoted and timed-out `bash` jobs, raise the default `bash` foreground wait from 60s to 120s before promoting, accept `path` as an alias for `filePath` in `read_file` and `write_file`, and tighten static agent, task, skill, and `eve/extensions/code` prompt copy. ([#6898](https://github.com/vercel/eve/pull/6898))
+- Improve default model output budgets, length and context-overflow recovery, bash launcher reliability, plain-text file tool outputs, and prompt caching in the base coding harness. ([#6886](https://github.com/vercel/eve/pull/6886))
+- `followAgents` and subagent stream reads now reach a remote child mounted at a named path such as `/eve/<name>`, instead of returning 404.
+  Thanks @phoenixdahdev for the reproduction in #6295. ([#6823](https://github.com/vercel/eve/pull/6823))
+- New projects from `eve init` no longer ignore `.env.example`, so the variable list a channel setup writes is committed with the project.
+  Thanks @coygeek for reporting this in #6115. ([#6824](https://github.com/vercel/eve/pull/6824))
+- Building agents for Vercel now fails when the agents in one deployment would run different eve versions.
+  The agents share the deployment's Workflow runs, so a run started by one eve version and replayed by another failed with `CORRUPTED_EVENT_LOG`. Install a single eve version for the project, for example by declaring `eve` only in the root `package.json`. ([#6847](https://github.com/vercel/eve/pull/6847))
+- Fix `eveSvelteKit` silently leaving the eve service out of Vercel builds of SvelteKit 3 apps, which build every Vite environment in one pass and run the adapter in a late `buildApp` hook. ([#6909](https://github.com/vercel/eve/pull/6909))
+- Clarify the `read_file`, `edit_file`, and `agent` tool descriptions so models make exact edits and delegate only independent work, and tighten the `eve/extensions/code` editing and verification guidance. ([#6947](https://github.com/vercel/eve/pull/6947))
+- Cancelling a turn no longer records the tools and model calls it stops as exceptions in traces.
+  Tools and model calls stopped by a turn cancellation now end their spans as cancelled, so error tracking no longer counts each cancel as a failure. ([#6629](https://github.com/vercel/eve/pull/6629))
+
 ## 1.5.0
 
 Released 2026-11-25 · [Compare with 1.4.0](https://github.com/vercel/eve/compare/eve%401.4.0...eve%401.5.0)

@@ -1,5 +1,18 @@
 # @eve/board
 
+## 0.2.1
+
+Released 2026-11-28 · [Compare with 0.2.0](https://github.com/vercel/eve/compare/%40eve%2Fboard%400.2.0...%40eve%2Fboard%400.2.1)
+
+### Bug Fixes
+
+- Fail config validation with a migration message when an `@eve/board` mount still sets the removed `configurers` option instead of silently ignoring it. ([#6862](https://github.com/vercel/eve/pull/6862))
+- Fix `watch` and `unwatch` failing with `client_id_taken` after an `@eve/board` mount's `watchChannel` changes, by reusing the agent's existing watch lock wherever it lives. ([#6852](https://github.com/vercel/eve/pull/6852))
+
+### Dependencies
+
+- Updated eve to 1.6.0.
+
 ## 0.2.0
 
 Released 2026-11-25 · [Compare with 0.1.0](https://github.com/vercel/eve/compare/%40eve%2Fboard%400.1.0...%40eve%2Fboard%400.2.0)
