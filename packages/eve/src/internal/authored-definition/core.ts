@@ -14,6 +14,7 @@ import {
   expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
+  expectNonNegativeInteger,
   expectPositiveInteger,
   expectProviderOptions,
   expectString,
@@ -159,9 +160,12 @@ function normalizeAgentLimitsDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["limits"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["sessionTimeoutMs", "sessionUsage"], message);
+  expectOnlyKnownKeys(record, ["queueHoldMs", "sessionTimeoutMs", "sessionUsage"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["limits"]>> = {};
 
+  if (record.queueHoldMs !== undefined) {
+    normalizedDefinition.queueHoldMs = expectNonNegativeInteger(record.queueHoldMs, message);
+  }
   if (record.sessionTimeoutMs !== undefined) {
     normalizedDefinition.sessionTimeoutMs = expectPositiveIntegerOrFalse(
       record.sessionTimeoutMs,

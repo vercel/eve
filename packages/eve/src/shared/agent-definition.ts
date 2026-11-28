@@ -194,6 +194,16 @@ export interface AgentLimitsDefinition {
    */
   readonly sessionTimeoutMs?: number | false;
   /**
+   * How long an idle session waits after a `"queue"` message before it starts the turn, in milliseconds.
+   *
+   * Queued messages that arrive within the wait join that turn when they share the first one's principal, so a
+   * burst of messages becomes one turn. A steering message starts or joins the turn at once and ends the wait.
+   * A session that is already running a turn starts the next queued message when it ends, with no wait.
+   *
+   * @default 0 (the turn starts as soon as the message arrives)
+   */
+  readonly queueHoldMs?: number;
+  /**
    * Decides whether a session has reached its usage limit. eve calls it before
    * each model call; returning `true` pauses the turn on a continuation prompt,
    * or fails it when nobody can answer. Approving starts a new window.
@@ -347,6 +357,7 @@ export type InternalAgentDefinition = {
 };
 
 export interface CompiledAgentLimitsDefinition {
+  readonly queueHoldMs?: number;
   readonly sessionTimeoutMs?: number | false;
   readonly sessionUsage?: boolean;
 }

@@ -253,6 +253,7 @@ async function startSuccessor(
               "new"
             ? { kind: "first-message" }
             : { kind: "parked" },
+      queueHoldMs: checkpoint.queueHoldMs,
       retention: checkpoint.retention,
       serializedContext,
       sessionId,

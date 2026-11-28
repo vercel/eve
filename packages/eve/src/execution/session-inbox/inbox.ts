@@ -116,7 +116,9 @@ export function isInterrupt(value: SessionInboxPayload): boolean {
   );
 }
 
-function isDelivery(value: SessionInboxPayload): boolean {
+export function isDeliveryPayload(
+  value: SessionInboxPayload,
+): value is Extract<SessionInboxPayload, { readonly kind: "send" | "deliver" }> {
   return value.kind === "send" || value.kind === "deliver";
 }
 
@@ -166,7 +168,7 @@ export function createSessionInbox<Hook extends InboxHook>(
 
   const openHandover = (): void => {
     handover = undefined;
-    observe(deliveryHandlers, queue, isDelivery);
+    observe(deliveryHandlers, queue, isDeliveryPayload);
     notify();
   };
   const blockedOnHandover = (): void => {
@@ -218,7 +220,7 @@ export function createSessionInbox<Hook extends InboxHook>(
     if (seen.has(part.index)) return;
     seen.add(part.index);
     queue.push(...part.payloads);
-    observe(deliveryHandlers, part.payloads, isDelivery);
+    observe(deliveryHandlers, part.payloads, isDeliveryPayload);
     observe(interruptHandlers, part.payloads, isInterrupt);
     notify();
   };
@@ -242,7 +244,7 @@ export function createSessionInbox<Hook extends InboxHook>(
           continue;
         }
         queue.push(payload);
-        if (!gated()) observe(deliveryHandlers, [payload], isDelivery);
+        if (!gated()) observe(deliveryHandlers, [payload], isDeliveryPayload);
         observe(interruptHandlers, [payload], isInterrupt);
         notify();
       }
@@ -413,7 +415,7 @@ export function createSessionInbox<Hook extends InboxHook>(
     },
     onDelivery(handler) {
       deliveryHandlers.add(handler);
-      if (!gated()) for (const payload of queue) if (isDelivery(payload)) handler(payload);
+      if (!gated()) for (const payload of queue) if (isDeliveryPayload(payload)) handler(payload);
       return () => deliveryHandlers.delete(handler);
     },
     restore(payloads) {

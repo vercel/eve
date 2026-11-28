@@ -68,6 +68,14 @@ export function expectPositiveInteger(value: unknown, message: string): number {
   return value;
 }
 
+export function expectNonNegativeInteger(value: unknown, message: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error(message);
+  }
+
+  return value;
+}
+
 export function expectFunction<TFunction extends (...args: never[]) => unknown>(
   value: unknown,
   message: string,

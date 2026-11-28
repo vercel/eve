@@ -41,7 +41,7 @@ export function agentSettings(step: {
 export function agentLimits(
   agent: Pick<SessionAgent, "settings">,
   ctx: Pick<ContextReader, "get">,
-): Pick<AgentLimitsDefinition, "sessionTimeoutMs"> | undefined {
+): Pick<AgentLimitsDefinition, "queueHoldMs" | "sessionTimeoutMs"> | undefined {
   const config = ctx.get(DynamicSubagentAgentConfigKey);
   return config === undefined ? agent.settings.limits : config.limits;
 }

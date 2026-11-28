@@ -13,6 +13,7 @@ export interface InitialWorkflowEntryInput {
   readonly kind: "initial";
   readonly ownerDeploymentId: string;
   readonly retention?: AgentWorkflowRetentionDefinition;
+  readonly queueHoldMs?: number;
   readonly sessionTimeoutMs?: number | false;
   readonly serializedContext: Record<string, unknown>;
 }

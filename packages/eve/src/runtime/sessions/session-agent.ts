@@ -24,6 +24,7 @@ export interface SessionAgentSettings {
   };
   readonly reasoning?: AgentReasoningDefinition;
   readonly limits?: {
+    readonly queueHoldMs?: number;
     readonly sessionTimeoutMs?: number | false;
     readonly sessionUsage?: SessionUsageLimit;
   };

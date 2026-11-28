@@ -12,7 +12,11 @@ import type {
   SessionInputQueue,
   TurnSelection,
 } from "#execution/session/input-queue.js";
-import type { SessionInboxHandle, SessionInboxReader } from "#execution/session-inbox/inbox.js";
+import {
+  isDeliveryPayload,
+  type SessionInboxHandle,
+  type SessionInboxReader,
+} from "#execution/session-inbox/inbox.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
@@ -35,16 +39,46 @@ export async function nextTurnDelivery(input: {
   readonly queue: SessionInputQueue;
   readonly ignore: (settlement: ControlSettlement) => Promise<void>;
   readonly whileWaiting?: () => Promise<void>;
+  readonly hold?: { readonly ms: number; readonly until: (at: number) => Promise<void> };
 }): Promise<NextTurnInstruction> {
-  const { inbox, cursor, queue } = input;
+  const { inbox, cursor, queue, hold } = input;
+  const holdAfter = (admitted: Awaited<ReturnType<typeof admitSessionInboxPayload>>): void => {
+    if (hold === undefined || hold.ms <= 0 || admitted.kind !== "delivery") return;
+    const { delivery } = admitted.admission;
+    if (delivery.turnPolicy === "queue" && delivery.caller === undefined) {
+      queue.beginHold(Date.now() + hold.ms);
+    }
+  };
   let freshSequence: number | undefined;
   while (true) {
     const end = pendingSessionEnd(cursor.serializedContext);
     if (end !== undefined) return { kind: "end", ...end };
 
-    const selected = queue.takeNext({
-      freshSequence: inbox.hasPending() ? undefined : freshSequence,
-    });
+    const leading = inbox.takeLeading(isDeliveryPayload);
+    for (const payload of leading) {
+      const idle = queue.pendingCount === 0;
+      const admitted = await admitSessionInboxPayload(payload, input);
+      if (!idle) continue;
+      if (freshSequence === undefined && admitted.kind === "delivery") {
+        freshSequence = admitted.admission.sequence;
+      }
+      holdAfter(admitted);
+    }
+    if (leading.length === 0 && inbox.hasPending()) queue.endHold();
+    const holding = hold === undefined ? undefined : queue.activeHold();
+    if (hold !== undefined && holding !== undefined) {
+      holding.timer ??= hold.until(holding.at);
+      const elapsed = await Promise.race([
+        inbox.whenPending().then(() => false),
+        holding.timer.then(() => true),
+      ]);
+      if (elapsed || !inbox.hasPending()) queue.endHold();
+      continue;
+    }
+    const selected =
+      holding === undefined
+        ? queue.takeNext({ freshSequence: inbox.hasPending() ? undefined : freshSequence })
+        : undefined;
     if (selected?.kind === "control")
       return selected.origin === undefined
         ? { kind: selected.control }
@@ -85,6 +119,7 @@ export async function nextTurnDelivery(input: {
     const admitted = await admitSessionInboxPayload(payload, input);
     freshSequence =
       wasIdle && admitted.kind === "delivery" ? admitted.admission.sequence : undefined;
+    if (wasIdle) holdAfter(admitted);
     if (admitted.kind === "workflow") return { kind: "workflow", message: admitted.message };
     if (admitted.kind === "unsupported") {
       await input.ignore(admitted.settlement);

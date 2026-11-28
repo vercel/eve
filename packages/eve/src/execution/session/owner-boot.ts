@@ -197,6 +197,7 @@ export async function bootInitialOwner<Hook extends InboxHook>(
             ? { kind: "first-message" }
             : { input: createInitialDelivery(input, serializedContext), kind: "turn" },
         initialTurnControl: prepared.turnControl,
+        queueHoldMs: input.queueHoldMs,
         retention: input.retention,
         serializedContext,
         sessionId,

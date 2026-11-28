@@ -21,6 +21,7 @@ describe("compiled agent manifest v50", () => {
       agent: {
         experimental: { workflow: { modelCallsPerStep: 4, retention: 0 } },
         limits: {
+          queueHoldMs: 120_000,
           sessionTimeoutMs: 86_400_000,
           sessionUsage: ({ window }) => window.costUsd !== undefined && window.costUsd >= 1.5,
         },
@@ -34,6 +35,7 @@ describe("compiled agent manifest v50", () => {
     expect(parsed.version).toBe(COMPILED_AGENT_MANIFEST_VERSION);
     expect(parsed.config.experimental?.workflow?.modelCallsPerStep).toBe(4);
     expect(parsed.config.experimental?.workflow?.retention).toBe(0);
+    expect(parsed.config.limits?.queueHoldMs).toBe(120_000);
     expect(parsed.config.limits?.sessionTimeoutMs).toBe(86_400_000);
     expect(parsed.config.limits?.sessionUsage).toBe(true);
     expect(() => validateCompiledAgentManifest(parsed)).not.toThrow();

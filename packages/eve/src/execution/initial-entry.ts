@@ -75,7 +75,7 @@ export async function prepareInitialEntry(
     agentName: agent.id,
     ctx,
   });
-  const sessionTimeoutMs = agentLimits(agent, ctx)?.sessionTimeoutMs;
+  const { queueHoldMs, sessionTimeoutMs } = agentLimits(agent, ctx) ?? {};
   const retention =
     agent.settings.retention ??
     (traceDecision.action === "record" && traceDecision.recordInputs && traceDecision.recordOutputs
@@ -93,6 +93,7 @@ export async function prepareInitialEntry(
   if (input.continuationConflictCommand !== undefined) {
     entry.continuationConflictCommand = input.continuationConflictCommand;
   }
+  if (queueHoldMs !== undefined) entry.queueHoldMs = queueHoldMs;
   if (sessionTimeoutMs !== undefined) entry.sessionTimeoutMs = sessionTimeoutMs;
   if (retention !== undefined) entry.retention = retention;
   return { agent, entry, input, serializedContext };

@@ -70,6 +70,7 @@ export interface SessionBoot {
   readonly history: HarnessModelMessage[];
   readonly initialTurnControl?: TurnControl;
   readonly start: SessionStart;
+  readonly queueHoldMs?: number;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionId: string;
@@ -327,6 +328,9 @@ async function runSessionLoop(
         inbox,
         queue,
         whileWaiting: stopSandboxOnceIdle,
+        ...(boot.queueHoldMs !== undefined && {
+          hold: { ms: boot.queueHoldMs, until: host.until },
+        }),
       });
       if (next.kind === "prewarm") {
         if (

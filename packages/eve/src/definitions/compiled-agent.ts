@@ -68,6 +68,7 @@ function compiledSettings(bundle: CompiledBundle): SessionAgentSettings {
     modelCallsPerStep: config?.experimental?.workflow?.modelCallsPerStep,
     reasoning: bundle.turnAgent.reasoning,
     retention: config?.experimental?.workflow?.retention,
+    queueHoldMs: config?.limits?.queueHoldMs,
     sessionTimeoutMs: config?.limits?.sessionTimeoutMs,
     sessionUsage: () => resolveSessionUsageLimit(bundle),
   });

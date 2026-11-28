@@ -56,6 +56,7 @@ export function agentDefinitionsOf(contents: AgentContents): readonly Definition
 export interface AgentSettingsFields {
   readonly compactionModel?: RuntimeModelReference;
   readonly compactionThresholdPercent?: number;
+  readonly queueHoldMs?: number;
   readonly sessionTimeoutMs?: number | false;
   readonly sessionUsage?: () => SessionUsageLimit | false | undefined;
   readonly modelCallsPerStep?: number;
@@ -71,6 +72,7 @@ export function settingsOf(fields: AgentSettingsFields): SessionAgentSettings {
       thresholdPercent: fields.compactionThresholdPercent,
     },
     limits: {
+      queueHoldMs: fields.queueHoldMs,
       sessionTimeoutMs: fields.sessionTimeoutMs,
       get sessionUsage() {
         sessionUsage ??= { limit: usageLimit(fields.sessionUsage?.()) };

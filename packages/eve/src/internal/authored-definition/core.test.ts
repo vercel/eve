@@ -155,6 +155,7 @@ describe("normalizeAgentDefinition", () => {
       {
         model: "openai/gpt-5.5",
         limits: {
+          queueHoldMs: 120_000,
           sessionTimeoutMs: 86_400_000,
           sessionUsage,
         },
@@ -163,6 +164,7 @@ describe("normalizeAgentDefinition", () => {
     );
 
     expect(definition.limits).toEqual({
+      queueHoldMs: 120_000,
       sessionTimeoutMs: 86_400_000,
       sessionUsage,
     });
@@ -227,6 +229,9 @@ describe("normalizeAgentDefinition", () => {
     ["sessionTimeoutMs", 1.5],
     ["sessionTimeoutMs", -1],
     ["sessionTimeoutMs", "30d"],
+    ["queueHoldMs", -1],
+    ["queueHoldMs", 1.5],
+    ["queueHoldMs", false],
     ["sessionUsage", true],
     ["sessionUsage", 40_000_000],
     ["sessionUsage", { inputTokens: 40_000_000 }],
