@@ -231,7 +231,7 @@ Only one active session can hold a channel address. A channel-created session cl
 
 A channel send continues the address's session before creating one. A send that fails ambiguously never creates a session.
 
-Pass a [delivery idempotency key](../channels/custom#retried-deliveries) so retried input can't interrupt generation or start another turn. Each session remembers its last 1,024 distinct keys across restarts and handoffs. A keyed send that starts a session returns the winning session's ID. A send without a key can return the ID of a session that loses the race.
+Pass a [delivery idempotency key](../channels/custom#retried-deliveries) so retried input can't interrupt generation or start another turn. Each session remembers its last 1,024 distinct keys across restarts and handoffs. A send that starts a session returns the ID of the session that holds the address, whether or not it carries a key.
 
 A handoff never leaves the session's addresses unclaimed. A delivery during a handoff is accepted immediately, never reported as an inactive session. A deployment running an earlier eve release releases its addresses briefly instead. A delivery in that interval retries until the new deployment claims the address. Either way, a channel never starts a replacement session for an address that is moving between deployments.
 
