@@ -26,7 +26,7 @@ import {
   type LinqCredentialProvider,
   type LinqCredentials,
 } from "#compiled/@linqapp/chat-sdk-adapter/index.js";
-import type { Message, Thread } from "#compiled/chat/index.js";
+import type { Message, StateAdapter, Thread } from "#compiled/chat/index.js";
 import { formatReplyContext } from "#public/channels/chat-sdk/reply-context.js";
 import {
   linqInboundContent,
@@ -54,6 +54,9 @@ export type LinqInboundResult = {
 
 /** Sync or async {@link LinqInboundResult}. */
 
+/** The Chat SDK adapter eve builds for Linq. */
+export type LinqAdapter = ReturnType<typeof createLinqAdapter>;
+
 /** A direct value or lazy resolver for a Linq credential. */
 export type LinqCredentialValue = string | (() => string | Promise<string>);
 
@@ -75,12 +78,17 @@ export interface LinqChannelCredentials {
 
 /** Configuration for {@link linqChannel}. */
 export interface LinqChannelConfig {
+  /**
+   * Replaces the Linq adapter. Receives the adapter eve builds from `credentials` and `baseURL`,
+   * and returns the adapter the channel uses, such as a wrapper that delegates to it.
+   */
+  readonly adapter?: (base: LinqAdapter) => LinqAdapter;
   /** Optional Linq API base URL, for example a sandbox endpoint. */
   readonly baseURL?: string;
   /** Outbound credentials and inbound webhook verification. */
   readonly credentials?: LinqChannelCredentials;
   /** Per-event overrides for the underlying Chat SDK channel. */
-  readonly events?: ChatSdkChannelEvents<{ linq: ReturnType<typeof createLinqAdapter> }>;
+  readonly events?: ChatSdkChannelEvents<{ linq: LinqAdapter }>;
   /** Inbound message policy. Defaults to dispatching with the Linq message author's user auth. */
   readonly onMessage?: (
     ctx: LinqInboundMessageContext,
@@ -97,6 +105,11 @@ export interface LinqChannelConfig {
   ) => IMessageTapbackResult | Promise<IMessageTapbackResult>;
   /** Override the default webhook route (`/eve/v1/linq`). */
   readonly route?: string;
+  /**
+   * Chat SDK state adapter for thread subscriptions, locks, and duplicate checks. Defaults to
+   * in-memory state, which does not survive restarts.
+   */
+  readonly state?: StateAdapter;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
   /** Display name used by the Chat SDK runtime. Defaults to `"eve"`. */
@@ -132,14 +145,15 @@ export interface LinqChannel extends Channel<
 export function linqChannel(config: LinqChannelConfig): LinqChannel {
   const adapterConfig: LinqAdapterConfig = normalizeCredentials(config.credentials);
   if (config.baseURL !== undefined) adapterConfig.baseURL = config.baseURL;
-  const linq = createLinqAdapter(adapterConfig);
+  const base = createLinqAdapter(adapterConfig);
+  const linq = config.adapter?.(base) ?? base;
   linq.rehydrateAttachment = rehydrateLinqAttachment;
   const bridge = chatSdkChannel({
     adapters: { linq },
     concurrency: "concurrent",
     events: config.events,
     routes: { linq: config.route ?? "/eve/v1/linq" },
-    state: createMemoryState(),
+    state: config.state ?? createMemoryState(),
     streaming: false,
     turnPolicy: config.turnPolicy,
     userName: config.userName ?? "eve",
@@ -230,7 +244,7 @@ async function defaultOnMessage(
 }
 
 async function dispatchMessage(
-  bridge: ChatSdkChannelBridge<{ linq: ReturnType<typeof createLinqAdapter> }>,
+  bridge: ChatSdkChannelBridge<{ linq: LinqAdapter }>,
   onMessage: NonNullable<LinqChannelConfig["onMessage"]>,
   thread: Thread,
   message: Message,
@@ -259,7 +273,7 @@ async function dispatchMessage(
 }
 
 async function markReadBestEffort(
-  adapter: ReturnType<typeof createLinqAdapter>,
+  adapter: LinqAdapter,
   thread: Thread,
   message: Message,
 ): Promise<void> {

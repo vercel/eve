@@ -16,7 +16,7 @@ import {
   type IMessageTapbackToolInput,
 } from "#public/channels/imessage-tapbacks.js";
 import type { ToolDefinition } from "#public/tools/index.js";
-import type { Adapter, Message, Thread } from "#compiled/chat/index.js";
+import type { Adapter, Message, StateAdapter, Thread } from "#compiled/chat/index.js";
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
 import {
   createiMessageAdapter,
@@ -31,6 +31,9 @@ import {
   photonInboundContent,
   photonQuotedMessage,
 } from "#public/channels/photon/inboundContent.js";
+
+/** The Chat SDK adapter eve builds for Photon iMessage. */
+export type PhotonIMessageAdapter = iMessageAdapter;
 
 /** Lazily resolves the Photon project credentials used by {@link photonIMessageChannel}. */
 export type PhotonIMessageChannelCredentials = () =>
@@ -72,10 +75,16 @@ export type PhotonInboundResult = {
 
 /** Configuration for {@link photonIMessageChannel}. */
 export interface PhotonIMessageChannelConfig {
+  /**
+   * Replaces the iMessage adapter. Receives the adapter eve builds from `credentials` and the
+   * webhook options, and returns the adapter the channel uses, such as a wrapper that delegates
+   * to it.
+   */
+  readonly adapter?: (base: PhotonIMessageAdapter) => PhotonIMessageAdapter;
   /** Lazy Photon project credentials, such as `connectPhotonCredentials(...)`. */
   readonly credentials: PhotonIMessageChannelCredentials;
   /** Per-event overrides for the underlying Chat SDK channel. */
-  readonly events?: ChatSdkChannelEvents<{ imessage: iMessageAdapter }>;
+  readonly events?: ChatSdkChannelEvents<{ imessage: PhotonIMessageAdapter }>;
   /** Inbound message policy. Defaults to dispatching with the Photon message author's user auth. */
   readonly onMessage?: (
     ctx: PhotonInboundMessageContext,
@@ -92,6 +101,11 @@ export interface PhotonIMessageChannelConfig {
   ) => IMessageTapbackResult | Promise<IMessageTapbackResult>;
   /** Override the default webhook route (`/eve/v1/photon`). */
   readonly route?: string;
+  /**
+   * Chat SDK state adapter for thread subscriptions, locks, and duplicate checks. Defaults to
+   * in-memory state, which does not survive restarts.
+   */
+  readonly state?: StateAdapter;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
   /** Display name used by the Chat SDK runtime. Defaults to `"eve"`. */
@@ -126,7 +140,7 @@ export interface PhotonIMessageChannel extends ChatSdkChannel {
  */
 export function photonIMessageChannel(config: PhotonIMessageChannelConfig): PhotonIMessageChannel {
   const webhookSecret = config.webhookSecret ?? process.env.IMESSAGE_WEBHOOK_SECRET;
-  const imessage = createiMessageAdapter({
+  const base = createiMessageAdapter({
     credentials: config.credentials,
     ...(config.webhookVerifier
       ? { webhookVerifier: config.webhookVerifier }
@@ -134,13 +148,14 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
         ? { webhookSecret }
         : { webhookVerifier: sameEnvironmentVercelOidc() }),
   });
+  const imessage = config.adapter?.(base) ?? base;
   addPhotonAttachmentRehydration(imessage);
   const bridge = chatSdkChannel({
     adapters: { imessage },
     concurrency: "concurrent",
     events: config.events,
     routes: { imessage: config.route ?? "/eve/v1/photon" },
-    state: createMemoryState(),
+    state: config.state ?? createMemoryState(),
     streaming: false,
     turnPolicy: config.turnPolicy,
     userName: config.userName ?? "eve",
@@ -206,7 +221,7 @@ async function defaultOnMessage(
 }
 
 async function dispatchMessage(
-  bridge: ChatSdkChannelBridge<{ imessage: iMessageAdapter }>,
+  bridge: ChatSdkChannelBridge<{ imessage: PhotonIMessageAdapter }>,
   onMessage: NonNullable<PhotonIMessageChannelConfig["onMessage"]>,
   thread: Thread,
   message: Message,
@@ -234,7 +249,7 @@ async function dispatchMessage(
 }
 
 async function markReadBestEffort(
-  adapter: iMessageAdapter,
+  adapter: PhotonIMessageAdapter,
   thread: Thread,
   message: Message,
 ): Promise<void> {

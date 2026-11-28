@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
+  chatSdkChannel,
   createiMessageAdapter,
+  createMemoryState,
   directMessage,
   fetchMessage,
   newMessage,
@@ -9,9 +11,11 @@ const {
   send,
   vercelOidc,
 } = vi.hoisted(() => ({
+  chatSdkChannel: vi.fn(),
   createiMessageAdapter: vi.fn(
     (_config: { webhookVerifier?: (request: Request) => unknown }) => ({}),
   ),
+  createMemoryState: vi.fn(() => ({ kind: "memory-state" })),
   directMessage: vi.fn(),
   fetchMessage: vi.fn(),
   newMessage: vi.fn(),
@@ -21,7 +25,7 @@ const {
 }));
 
 vi.mock("#public/channels/chat-sdk/index.js", () => ({
-  chatSdkChannel: () => ({
+  chatSdkChannel: chatSdkChannel.mockImplementation(() => ({
     bot: {
       getAdapter: () => ({ fetchMessage, markRead: vi.fn() }),
       initialize: vi.fn(),
@@ -31,12 +35,10 @@ vi.mock("#public/channels/chat-sdk/index.js", () => ({
     },
     channel: { __kind: "eve:channel", adapter: { kind: "channel:photon" }, routes: [] },
     send,
-  }),
+  })),
   messageContentOf: (message: Message) => message.text,
 }));
-vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
-  createMemoryState: vi.fn(),
-}));
+vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({ createMemoryState }));
 vi.mock("#compiled/@photon-ai/chat-adapter-imessage/index.js", () => ({
   createiMessageAdapter,
 }));
@@ -70,6 +72,43 @@ describe("photonIMessageChannel", () => {
     await expect(webhookVerifier(request)).resolves.toBeNull();
     verify.mockResolvedValueOnce(runtime);
     await expect(webhookVerifier(request)).resolves.toBe(runtime);
+  });
+
+  it("defaults to in-memory state and eve's iMessage adapter", () => {
+    photonIMessageChannel({
+      credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+    });
+
+    const config = chatSdkChannel.mock.calls[0]?.[0];
+    expect(config.state).toEqual({ kind: "memory-state" });
+    expect(config.adapters.imessage).toBe(createiMessageAdapter.mock.results[0]?.value);
+    expect(config.adapters.imessage.rehydrateAttachment).toEqual(expect.any(Function));
+  });
+
+  it("uses a supplied state adapter instead of in-memory state", () => {
+    const state = { kind: "durable-state" } as never;
+
+    photonIMessageChannel({
+      credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+      state,
+    });
+
+    expect(createMemoryState).not.toHaveBeenCalled();
+    expect(chatSdkChannel.mock.calls[0]?.[0].state).toBe(state);
+  });
+
+  it("uses the adapter returned by the adapter option, with attachment rehydration", () => {
+    const wrapped = { wrapped: true };
+    const adapter = vi.fn(() => wrapped as never);
+
+    photonIMessageChannel({
+      adapter,
+      credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+    });
+
+    expect(adapter).toHaveBeenCalledWith(createiMessageAdapter.mock.results[0]?.value);
+    expect(chatSdkChannel.mock.calls[0]?.[0].adapters.imessage).toBe(wrapped);
+    expect(wrapped).toHaveProperty("rehydrateAttachment", expect.any(Function));
   });
 
   it("sends emoji tapbacks through the fetched spectrum message", async () => {

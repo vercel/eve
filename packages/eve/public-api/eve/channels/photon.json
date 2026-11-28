@@ -5,6 +5,7 @@
   "IMessageTapbackResult",
   "IMessageTapbackToolInput",
   "IMessageTapbackType",
+  "PhotonIMessageAdapter",
   "PhotonIMessageChannel",
   "PhotonIMessageChannelConfig",
   "PhotonIMessageChannelCredentials",

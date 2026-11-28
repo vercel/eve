@@ -1,6 +1,7 @@
 export {
   defaultLinqAuth,
   linqChannel,
+  type LinqAdapter,
   type LinqChannel,
   type LinqChannelConfig,
   type LinqChannelCredentials,
