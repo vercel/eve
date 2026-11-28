@@ -12,6 +12,7 @@ import { failModelCredential, pauseForModelSignIn } from "./credential-failure.j
 import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import {
+  requestAndStartRun as requestAndStartRunFact,
   requestRun as requestRunFact,
   startRun as startRunFact,
 } from "#harness/session-machine/runs.js";
@@ -23,6 +24,9 @@ import {
   prepareModelCall,
   type Step,
 } from "#harness/step/context.js";
+import type { ContextReader } from "#context/key.js";
+import { ChannelKey, compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
+import { declared } from "#runtime/types.js";
 import type { TurnInput } from "#harness/step/intake.js";
 import {
   commitTurnInput,
@@ -53,6 +57,26 @@ export interface ModelResponse {
   readonly result: HarnessStepResult;
 }
 
+export class RunBoundaryError extends Error {
+  constructor(cause: unknown) {
+    super("Failed to commit model run boundary event.", { cause });
+    this.name = "RunBoundaryError";
+  }
+}
+
+function observesModelRequested(ctx: ContextReader): boolean {
+  const bundle = compiledBundleOf(ctx);
+  if (bundle !== undefined) {
+    for (const hook of declared(bundle.resolvedAgent, "hook")) {
+      if (hook.events["model.requested"] !== undefined || hook.events["*"] !== undefined) {
+        return true;
+      }
+    }
+  }
+  const adapter = ctx.get(ChannelKey);
+  return adapter?.["model.requested"] !== undefined;
+}
+
 export async function runModelStep(
   step: Step,
   input: {
@@ -70,8 +94,11 @@ export async function runModelStep(
 
   const resolved = await resolveModel(step);
   if ("failed" in resolved) return resolved.failed;
-  const requested = await requestRun(step, prompt);
-  if (requested !== undefined) return requested;
+  const separateModelRequested = observesModelRequested(step.ctx);
+  if (separateModelRequested) {
+    const requested = await requestRun(step, prompt);
+    if (requested !== undefined) return requested;
+  }
   const projectedMessages = projectPrompt(prompt);
   const catalog = await stepCatalog(step);
   step.frameworkToolNames = frameworkToolNames(catalog);
@@ -79,14 +106,12 @@ export async function runModelStep(
   const caller = new ModelCaller(step, prompt, {
     approvalMemory,
     catalog,
+    ensureRunRequested: async () => await ensureRunRequested(step, prompt),
     generation,
     model: resolved.model,
     renewCredential: resolved.renew,
-    newRun: async () => {
-      const next = await requestRun(step, prompt);
-      if (next !== undefined) throw new Error("eve couldn't request the replacement model run.");
-    },
-    startRun: async (attempt) => await startRun(step, attempt),
+    separateModelRequested,
+    startRun: async (attempt) => await startRun(step, prompt, attempt),
     projectedMessages,
     turnMessages: input.turn.messages,
   });
@@ -97,6 +122,7 @@ export async function runModelStep(
   } catch (error) {
     throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
+    if (error instanceof RunBoundaryError) return await failBoundaryEvent(step, error.cause);
     const credentialError = credentialErrorIn(error);
     if (credentialError !== undefined) {
       if (generation.interrupted) return caller.steered();
@@ -185,11 +211,39 @@ async function requestRun(step: Step, prompt: Prompt): Promise<StepResult | unde
   return undefined;
 }
 
-async function startRun(step: Step, attempt: number): Promise<void> {
-  const runId = step.position().runId;
-  if (runId === undefined) return;
+async function ensureRunRequested(step: Step, prompt: Prompt): Promise<void> {
+  if (step.position().runId !== undefined) return;
+  try {
+    await step.apply(
+      requestRunFact({ turnId: activeTurnId(step.position()) }, nextRunId(step.view().projection)),
+      validateHarnessModelMessages(withClientContext(prompt)),
+    );
+  } catch (error) {
+    throwIfSessionStreamDead(error);
+    throw new RunBoundaryError(error);
+  }
+}
+
+async function startRun(step: Step, prompt: Prompt, attempt: number): Promise<void> {
+  const existingRunId = step.position().runId;
   const modelId = stepReference(step).id;
-  await step.apply(startRunFact({ attempt, modelId, runId }));
+  try {
+    if (existingRunId === undefined) {
+      const runId = nextRunId(step.view().projection);
+      await step.apply(
+        requestAndStartRunFact(
+          { turnId: activeTurnId(step.position()) },
+          { attempt, modelId, runId },
+        ),
+        validateHarnessModelMessages(withClientContext(prompt)),
+      );
+      return;
+    }
+    await step.apply(startRunFact({ attempt, modelId, runId: existingRunId }));
+  } catch (error) {
+    throwIfSessionStreamDead(error);
+    throw new RunBoundaryError(error);
+  }
 }
 
 async function failOrAsk(

@@ -89,6 +89,7 @@ import {
   NO_INLINE_CALLS,
 } from "#harness/call-executor.js";
 import { extractGatewayCostUsd } from "./usage.js";
+import { RunBoundaryError } from "./run.js";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 
@@ -112,13 +113,14 @@ export interface ModelCallOptions {
 
 interface ModelCallerInput {
   readonly catalog: StepCatalog;
+  readonly ensureRunRequested: () => Promise<void>;
   readonly model: LanguageModel;
   readonly generation: GenerationSteering;
   readonly turnMessages: readonly HarnessModelMessage[];
   readonly approvalMemory: ApprovalMemory;
   readonly projectedMessages: HarnessModelMessage[];
-  readonly newRun: () => Promise<void>;
   readonly renewCredential?: (rejection: unknown) => Promise<void>;
+  readonly separateModelRequested?: boolean;
   readonly startRun: (attempt: number) => Promise<void>;
 }
 
@@ -171,7 +173,11 @@ export class ModelCaller {
       ...(cachedMaxOutput !== undefined && { maxOutputTokensOverride: cachedMaxOutput }),
     };
     const diagnostics = {
-      policies: [() => (this.compactionFailure === undefined ? ALLOW_RETRY : STOP_RETRY)],
+      policies: [
+        ({ error }: { readonly error: unknown }) =>
+          error instanceof RunBoundaryError ? STOP_RETRY : ALLOW_RETRY,
+        () => (this.compactionFailure === undefined ? ALLOW_RETRY : STOP_RETRY),
+      ],
       onRetry: (error: unknown) => this.prepareRetry(error),
       sessionId: this.step.session.sessionId,
       turnId: this.step.position().turnId,
@@ -185,6 +191,7 @@ export class ModelCaller {
         );
       } catch (error) {
         throwIfSessionStreamDead(error);
+        if (error instanceof RunBoundaryError) throw error;
         if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
         throwIfTurnAborted(this.step.config.abortSignal);
         this.input.generation.check();
@@ -247,7 +254,7 @@ export class ModelCaller {
     if (this.acceptedOutput) {
       await step.apply(discardAttempt(step.view(), { ending: "retried", runId, usage }));
       this.acceptedOutput = false;
-      await this.input.newRun();
+      if (this.input.separateModelRequested) await this.input.ensureRunRequested();
       return;
     }
     if (attempt === undefined) return;
@@ -357,6 +364,7 @@ export class ModelCaller {
     let compacted: HarnessModelMessage[] | undefined;
     try {
       compacted = await historyBeforeCall(step, {
+        beforeCompact: this.input.ensureRunRequested,
         messages: prompt.messages,
         model: this.input.model,
         renew: this.input.renewCredential,
@@ -364,6 +372,7 @@ export class ModelCaller {
         requestEnvelopeTokens: this.requestEnvelopeTokens,
       });
     } catch (error) {
+      if (error instanceof RunBoundaryError) throw error;
       this.compactionFailure = { error };
       throw error;
     }
