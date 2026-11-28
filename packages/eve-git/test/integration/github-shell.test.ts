@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import test from "node:test";
 import type { ConnectTokenParams } from "@vercel/connect";
 import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
-import type { ToolContext } from "eve/tools";
+import type { ToolAuthProvider, ToolContext } from "eve/tools";
 
 type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
@@ -231,6 +231,91 @@ test("resolves one user grant for every repository through ctx.getToken and re-a
   await assert.rejects(executeGitHubShell(READ, config, dependencies), /authorization required/u);
   assert.equal(requireAuthCalls.length, 2);
   assert.equal(runs.length, 5);
+});
+
+test("a user token comes from the authorization the config supplies, not a Connect connector", async () => {
+  const authorization: ToolAuthProvider = {
+    principalType: "user",
+    async getToken() {
+      return { token: "hub-token" };
+    },
+  };
+  const getTokenCalls: Parameters<ToolContext["getToken"]>[] = [];
+  const getToken: ToolContext["getToken"] = async (...args) => {
+    getTokenCalls.push(args);
+    return { token: "hub-token" };
+  };
+  const requests: string[] = [];
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  const { connector: _connector, ...withoutConnector } = CONFIG;
+  await executeGitHubShell(
+    READ,
+    {
+      ...withoutConnector,
+      principalType: "user",
+      authorization,
+      authorize: ({ token }) => {
+        requests.push(token);
+        return true;
+      },
+    },
+    {
+      getToken,
+      requireAuth: () => {
+        throw new Error("authorization required");
+      },
+      sessionId: "session-supplied-authorization",
+      async getConnectToken(): Promise<string> {
+        throw new Error("a supplied authorization must not reach Connect");
+      },
+      async getSandbox() {
+        return fakeSandbox(runs, () => ({ exitCode: 0, stdout: "", stderr: "" }));
+      },
+    },
+  );
+  assert.equal(getTokenCalls.length, 1);
+  assert.equal(getTokenCalls[0]![0], authorization);
+  assert.deepEqual(requests, ["hub-token"]);
+  assert.equal(runs.length, 1);
+});
+
+test("a supplied authorization is re-authorized through ctx.requireAuth on 401", async () => {
+  const authorization: ToolAuthProvider = {
+    principalType: "user",
+    async getToken() {
+      return { token: "hub-token" };
+    },
+  };
+  const requireAuthCalls: Parameters<ToolContext["requireAuth"]>[] = [];
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  const { connector: _connector, ...withoutConnector } = CONFIG;
+  await assert.rejects(
+    executeGitHubShell(
+      READ,
+      { ...withoutConnector, principalType: "user", authorization, authorize: () => true },
+      {
+        getToken: async () => ({ token: "hub-token" }),
+        requireAuth: (...args) => {
+          requireAuthCalls.push(args);
+          throw new Error("authorization required");
+        },
+        sessionId: "session-supplied-authorization-401",
+        async getConnectToken(): Promise<string> {
+          throw new Error("a supplied authorization must not reach Connect");
+        },
+        async getSandbox() {
+          return fakeSandbox(runs, () => ({
+            exitCode: 1,
+            stdout: "",
+            stderr: "HTTP 401: Bad credentials (https://api.github.com/graphql)",
+          }));
+        },
+      },
+    ),
+    /authorization required/u,
+  );
+  assert.equal(requireAuthCalls.length, 1);
+  assert.equal(requireAuthCalls[0]![0], authorization);
 });
 
 test("user tokens cannot satisfy repository allowlists with a declared target", async () => {

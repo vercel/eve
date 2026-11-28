@@ -96,14 +96,17 @@ Configure `github` to get GitHub tokens through Vercel Connect instead. The exte
 
 `gh-signed-commit` adds or updates non-executable regular files and deletes tracked entries. It rejects additions or updates involving executable files, symlinks, submodules, or file-mode changes before contacting GitHub. Your staged changes remain intact. For those changes, use native `git commit -S` with a configured signing key, then `git push` through the authenticated tool.
 
-| Option                 | Required      | Effect                                                                                     |
-| ---------------------- | ------------- | ------------------------------------------------------------------------------------------ |
-| `github.connector`     | With `github` | Connector that mints a GitHub token                                                        |
-| `github.broker`        | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules |
-| `github.principalType` | With `github` | `"app"` for GitHub App installation tokens, or `"user"` for the caller's own token         |
-| `github.authorize`     | With `github` | `authorize(request)` returns `true` to let a `gh` call run                                 |
-| `github.attribution`   | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`       |
-| `github.permissions`   | No            | With `"app"`, the installation permissions each token carries, such as `"contents:write"`  |
+| Option                 | Required      | Effect                                                                                                |
+| ---------------------- | ------------- | ----------------------------------------------------------------------------------------------------- |
+| `github.connector`     | With `github` | Connector that mints a GitHub token                                                                   |
+| `github.authorization` | With `github` | With `"user"`, your own token source instead of `connector`, in the shape a connection's `auth` takes |
+| `github.broker`        | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules            |
+| `github.principalType` | With `github` | `"app"` for GitHub App installation tokens, or `"user"` for the caller's own token                    |
+| `github.authorize`     | With `github` | `authorize(request)` returns `true` to let a `gh` call run                                            |
+| `github.attribution`   | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`                  |
+| `github.permissions`   | No            | With `"app"`, the installation permissions each token carries, such as `"contents:write"`             |
+
+With `"user"`, set exactly one of `github.connector` and `github.authorization`. `authorization` takes the shape a connection's `auth` takes (`getToken` and `principalType: "user"`, plus `startAuthorization` and `completeAuthorization` to sign the caller in), so a service of your own can supply each caller's token. An `authorization` without `principalType: "user"` is rejected, because an app-scoped provider would share one token across callers.
 
 With `"app"`, each token carries every permission the App holds unless `github.permissions` lists the ones it needs. Set it to keep tokens narrower than the App's installation without rewriting the credential rules in your broker.
 

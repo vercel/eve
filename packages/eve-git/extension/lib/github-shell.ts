@@ -54,11 +54,11 @@ interface GitHubConfigBase {
     sandbox: SandboxSession,
     rules: Readonly<Record<string, readonly GitHubLeaseRule[]>> | null,
   ) => Promise<void>;
-  readonly connector: string;
 }
 
 /** Mints GitHub App installation tokens scoped to the declared repository or owner. */
 export interface GitHubAppConfig extends GitHubConfigBase {
+  readonly connector: string;
   /** The only access control: commands run only when it returns `true`. */
   readonly authorize: GitHubAuthorize<GitHubAppAuthorizeRequest>;
   /**
@@ -69,8 +69,18 @@ export interface GitHubAppConfig extends GitHubConfigBase {
   readonly principalType: "app";
 }
 
+/**
+ * Where a caller's own GitHub token comes from: a Vercel Connect `connector`, or an
+ * `authorization` of your own, the same provider shape a connection's `auth` takes.
+ * `connector` is one such provider, made for you. Set exactly one.
+ */
+export interface GitHubUserTokenSource {
+  readonly authorization?: ToolAuthProvider;
+  readonly connector?: string;
+}
+
 /** Resolves the caller's own token through `ctx.getToken`, signing them in when needed. */
-export interface GitHubUserConfig extends GitHubConfigBase {
+export interface GitHubUserConfig extends GitHubConfigBase, GitHubUserTokenSource {
   /** The only access control: commands run only when it returns `true`. */
   readonly authorize: GitHubAuthorize<GitHubUserAuthorizeRequest>;
   readonly principalType: "user";
@@ -224,7 +234,11 @@ export async function executeGitHubShell(
   if (config.principalType === "user") {
     if (!dependencies.getToken || !dependencies.requireAuth)
       throw new Error("User-scoped GitHub access requires ctx.getToken and ctx.requireAuth.");
-    userAuth = connectUserAuthorization(config.connector);
+    userAuth =
+      config.authorization ??
+      (config.connector ? connectUserAuthorization(config.connector) : undefined);
+    if (!userAuth)
+      throw new Error("User-scoped GitHub access needs a connector or an authorization.");
     ({ token } = await dependencies.getToken(userAuth));
   } else {
     const installation: {
@@ -240,8 +254,13 @@ export async function executeGitHubShell(
       subject: { type: "app" },
     });
   }
-  if (!token)
-    throw new Error(`Connect returned an empty token for ${JSON.stringify(config.connector)}.`);
+  if (!token) {
+    throw new Error(
+      config.principalType === "user" && config.authorization
+        ? "The GitHub authorization returned an empty token."
+        : `Connect returned an empty token for ${JSON.stringify(config.connector)}.`,
+    );
+  }
   const allowed =
     config.principalType === "user"
       ? await config.authorize({ argv, auth, repository: null, token })

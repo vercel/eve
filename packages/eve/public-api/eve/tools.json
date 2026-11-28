@@ -24,6 +24,7 @@
   "SessionFrame",
   "ToolAnswer",
   "ToolAskOptions",
+  "ToolAuthDefinition",
   "ToolAuthOptions",
   "ToolAuthProvider",
   "ToolContext",
