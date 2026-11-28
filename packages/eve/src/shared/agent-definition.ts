@@ -5,6 +5,7 @@ import type { TokenUsage } from "#shared/token-usage.js";
 import type { DefinedModel } from "#models/definition.js";
 import {
   isDynamicSentinel,
+  type DynamicContext,
   type DynamicModelContext,
   type DynamicSentinel,
 } from "#dynamic/definition.js";
@@ -144,8 +145,15 @@ export type PublicAgentModelDefinition =
 
 export interface InternalAgentCompactionDefinition {
   model?: InternalAgentModelDefinition;
+  dynamicModel?: PublicAgentDynamicCompactionModelDefinition;
   thresholdPercent?: number;
 }
+
+/** A summary model chosen when compaction runs, or no selection to reuse the turn model. */
+export type PublicAgentDynamicCompactionModelDefinition = DynamicSentinel<
+  PublicAgentStaticModelDefinition | PublicAgentModelSelectionDefinition | null | undefined,
+  DynamicContext
+>;
 
 /**
  * Configures conversation compaction: when the model context window fills past
@@ -165,10 +173,12 @@ export interface PublicAgentCompactionDefinition {
   /**
    * Optional model used only for generating compaction summaries.
    *
-   * When omitted, eve uses the active turn model for the summary call. A summary call can't hold
-   * the turn for a sign-in, so it takes no `defineModel` value.
+   * When omitted, eve uses the active turn model for the summary call. Pass `defineDynamic()`
+   * from `eve` to read the session and `ctx.model`, the turn's model, and choose a model ID,
+   * instance, or selection. Return `null` to use the turn model. A separate summary model
+   * cannot use `defineModel` because the summary call cannot open a sign-in.
    */
-  readonly model?: PublicAgentStaticModelDefinition;
+  readonly model?: PublicAgentStaticModelDefinition | PublicAgentDynamicCompactionModelDefinition;
   /**
    * Fraction of the primary model context window that triggers compaction.
    *

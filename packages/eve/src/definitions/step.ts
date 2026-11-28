@@ -8,7 +8,7 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import { sessionDefinitions } from "./agent.js";
-import { draftOf } from "./combine.js";
+import { decideModel, draftOf } from "./combine.js";
 import {
   type CallInput,
   type CallRecord,
@@ -90,6 +90,19 @@ export async function stepModel(step: StepSource): Promise<ModelChoice | undefin
     contributionsOf(definitions, container, { step: stepInfo(step) }),
     container,
   );
+}
+
+export async function compactionModel(
+  ctx: ContextContainer,
+  run: ValueRun,
+): Promise<ModelChoice | undefined> {
+  const contributions = contributionsOf(
+    await sessionDefinitions(ctx),
+    ctx,
+    { history: run.conversation, signal: run.abortSignal },
+    "evaluate",
+  );
+  return await decideModel(contributions, "compactionModel");
 }
 
 export async function evaluateValues(ctx: ContextContainer, run: ValueRun): Promise<void> {

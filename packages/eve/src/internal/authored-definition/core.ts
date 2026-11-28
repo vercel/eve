@@ -24,7 +24,6 @@ import {
   ANTHROPIC_PROMPT_CACHE_TTLS,
   type AgentPromptCacheDefinition,
   type AnthropicPromptCacheTtl,
-  type PublicAgentStaticModelDefinition,
   type SessionUsageLimit,
 } from "#shared/agent-definition.js";
 import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
@@ -329,16 +328,21 @@ function normalizeAgentCompactionDefinition(
 
   if (record.model !== undefined) {
     if (isDynamicSentinel(record.model)) {
-      throw new Error(
-        `${message} "compaction.model" does not support defineDynamic — provide a static model.`,
-      );
+      assertDynamicSentinelKeys(record.model, `${message} The dynamic "compaction.model":`);
+      if (record.modelContextWindowTokens !== undefined) {
+        throw new Error(
+          `${message} A dynamic "compaction.model" returns its "modelContextWindowTokens" with the model: return { model, modelContextWindowTokens } from its function.`,
+        );
+      }
     }
     if (isDefinedModel(record.model)) {
       throw new Error(
         `${message} "compaction.model" takes a model ID or a model instance. A defineModel value needs a credential, and the summary call can't hold the turn for a sign-in.`,
       );
     }
-    normalizedDefinition.model = record.model as PublicAgentStaticModelDefinition;
+    normalizedDefinition.model = record.model as NonNullable<
+      NormalizedAgentDefinition["compaction"]
+    >["model"];
   }
 
   if (record.modelContextWindowTokens !== undefined) {

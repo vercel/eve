@@ -97,7 +97,11 @@ export type CompiledDynamicModelDefinition = ModuleSourceRef;
 
 export type CompiledAgentBuildDefinition = AgentBuildDefinition;
 
-export type CompiledAgentCompactionDefinition = Omit<InternalAgentCompactionDefinition, "model"> & {
+export type CompiledAgentCompactionDefinition = Omit<
+  InternalAgentCompactionDefinition,
+  "dynamicModel" | "model"
+> & {
+  dynamicModel?: true;
   model?: CompiledRuntimeModelReference;
 };
 

@@ -78,18 +78,12 @@ export async function compileAgentConfig(
           value: definition.model as PublicAgentTurnModelDefinition,
         })
       : undefined;
-  const compaction: {
-    model?: CompiledRuntimeModelReference;
-    thresholdPercent?: number;
-  } = {};
+  const compaction: NonNullable<CompiledAgentDefinition["compaction"]> = {};
 
   const compiledConfig: {
     approval?: boolean;
     build?: CompiledAgentDefinition["build"];
-    compaction: {
-      model?: CompiledRuntimeModelReference;
-      thresholdPercent?: number;
-    };
+    compaction: NonNullable<CompiledAgentDefinition["compaction"]>;
     defaultTools?: boolean;
     description?: string;
     experimental?: CompiledAgentDefinition["experimental"];
@@ -158,16 +152,19 @@ export async function compileAgentConfig(
     };
   }
 
-  if (definition.compaction?.model !== undefined) {
+  const compactionModel = definition.compaction?.model;
+  if (isDynamicSentinel(compactionModel)) {
+    compaction.dynamicModel = true;
+  } else if (compactionModel !== undefined) {
     compaction.model = await normalizeAuthoredModelReference({
       modelCatalog: context.modelCatalog,
       purpose: "the compaction summary model",
-      contextWindowTokens: definition.compaction.modelContextWindowTokens,
+      contextWindowTokens: definition.compaction?.modelContextWindowTokens,
       providerOptions: definition.modelOptions?.providerOptions,
       source: configModule,
       sourceField: "compaction.model",
       sourcePath: configModulePath,
-      value: definition.compaction.model,
+      value: compactionModel,
     });
   }
 
