@@ -36,6 +36,10 @@ import type {
   HeaderValue,
 } from "#shared/connection-types.js";
 
+type McpListedTool = Awaited<ReturnType<MCPClient["listTools"]>>["tools"][number];
+
+const MAX_TOOL_LIST_PAGES = 100;
+
 interface McpToolCache {
   readonly metadata: readonly ConnectionToolMetadata[];
   readonly tools: ToolSet;
@@ -294,14 +298,10 @@ export class McpConnectionClient implements ConnectionClient {
 
   async #fetchToolsInner(): Promise<McpToolCache> {
     const client = await this.connect();
-    const listResult = await withMcpToolsListSpan({
-      connectionName: this.#connection.connectionName,
-      execute: () => client.listTools(),
-      protocolVersion: client.initializeResult?.protocolVersion,
-    });
+    const listedTools = await this.#listAllTools(client);
 
     const providedArgumentNames = Object.keys(this.#connection.toolCall?.providedArguments ?? {});
-    const projectedTools = listResult.tools.map((tool) => ({
+    const projectedTools = listedTools.map((tool) => ({
       ...tool,
       inputSchema: omitProvidedArgumentsFromSchema(tool.inputSchema, providedArgumentNames),
     }));
@@ -320,6 +320,29 @@ export class McpConnectionClient implements ConnectionClient {
     }));
 
     return { metadata, tools };
+  }
+
+  async #listAllTools(client: MCPClient): Promise<McpListedTool[]> {
+    const tools: McpListedTool[] = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    for (let pageIndex = 0; pageIndex < MAX_TOOL_LIST_PAGES; pageIndex++) {
+      const requestCursor = cursor;
+      const page = await withMcpToolsListSpan({
+        connectionName: this.#connection.connectionName,
+        execute: () =>
+          requestCursor === undefined
+            ? client.listTools()
+            : client.listTools({ params: { cursor: requestCursor } }),
+        protocolVersion: client.initializeResult?.protocolVersion,
+      });
+      tools.push(...page.tools);
+      cursor = page.nextCursor || undefined;
+      if (cursor === undefined) return tools;
+      if (seen.has(cursor)) throw new Error("MCP tools/list returned a repeated cursor.");
+      seen.add(cursor);
+    }
+    throw new Error(`MCP tools/list exceeds the ${MAX_TOOL_LIST_PAGES}-page limit.`);
   }
 
   async close(): Promise<void> {
