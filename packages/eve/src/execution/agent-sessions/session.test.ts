@@ -324,3 +324,94 @@ it("leaves a message the child admitted after the turn ended pending for the nex
   endChildTurn("second turn");
   await expect(pending.result()).resolves.toMatchObject({ reply: "second turn" });
 });
+
+it("reuses one reply hook across sequential turns to a local agent and disposes it on close", async () => {
+  const { sessions } = serveRun();
+  const reviewer = sessions.open("reviewer");
+
+  const first = await reviewer.send("first");
+  endChildTurn("first reply");
+  await expect(first.result()).resolves.toMatchObject({ reply: "first reply" });
+
+  const secondSend = reviewer.send("second");
+  await landNewestFirst();
+  const second = await secondSend;
+  endChildTurn("second reply");
+  await expect(second.result()).resolves.toMatchObject({ reply: "second reply" });
+
+  expect(mocks.admitted).toEqual(["reply-0", "reply-0"]);
+  await sessions.close();
+});
+
+it("allocates a fresh local reply hook after a forwarding failure kills the previous reader", async () => {
+  const { forwardAgentSessionRequest } = await import("#execution/agent-sessions/requests.js");
+  vi.mocked(forwardAgentSessionRequest).mockRejectedValueOnce(new Error("relay failed"));
+  const { sessions } = serveRun();
+  const reviewer = sessions.open("reviewer");
+
+  const first = await reviewer.send("first");
+  mocks.hooks.get("reply-0")?.push({
+    callId: "call-1",
+    childSessionId: "child",
+    events: [],
+    kind: "subagent-interaction",
+    subagentName: "reviewer",
+  });
+  await expect(first.result()).rejects.toThrow("relay failed");
+
+  const secondSend = reviewer.send("second");
+  await landNewestFirst();
+  const second = await secondSend;
+  endChildTurn("second reply");
+  await expect(second.result()).resolves.toMatchObject({ reply: "second reply" });
+
+  expect(mocks.admitted).toEqual(["reply-0", "reply-1"]);
+  await sessions.close();
+});
+
+it("retires the reusable local hook when a concurrent send settles it so a later send does not hang", async () => {
+  const { sessions } = serveRun();
+  const reviewer = sessions.open("reviewer");
+  const first = await reviewer.send("first");
+  const secondSend = reviewer.send("second");
+  await landNewestFirst();
+  const second = await secondSend;
+
+  endChildTurn("combined reply");
+  await expect(Promise.all([first.result(), second.result()])).resolves.toMatchObject([
+    { reply: "combined reply", status: "completed" },
+    { reply: "combined reply", status: "completed" },
+  ]);
+
+  const thirdSend = reviewer.send("third");
+  await landNewestFirst();
+  const third = await thirdSend;
+  endChildTurn("third reply");
+  await expect(third.result()).resolves.toMatchObject({
+    reply: "third reply",
+    status: "completed",
+  });
+  expect(mocks.admitted).toEqual(["reply-0", "reply-1", "reply-2"]);
+  await sessions.close();
+});
+
+it("retires the reusable local hook when delivery fails so a subsequent send does not hang", async () => {
+  const { sendAgentSessionMessageStep } = await import("#execution/agent-sessions/steps.js");
+  const { sessions } = serveRun();
+  const reviewer = sessions.open("reviewer");
+
+  const first = await reviewer.send("first");
+  endChildTurn("first reply");
+  await expect(first.result()).resolves.toMatchObject({ reply: "first reply" });
+
+  vi.mocked(sendAgentSessionMessageStep).mockRejectedValueOnce(new Error("delivery blip"));
+  await expect(reviewer.send("failed")).rejects.toThrow("delivery blip");
+
+  const nextSend = reviewer.send("after blip");
+  await landNewestFirst();
+  const next = await nextSend;
+  endChildTurn("recovered reply");
+  await expect(next.result()).resolves.toMatchObject({ reply: "recovered reply" });
+  expect(mocks.admitted).toEqual(["reply-0", "reply-1"]);
+  await sessions.close();
+});

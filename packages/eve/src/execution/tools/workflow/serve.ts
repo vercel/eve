@@ -31,7 +31,11 @@ import type {
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunInbox } from "#execution/tools/workflow/owner.js";
+import { agentModelsServeWorkflow } from "#runtime/subagents/workflow.js";
+import { agentToolServeWorkflowReference } from "#runtime/subagents/workflow-reference.js";
+import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import type { JsonValue } from "#shared/json.js";
+import { readWorkflowFunctionId } from "#shared/workflow-function-id.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { ToolContext } from "#tools/definition.js";
 import type {
@@ -62,9 +66,73 @@ interface PendingReceive {
   readonly resolve: (call: WorkflowServeCall<JsonValue>) => void;
 }
 
+const FALLBACK_AGENT_MODELS_SERVE_WORKFLOW_ID = `workflow//${EVE_PACKAGE_NAME}//agentModelsServeWorkflow`;
+
+function usesInWorkflowStretchAbort(workflowId: string): boolean {
+  if (workflowId === agentToolServeWorkflowReference.workflowId) return true;
+  const modelsId =
+    readWorkflowFunctionId(agentModelsServeWorkflow) ?? FALLBACK_AGENT_MODELS_SERVE_WORKFLOW_ID;
+  return workflowId === modelsId;
+}
+
+interface StretchAbortControl {
+  readonly signal: AbortSignal;
+  abort(reason: unknown): void;
+}
+
+type AbortListener = Parameters<AbortSignal["addEventListener"]>[1];
+
+class InWorkflowAbortSignal implements AbortSignal, StretchAbortControl {
+  aborted = false;
+  onabort: ((this: AbortSignal, ev: Event) => unknown) | null = null;
+  reason: unknown = undefined;
+  private readonly listeners = new Map<AbortListener, () => void>();
+
+  get signal(): AbortSignal {
+    return this;
+  }
+
+  addEventListener(type: string, listener: AbortListener): void {
+    if (type !== "abort" || listener === null) return;
+    const invoke =
+      typeof listener === "function"
+        ? () => listener.call(this, { type: "abort" } as Event)
+        : () => listener.handleEvent({ type: "abort" } as Event);
+    if (this.aborted) {
+      invoke();
+      return;
+    }
+    this.listeners.set(listener, invoke);
+  }
+
+  removeEventListener(type: string, listener: AbortListener): void {
+    if (type !== "abort" || listener === null) return;
+    this.listeners.delete(listener);
+  }
+
+  dispatchEvent(): boolean {
+    return true;
+  }
+
+  throwIfAborted(): void {
+    if (this.aborted) throw this.reason;
+  }
+
+  abort(reason: unknown): void {
+    if (this.aborted) return;
+    this.aborted = true;
+    this.reason = reason;
+    const event = { type: "abort" } as Event;
+    this.onabort?.call(this, event);
+    const pending = Array.from(this.listeners.values());
+    this.listeners.clear();
+    for (const invoke of pending) invoke();
+  }
+}
+
 class WorkflowServeCalls implements WorkflowBodyControl {
   readonly asks: WorkflowToolRunAsks;
-  private readonly run = new AbortController();
+  private readonly run = new InWorkflowAbortSignal();
   private readonly first: ServedCall;
   private readonly runRef: WorkflowToolRunRef;
   private readonly runSession: SessionContext["session"];
@@ -72,13 +140,14 @@ class WorkflowServeCalls implements WorkflowBodyControl {
   readonly usage: RunUsageTally = createRunUsageTally(() => this.sendUncarriedUsage());
   private carriedUsage: TokenUsage | undefined;
   private readonly toolName: string;
+  private readonly inWorkflowStretchAbort: boolean;
   private readonly seenCallIds: Set<string>;
   private firstReceived = false;
   private arrived: ServedCall[] = [];
   private waiting: ServedCall[];
   private latest: ServedCall;
   private pendingReceive: PendingReceive | undefined;
-  private stretch: AbortController | undefined;
+  private stretch: StretchAbortControl | undefined;
   private unwindingCancel = false;
   private endedBy: Error | undefined;
   private replies: Promise<void> = Promise.resolve();
@@ -89,6 +158,7 @@ class WorkflowServeCalls implements WorkflowBodyControl {
     this.runSession = input.session;
     this.owner = input.owner;
     this.toolName = input.toolName;
+    this.inWorkflowStretchAbort = usesInWorkflowStretchAbort(input.workflowId);
     this.seenCallIds = new Set([input.callId]);
     this.first = this.serve({
       agentContext: input.agentContext,
@@ -105,15 +175,15 @@ class WorkflowServeCalls implements WorkflowBodyControl {
   }
 
   get runSignal(): AbortSignal {
-    return this.run.signal;
+    return this.run;
   }
 
   get unwinding(): boolean {
-    return this.run.signal.aborted || this.unwindingCancel;
+    return this.run.aborted || this.unwindingCancel;
   }
 
   get currentSignal(): AbortSignal {
-    return this.stretch?.signal ?? this.run.signal;
+    return this.stretch?.signal ?? this.runSignal;
   }
 
   get current(): ServedCall {
@@ -224,7 +294,9 @@ class WorkflowServeCalls implements WorkflowBodyControl {
   }
 
   private serve(call: WorkflowToolRunCall): ServedCall {
-    this.stretch ??= new AbortController();
+    this.stretch ??= this.inWorkflowStretchAbort
+      ? new InWorkflowAbortSignal()
+      : new AbortController();
     return {
       agentContext: call.agentContext,
       agents: createAgentsView(call.agentContext),
