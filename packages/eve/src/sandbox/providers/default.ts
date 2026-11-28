@@ -13,6 +13,10 @@ import {
 } from "#public/sandbox/provider.js";
 import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.js";
 import { withAdoptedSandboxSessionStates, withRecordedSandboxProvider } from "#sandbox/state.js";
+import {
+  getSandboxTemplateRebuilder,
+  withSandboxTemplateRebuilder,
+} from "#sandbox/template-rebuild.js";
 import { DockerSandbox } from "#sandbox/providers/docker.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
@@ -187,6 +191,16 @@ export const DefaultSandbox: SandboxProvider<
     };
 
     withRecordedSandboxProvider(implementation, recordedProvider);
+    withSandboxTemplateRebuilder(implementation, async (artifact, input) => {
+      if (!isDefaultSandboxPreparedArtifact(artifact) || artifact.provider !== "vercel") {
+        throw new Error(
+          "DefaultSandbox can rebuild its template only when this build selected Vercel Sandbox.",
+        );
+      }
+      const rebuild = getSandboxTemplateRebuilder(provider("vercel").implementation);
+      if (rebuild === undefined) throw new Error("The Vercel sandbox provider cannot rebuild.");
+      return await rebuild(artifact.artifact, input);
+    });
     return withAdoptedSandboxSessionStates(implementation, (record) => {
       const name = record.providerName;
       if (!isSelectedProvider(name)) return undefined;

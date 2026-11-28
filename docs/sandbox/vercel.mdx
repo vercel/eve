@@ -92,6 +92,92 @@ When `VERCEL` is set, builds need `VERCEL_OIDC_TOKEN` for templates with a `prep
 
 A new session sandbox from a snapshot of [eve's default image](/docs/sandbox/docker#eves-default-image), without Drive mounts, runs no setup command. eve runs base-runtime setup when it attaches any other sandbox. These include existing or resumed sandboxes, custom images or snapshot sources, sandboxes with Drive mounts, and sandboxes created without a snapshot.
 
+## What decides the template
+
+`eve build` names each template `eve-sbx-tpl-vercel-` followed by the first 32 hex characters of a SHA-256 over these six inputs. A change to any of them builds a new template, and the same inputs reuse the one that exists.
+
+| Input            | What it holds                                                                                                                 |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `createOptions`  | The Vercel create options, with eve's env and `timeout` defaults, minus `fetch`, `projectId`, `signal`, `teamId` and `token`. |
+| `resolvedImage`  | The base image string, or nothing when `source` is set.                                                                       |
+| `version`        | The template format number eve ships, currently `4`.                                                                          |
+| `vercelEnv`      | `VERCEL_TARGET_ENV` at build time, such as `staging`, or else `VERCEL_ENV`. Empty outside Vercel.                             |
+| `resources`      | A hash of the workspace and skill files.                                                                                      |
+| `sourceRevision` | A hash of the bytes of `agent/sandbox.ts`.                                                                                    |
+
+The key leaves out files that `agent/sandbox.ts` imports and the contents of an image behind a mutable tag. Edit `agent/sandbox.ts` to force a new template.
+
+Every template is scoped to its Vercel environment, so a preview or `staging` deployment builds its own template and a production deployment never reuses it. The first deploy after you upgrade eve rebuilds each template once, because `vercelEnv` is new to the key.
+
+## Rebuild the snapshot after deploy
+
+`eve build` captures one snapshot per deployment, so a session that starts hours after a deploy opens on whatever `prepare` fetched at build time. `rebuildSandboxTemplate({ revision, prepare })`, exported from `eve/sandbox/vercel`, refreshes it without a redeploy. It opens a temporary sandbox from the newest snapshot, runs `prepare` in it, captures a new snapshot, and points the template at it. New sessions open from the newest snapshot.
+
+Call it from a schedule, a channel, or a tool in a built deployment. `eve dev` has nothing to rebuild. The environment needs a snapshot, which means a `prepare` callback, managed workspace or skill files, or a `source`; with none of them `rebuildSandboxTemplate()` throws.
+
+```ts title="agent/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { VercelSandbox } from "eve/sandbox/vercel";
+
+export const environment = VercelSandbox.environment({
+  prepare: async (sandbox) => {
+    const result = await sandbox.run({
+      command: "git clone --depth 1 https://github.com/acme/app.git /workspace/app",
+    });
+    if (result.exitCode !== 0) throw new Error(result.stderr);
+  },
+});
+
+export default defineSandbox(() => environment.open());
+```
+
+```ts title="agent/schedules/rebuild.ts"
+import { defineSchedule } from "eve/schedules";
+import { rebuildSandboxTemplate } from "eve/sandbox/vercel";
+
+export default defineSchedule({
+  cron: "0 * * * *",
+  run: async () => {
+    await rebuildSandboxTemplate({
+      revision: new Date().toISOString().slice(0, 13),
+      prepare: async (sandbox) => {
+        const result = await sandbox.run({
+          command: "git pull",
+          workingDirectory: "/workspace/app",
+        });
+        if (result.exitCode !== 0) throw new Error(result.stderr);
+      },
+    });
+  },
+});
+```
+
+`sandbox.run()` returns `{ exitCode }` and does not throw. Check `exitCode` and throw when it is not `0`, or eve publishes the result of a failed command.
+
+To rebuild when a Git branch moves, use [`repoSnapshotSchedule`](/docs/code-extension#keep-a-repository-checkout-current) instead of writing the schedule yourself.
+
+### What a rebuild does
+
+| Situation                                                                                     | Result                                                                                                                                      |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `revision` is already the template's, or another rebuild of the template runs in this process | Returns `{ rebuilt: false }` and does not run `prepare`.                                                                                    |
+| `prepare` throws, or another rebuild publishes first                                          | The new snapshot is deleted and the template stays as it was.                                                                               |
+| Publishing the new snapshot fails                                                             | eve puts the previous pointer back.                                                                                                         |
+| A session starts                                                                              | It reads the template's newest snapshot once. If the read fails or the snapshot has expired, it opens from the snapshot the build captured. |
+| A session is running or resumes                                                               | It keeps its own sandbox and sees the old files.                                                                                            |
+| `eve build` runs for a deploy that changes any [template input](#what-decides-the-template)   | It captures a new first snapshot and starts a new template.                                                                                 |
+| `eve build` runs for any other deploy                                                         | It keeps the newest snapshot.                                                                                                               |
+
+Each new session makes one extra request to read the newest snapshot, 51 to 88 ms. A session that resumes makes none.
+
+### Snapshot retention and cost
+
+Snapshots expire 30 days after last use. A rebuild never deletes the snapshot it replaces, because another deployment of the same template may still start sessions from it. Each rebuild therefore leaves one stored snapshot until it expires. Set `snapshotExpiration` in the sandbox options to shorten that.
+
+If the newest snapshot has expired, new sessions open from the snapshot the build captured, and the next rebuild starts from that one. That snapshot expires 30 days after the deploy unless a rebuild uses it. When no snapshot is left, a session fails with `SandboxTemplateNotProvisionedError`, `rebuildSandboxTemplate()` throws, and a redeploy captures a new one.
+
+Between deleting the old pointer and creating the new one, which takes about 110 to 160 ms, a session that starts opens from the build's snapshot.
+
 ## Initialize after open
 
 Initialize state for one session after `open()` and before you return the sandbox. Relative paths, including a relative `workingDirectory` passed to `run()` or `spawn()`, resolve from `/workspace`:

@@ -122,7 +122,9 @@ export const environment = VercelSandbox.environment({
 export default defineSandbox(() => environment.open());
 ```
 
-`prepare` runs once per reusable template, not once per session. The template is a Vercel snapshot, a Docker image, or a just-bash filesystem template.
+`prepare` runs once per reusable template, not once per session. `sandbox.run()` returns the exit code and does not throw, so check `exitCode` and throw when it is not `0`; a `prepare` that returns normally is treated as successful. The template is a Vercel snapshot, a Docker image, or a just-bash filesystem template.
+
+On Vercel, a prepared environment can be refreshed after deploy without redeploying. See [rebuild the snapshot after deploy](/docs/sandbox/vercel#rebuild-the-snapshot-after-deploy).
 
 `eve build` prepares every environment. During `eve dev`, the first sandbox access after startup or a rebuild prepares all environments in the build, including those of subagents and extensions. That access can be slow, and a later access retries a failed preparation.
 
