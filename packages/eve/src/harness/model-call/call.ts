@@ -118,6 +118,7 @@ interface ModelCallerInput {
   readonly approvalMemory: ApprovalMemory;
   readonly projectedMessages: HarnessModelMessage[];
   readonly newRun: () => Promise<void>;
+  readonly onBeforeInlineCalls?: (usage: Usage | undefined) => void;
   readonly renewCredential?: (rejection: unknown) => Promise<void>;
   readonly startRun: (attempt: number) => Promise<void>;
 }
@@ -584,10 +585,22 @@ export class ModelCaller {
     const { finishReason } = stepResult;
     if (finishReason !== "stop" && finishReason !== "tool-calls") return NO_INLINE_CALLS;
     const { step } = this;
+    let notifiedInlineUsage = false;
     const results = await executeInlineCalls({
       abortSignal: this.input.generation.signal,
       approvalMemory: this.input.approvalMemory,
-      beforeExecute: () => this.input.generation.protectToolExecution(),
+      beforeExecute: () => {
+        this.input.generation.protectToolExecution();
+        if (!notifiedInlineUsage) {
+          notifiedInlineUsage = true;
+          this.input.onBeforeInlineCalls?.(
+            runUsageOf({
+              costUsd: extractGatewayCostUsd(stepResult.providerMetadata),
+              usage: stepResult.usage,
+            }),
+          );
+        }
+      },
       excludedCallIds: options.excludedCallIds ?? new Set(),
       messages,
       modelCallId: stepResult.callId,

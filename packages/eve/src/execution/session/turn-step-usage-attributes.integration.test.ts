@@ -373,4 +373,168 @@ describe("turnStepOn usage attributes", () => {
       }
     });
   });
+
+  it("starts usage attribute write before inline tool execution finishes without duplicating at step end", async () => {
+    const toolStarted = Promise.withResolvers<void>();
+    const toolGate = Promise.withResolvers<void>();
+    const usageStarted = Promise.withResolvers<void>();
+    const usageWrites: Array<Record<string, EveAttributeValue>> = [];
+
+    const channel = defineChannel({
+      routes,
+      events: {
+        "turn.settled"() {},
+      },
+    });
+    const slowTool = defineTool({
+      description: "Slow lookup",
+      inputSchema: z.object({}),
+      async execute() {
+        toolStarted.resolve();
+        await toolGate.promise;
+        return { ok: true };
+      },
+    });
+
+    const app = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic(() => ({
+            model: mockModel(() => ({
+              toolCalls: [{ id: "call-1", input: {}, name: "slow_tool" }],
+              usage: { inputTokens: 19, outputTokens: 6 },
+            })),
+            modelContextWindowTokens: 200_000,
+          })),
+        }),
+        name: "usage-overlap-inline-tools",
+      },
+      modules: [
+        { loadNamespace: async () => ({ default: channel }), logicalPath: "channels/chat.ts" },
+        { loadNamespace: async () => ({ default: slowTool }), logicalPath: "tools/slow_tool.ts" },
+      ],
+    });
+
+    await app.run(async () => {
+      const runStep = turnStepOn(
+        createStepHost(async (attributes) => {
+          if ("$eve.input_tokens" in attributes) {
+            usageWrites.push(attributes);
+            usageStarted.resolve();
+          }
+        }),
+      );
+
+      const stepPromise = runStep(createTurnStepInput("sess-inline-overlap", "Run slow tool."));
+      try {
+        await toolStarted.promise;
+        await usageStarted.promise;
+        expect(usageWrites).toHaveLength(1);
+        expect(usageWrites[0]).toMatchObject({
+          "$eve.input_tokens": 19,
+          "$eve.output_tokens": 6,
+        });
+
+        toolGate.resolve();
+        const result = await stepPromise;
+        expect(result.action).toBe("continue");
+        expect(usageWrites).toHaveLength(1);
+      } finally {
+        toolGate.resolve();
+        await stepPromise.catch(() => undefined);
+      }
+    });
+  });
+
+  it("writes once for parallel inline tools, waits on an in-flight write, and retries if the early write fails", async () => {
+    const channel = defineChannel({ routes, events: { "turn.settled"() {} } });
+    let completedTools = 0;
+    let allToolsDone = Promise.withResolvers<void>();
+    const tool = defineTool({
+      description: "Fast parallel lookup",
+      inputSchema: z.object({ id: z.string() }),
+      execute: async ({ id }) => {
+        completedTools += 1;
+        if (completedTools === 3) allToolsDone.resolve();
+        return { id };
+      },
+    });
+
+    const app = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic(() => ({
+            model: mockModel(() => ({
+              toolCalls: [
+                { id: "c1", input: { id: "a" }, name: "parallel_tool" },
+                { id: "c2", input: { id: "b" }, name: "parallel_tool" },
+                { id: "c3", input: { id: "c" }, name: "parallel_tool" },
+              ],
+              usage: { inputTokens: 25, outputTokens: 10 },
+            })),
+            modelContextWindowTokens: 200_000,
+          })),
+        }),
+        name: "usage-overlap-parallel-and-retry",
+      },
+      modules: [
+        { loadNamespace: async () => ({ default: channel }), logicalPath: "channels/chat.ts" },
+        { loadNamespace: async () => ({ default: tool }), logicalPath: "tools/parallel_tool.ts" },
+      ],
+    });
+
+    await app.run(async () => {
+      const slowGate = Promise.withResolvers<void>();
+      const slowStarted = Promise.withResolvers<void>();
+      const slowWrites: Array<Record<string, EveAttributeValue>> = [];
+      let slowSettled = false;
+      const runSlow = turnStepOn(
+        createStepHost(async (attributes) => {
+          if ("$eve.input_tokens" in attributes) {
+            slowWrites.push(attributes);
+            slowStarted.resolve();
+            await slowGate.promise;
+          }
+        }),
+      );
+      const slowStep = runSlow(createTurnStepInput("sess-parallel-slow", "Run parallel.")).then(
+        (res) => {
+          slowSettled = true;
+          return res;
+        },
+      );
+      await Promise.all([slowStarted.promise, allToolsDone.promise]);
+      await drainPendingTurns();
+      expect(slowSettled).toBe(false);
+      slowGate.resolve();
+      const slowResult = await slowStep;
+      expect(slowResult.action).toBe("continue");
+      expect(slowWrites).toHaveLength(1);
+
+      completedTools = 0;
+      allToolsDone = Promise.withResolvers<void>();
+      let attempts = 0;
+      const failGate = Promise.withResolvers<void>();
+      const failStarted = Promise.withResolvers<void>();
+      const runRetry = turnStepOn(
+        createStepHost(async (attributes) => {
+          if ("$eve.input_tokens" in attributes) {
+            attempts += 1;
+            if (attempts === 1) {
+              failStarted.resolve();
+              await failGate.promise;
+            }
+            throw new Error("transient attr_set error");
+          }
+        }),
+      );
+      const retryStep = runRetry(createTurnStepInput("sess-early-fail", "Retry attr write."));
+      await Promise.all([failStarted.promise, allToolsDone.promise]);
+      await drainPendingTurns();
+      failGate.resolve();
+      const retryResult = await retryStep;
+      expect(retryResult.action).toBe("continue");
+      expect(attempts).toBe(2);
+    });
+  });
 });

@@ -142,18 +142,35 @@ export type { TurnStepInput };
 const log = createLogger("execution.turn-step");
 
 interface PendingStepAttributes {
+  lastWritten?: Record<string, EveAttributeValue>;
   title?: Promise<void>;
   usage?: Record<string, EveAttributeValue>;
   usageWrite?: Promise<void>;
+}
+
+function sameAttributes(
+  a: Record<string, EveAttributeValue>,
+  b: Record<string, EveAttributeValue> | undefined,
+): boolean {
+  if (b === undefined) return false;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
 }
 
 function recordPendingUsage(
   pending: PendingStepAttributes,
   attributes: Record<string, EveAttributeValue>,
 ): void {
+  const next: Record<string, EveAttributeValue> = { ...pending.usage };
   for (const [key, value] of Object.entries(attributes)) {
-    if (value !== undefined) (pending.usage ??= {})[key] = value;
+    if (value !== undefined) next[key] = value;
   }
+  pending.usage = next;
 }
 
 function writePendingUsage(pending: PendingStepAttributes, host: SessionStepHost): Promise<void> {
@@ -163,7 +180,9 @@ function writePendingUsage(pending: PendingStepAttributes, host: SessionStepHost
     const previous = pending.usageWrite;
     pending.usageWrite = (async () => {
       await previous;
+      if (sameAttributes(usage, pending.lastWritten)) return;
       await host.setAttributes(usage);
+      pending.lastWritten = usage;
     })().catch(() => {});
   }
   return pending.usageWrite ?? Promise.resolve();

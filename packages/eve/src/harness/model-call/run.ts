@@ -76,6 +76,7 @@ export async function runModelStep(
   const catalog = await stepCatalog(step);
   step.frameworkToolNames = frameworkToolNames(catalog);
   const { approvalMemory } = humanInputContext(step);
+  let earlyUsageRecord: Promise<void> | undefined;
   const caller = new ModelCaller(step, prompt, {
     approvalMemory,
     catalog,
@@ -85,6 +86,14 @@ export async function runModelStep(
     newRun: async () => {
       const next = await requestRun(step, prompt);
       if (next !== undefined) throw new Error("eve couldn't request the replacement model run.");
+    },
+    onBeforeInlineCalls: (pendingUsage) => {
+      earlyUsageRecord = recordModelUsage(step, {
+        model: resolved.model,
+        pendingUsage,
+        tools: catalog.advertised.size,
+      });
+      void earlyUsageRecord.catch(() => {});
     },
     startRun: async (attempt) => await startRun(step, attempt),
     projectedMessages,
@@ -118,6 +127,8 @@ export async function runModelStep(
     if (resolved.scoped !== undefined && refusesCredential(error))
       return await failModelCredential(step, "MODEL_AUTHORIZATION_FAILED", error, resolved.scoped);
     return reportModelCallFailure(step, error, caller.takeUnkeptUsage());
+  } finally {
+    await earlyUsageRecord?.catch(() => {});
   }
 
   let stepResult: StepResult;
