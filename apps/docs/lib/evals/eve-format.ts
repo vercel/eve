@@ -1,7 +1,7 @@
-import type { EveCodeDatasetResults, EveCodeHarnessScore } from "./eve-code-results";
+import type { EveDatasetResults, EveHarnessScore } from "./eve-results";
 
 /** Ranks by resolve rate, then by median latency, matching eve-bench's correctness-first order. */
-export function rankedHarnesses(results: EveCodeDatasetResults): EveCodeHarnessScore[] {
+export function rankedHarnesses(results: EveDatasetResults): EveHarnessScore[] {
   return [...results.harnesses].sort(
     (left, right) =>
       right.resolveRate.estimate - left.resolveRate.estimate ||
@@ -10,7 +10,7 @@ export function rankedHarnesses(results: EveCodeDatasetResults): EveCodeHarnessS
 }
 
 export function renderBenchmarkMarkdown(
-  results: EveCodeDatasetResults | undefined,
+  results: EveDatasetResults | undefined,
   dataset: string,
 ): string {
   if (!results) return `No published ${dataset} results yet.`;

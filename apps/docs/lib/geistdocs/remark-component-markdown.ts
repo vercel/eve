@@ -1,7 +1,7 @@
 import { mdxJsxToMarkdown, type MdxJsxFlowElement } from "mdast-util-mdx-jsx";
 import type { Options } from "mdast-util-to-markdown";
-import { renderBenchmarkMarkdown } from "../evals/eve-code-format";
-import { eveCodeBenchmark } from "../evals/eve-code-results";
+import { renderBenchmarkMarkdown } from "../evals/eve-format";
+import { eveBenchmark } from "../evals/eve-results";
 import { templateManifest } from "../templates/manifest";
 import { renderAgentRuntimeDiagramMarkdown } from "./agent-runtime-diagram";
 import { renderAmbientListeningFlowMarkdown } from "./ambient-listening-flow";
@@ -49,14 +49,14 @@ export function remarkComponentMarkdown(this: { data(): unknown }): void {
       mdxJsxFlowElement(node: MdxJsxFlowElement, parent, state, info) {
         if (node.name === "AgentRuntimeDiagram") return renderAgentRuntimeDiagramMarkdown();
         if (node.name === "AmbientListeningFlow") return renderAmbientListeningFlowMarkdown();
-        if (node.name === "EveCodeBenchmark") {
+        if (node.name === "EveBenchmark") {
           const dataset = node.attributes.find(
             (attribute) => attribute.type === "mdxJsxAttribute" && attribute.name === "dataset",
           );
           if (dataset?.type !== "mdxJsxAttribute" || typeof dataset.value !== "string") {
-            throw new Error("EveCodeBenchmark Markdown export requires a literal dataset string.");
+            throw new Error("EveBenchmark Markdown export requires a literal dataset string.");
           }
-          return renderBenchmarkMarkdown(eveCodeBenchmark.datasets[dataset.value], dataset.value);
+          return renderBenchmarkMarkdown(eveBenchmark.datasets[dataset.value], dataset.value);
         }
         if (node.name && cardLists.has(node.name)) {
           return node.children.map((child) => state.handle(child, node, state, info)).join("\n");

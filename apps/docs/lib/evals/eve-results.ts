@@ -1,9 +1,9 @@
-import rawSnapshot from "./eve-code-benchmark.json";
+import rawSnapshot from "./eve-benchmark.json";
 
-/** Written by `.github/scripts/eve-code-docs-snapshot.mjs` from eve-bench reports of `main`. */
-export interface EveCodeHarnessScore {
+/** Written by `.github/scripts/eve-docs-snapshot.mjs` from eve-bench reports of `main`. */
+export interface EveHarnessScore {
   harness: string;
-  /** Package version for released harnesses; short source commit for eve-code. */
+  /** Package version for released harnesses; short source commit for eve. */
   version: string | null;
   resolved: number;
   attempts: number;
@@ -20,20 +20,20 @@ export interface EveCodeHarnessScore {
   measuredAt: string | null;
 }
 
-export interface EveCodeDatasetResults {
+export interface EveDatasetResults {
   dataset: { name: string; version: string };
   model: { id: string; released?: string; knowledge?: string };
   attempts: number;
   tasks: number;
   generatedAt: string;
-  harnesses: EveCodeHarnessScore[];
+  harnesses: EveHarnessScore[];
 }
 
-export interface EveCodeBenchmarkSnapshot {
+export interface EveBenchmarkSnapshot {
   schemaVersion: 1;
-  datasets: Record<string, EveCodeDatasetResults>;
+  datasets: Record<string, EveDatasetResults>;
 }
 
-export const eveCodeBenchmark = rawSnapshot as EveCodeBenchmarkSnapshot;
+export const eveBenchmark = rawSnapshot as EveBenchmarkSnapshot;
 
-export { rankedHarnesses } from "./eve-code-format";
+export { rankedHarnesses } from "./eve-format";

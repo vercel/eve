@@ -2,21 +2,17 @@
 
 import { useState } from "react";
 
-import {
-  eveCodeBenchmark,
-  rankedHarnesses,
-  type EveCodeHarnessScore,
-} from "@/lib/evals/eve-code-results";
+import { eveBenchmark, rankedHarnesses, type EveHarnessScore } from "@/lib/evals/eve-results";
 
-const REFERENCE = "eve-code";
+const REFERENCE_HARNESSES = new Set(["eve", "eve-code"]);
 const COLORS = ["#4f6bed", "#5ed37f", "#e0803f", "#c26bd9", "#d9c24f"];
 
 interface Metric {
   label: string;
   higherIsBetter: boolean;
-  value: (score: EveCodeHarnessScore) => number;
+  value: (score: EveHarnessScore) => number;
   /** Interval drawn around the dot, when the metric has one. */
-  range?: (score: EveCodeHarnessScore) => [number, number];
+  range?: (score: EveHarnessScore) => [number, number];
   format: (value: number) => string;
   /** Difference from the reference contender. */
   delta: (value: number, reference: number) => string;
@@ -57,10 +53,10 @@ const METRICS: Record<string, Metric> = {
   },
 };
 
-/** Renders the latest published eve-code results for one eve-bench dataset. */
-export const EveCodeBenchmark = ({ dataset }: { dataset: string }) => {
+/** Renders the latest published eve benchmark results for one eve-bench dataset. */
+export const EveBenchmark = ({ dataset }: { dataset: string }) => {
   const [metricKey, setMetricKey] = useState("correctness");
-  const results = eveCodeBenchmark.datasets[dataset];
+  const results = eveBenchmark.datasets[dataset];
   if (!results) return <p>No published {dataset} results yet.</p>;
 
   const metric = METRICS[metricKey];
@@ -68,7 +64,7 @@ export const EveCodeBenchmark = ({ dataset }: { dataset: string }) => {
   const colors = new Map(
     rows.map((score, index) => [score.harness, COLORS[index % COLORS.length]]),
   );
-  const reference = rows.find((score) => score.harness === REFERENCE);
+  const reference = rows.find((score) => REFERENCE_HARNESSES.has(score.harness));
   const max =
     metric.max ??
     niceCeiling(Math.max(...rows.map((score) => metric.range?.(score)[1] ?? metric.value(score))));
@@ -134,7 +130,7 @@ export const EveCodeBenchmark = ({ dataset }: { dataset: string }) => {
           const value = metric.value(score);
           const color = colors.get(score.harness);
           const range = metric.range?.(score);
-          const isReference = score.harness === REFERENCE;
+          const isReference = REFERENCE_HARNESSES.has(score.harness);
           return (
             <div
               className="grid grid-cols-[12rem_1fr_6rem_5rem] items-center gap-x-4 rounded-md py-1.5 hover:bg-gray-100"

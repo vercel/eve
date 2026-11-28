@@ -1,4 +1,4 @@
-// Turns an eve-bench report.json into the public eve-code results snapshot the docs render.
+// Turns an eve-bench report.json into the public eve benchmark results snapshot the docs render.
 // The snapshot keeps only aggregate scores and public run links: the result store is private,
 // so blob URLs and per-trial data never reach the docs.
 import { readFile, writeFile } from "node:fs/promises";
@@ -16,8 +16,12 @@ export function snapshotFromReport(report) {
   if (!comparison?.compatible || !comparison.complete || !comparison.summary) {
     return { skip: "report has no complete cross-harness comparison" };
   }
-  const results = new Map(comparison.results.map((result) => [result.harness, result]));
-  if (!results.has("eve-code")) return { skip: "report has no eve-code result" };
+  const results = new Map(
+    comparison.results.map((result) => [result.contender ?? result.harness, result]),
+  );
+  if (!comparison.results.some((result) => result.harness === "eve")) {
+    return { skip: "report has no eve result" };
+  }
 
   const publishedAt = new Map(
     (report.comparison.references ?? []).map((reference) => [
@@ -42,8 +46,8 @@ export function snapshotFromReport(report) {
         const result = results.get(score.contender);
         if (!result) throw new Error(`No result for contender ${score.contender}.`);
         return {
-          harness: score.contender,
-          version: harnessVersion(score.contender, result.provenance),
+          harness: result.harness === "eve" ? "eve" : score.contender,
+          version: harnessVersion(result.harness, result.provenance),
           resolved: score.resolved,
           attempts: score.attempts,
           resolveRate: score.resolveRate,
@@ -56,16 +60,23 @@ export function snapshotFromReport(report) {
           latencyP90Ms: score.latencyP90Ms,
           source: result.provenance.source?.revision ?? null,
           runUrl: result.provenance.run?.url ?? null,
-          measuredAt: publishedAt.get(score.contender) ?? finishedAt(result),
+          measuredAt:
+            publishedAt.get(result.harness) ??
+            publishedAt.get(score.contender) ??
+            finishedAt(result),
         };
       }),
     },
   };
 }
 
-/** A released harness reports its package version; eve-code is identified by its source commit. */
+/** A released harness reports its package version; eve is identified by its source commit. */
 function harnessVersion(harness, provenance) {
   const settings = provenance.harness ?? {};
+  if (harness === "eve") {
+    const sha = settings.source?.gitSha ?? provenance.source?.revision;
+    if (typeof sha === "string") return sha.slice(0, 7);
+  }
   const version = settings.version ?? settings[`${harness}Version`];
   if (typeof version === "string") return version;
   const sha = settings.source?.gitSha ?? provenance.source?.revision;
@@ -96,7 +107,7 @@ export function commitPayload({ repository, branch, expectedHeadOid, path, conte
         branch: { repositoryNameWithOwner: repository, branchName: branch },
         expectedHeadOid,
         message: {
-          headline: "chore: refresh eve-code benchmark results",
+          headline: "chore: refresh eve benchmark results",
           body: `From ${runUrl}\n\nSigned-off-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>`,
         },
         fileChanges: { additions: [{ path, contents: Buffer.from(contents).toString("base64") }] },
@@ -122,12 +133,12 @@ async function main(args) {
   }
   const [reportPath, snapshotPath] = args;
   if (!reportPath || !snapshotPath) {
-    throw new Error("Usage: eve-code-docs-snapshot.mjs <report.json> <snapshot.json>");
+    throw new Error("Usage: eve-docs-snapshot.mjs <report.json> <snapshot.json>");
   }
   const report = JSON.parse(await readFile(reportPath, "utf8"));
   const { skip, section } = snapshotFromReport(report);
   if (skip) {
-    console.log(`::notice::eve-code docs snapshot not updated: ${skip}.`);
+    console.log(`::notice::eve docs snapshot not updated: ${skip}.`);
     return;
   }
   const existing = JSON.parse(await readFile(snapshotPath, "utf8"));

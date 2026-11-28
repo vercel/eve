@@ -7,7 +7,7 @@ import type { MDXComponents } from "mdx/types";
 import Link from "next/link";
 import { AgentRuntimeDiagram } from "./agent-runtime-diagram";
 import { AmbientListeningFlow } from "./ambient-listening-flow";
-import { EveCodeBenchmark } from "./eve-code-benchmark";
+import { EveBenchmark } from "./eve-benchmark";
 import { TabsWithChildren } from "./synced-tabs";
 import {
   Capabilities,
@@ -39,7 +39,7 @@ const localComponents: MDXComponents = {
   AmbientListeningFlow,
   Capabilities,
   Capability,
-  EveCodeBenchmark,
+  EveBenchmark,
   Step,
   Steps,
   TabsWithChildren,

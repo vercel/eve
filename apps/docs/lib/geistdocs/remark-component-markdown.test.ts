@@ -2,6 +2,7 @@ import { createProcessor } from "@mdx-js/mdx";
 import { toMarkdown, type Options } from "mdast-util-to-markdown";
 import { describe, expect, it } from "vitest";
 import config from "../../source.config";
+import { remarkComponentMarkdown } from "./remark-component-markdown";
 
 async function configuredProcessor() {
   const options =
@@ -21,7 +22,7 @@ describe("component Markdown export", () => {
       "",
       "<Callout>Keep this content.</Callout>",
       "",
-      '<EveCodeBenchmark dataset="deepswe-lean" />',
+      '<EveBenchmark dataset="deepswe-lean" />',
       "",
       "```mdx",
       "<AgentRuntimeDiagram />",
@@ -129,5 +130,55 @@ describe("component Markdown export", () => {
       "- **Meet employees where they work**: One agent serves Slack and your own web apps. See [Channels](/docs/channels/overview).",
     );
     expect(markdown).not.toMatch(/<(UseCase|Template|Capabilit)/);
+  });
+
+  it.each(["<EveBenchmark />", '<EveBenchmark dataset={"example"} />'])(
+    "rejects unsupported EveBenchmark dataset attributes: %s",
+    (source) => {
+      const processor = createProcessor({ remarkPlugins: [remarkComponentMarkdown] });
+      const tree = processor.parse(source);
+      expect(() =>
+        toMarkdown(tree, {
+          extensions: (processor.data() as { toMarkdownExtensions?: Options[] })
+            .toMarkdownExtensions,
+        }),
+      ).toThrow("EveBenchmark Markdown export requires a literal dataset string.");
+    },
+  );
+
+  it("exports EveBenchmark results without changing HTML components or fenced examples", async () => {
+    const processor = await configuredProcessor();
+    const tree = processor.parse(
+      [
+        '<EveBenchmark dataset="deepswe-lean" />',
+        "",
+        "<EveBenchmark",
+        '  className="wide"',
+        "  dataset='not-published'",
+        "/>",
+        "",
+        "<Callout>Keep this content.</Callout>",
+        "",
+        "```mdx",
+        '<EveBenchmark dataset="deepswe-lean" />',
+        "```",
+      ].join("\n"),
+    );
+    const markdown = toMarkdown(tree, {
+      extensions: (processor.data() as { toMarkdownExtensions?: Options[] }).toMarkdownExtensions,
+    });
+
+    expect(markdown).toContain(
+      "| Harness | Resolved | 95% interval | Median latency | p90 latency | Measured |",
+    );
+    expect(markdown).toContain("No published not-published results yet.");
+    expect(markdown).toContain("<Callout>Keep this content.</Callout>");
+    expect(markdown).toContain('```mdx\n<EveBenchmark dataset="deepswe-lean" />\n```');
+    expect(markdown.match(/<EveBenchmark/g)).toHaveLength(1);
+    expect(
+      tree.children.filter(
+        (node) => node.type === "mdxJsxFlowElement" && node.name === "EveBenchmark",
+      ),
+    ).toHaveLength(2);
   });
 });

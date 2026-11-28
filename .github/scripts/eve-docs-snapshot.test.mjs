@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mergeSnapshot, snapshotFromReport } from "./eve-code-docs-snapshot.mjs";
+import { mergeSnapshot, snapshotFromReport } from "./eve-docs-snapshot.mjs";
 
 const score = (contender, resolved) => ({
   contender,
@@ -17,15 +17,16 @@ const score = (contender, resolved) => ({
   latencyP90Ms: 2000,
 });
 
-const result = (harness) => ({
+const result = (harness, contender) => ({
   harness,
+  ...(contender ? { contender } : {}),
   trials: [{ finishedAt: "2026-09-29T00:00:00.000Z" }],
   provenance: {
     harness:
-      harness === "eve-code"
-        ? { source: { gitSha: "a7b0fb2b5c" } }
+      harness === "eve"
+        ? { eve: { kind: "installed", version: "1.5.0" } }
         : { opencodeVersion: "1.18.30" },
-    source: { revision: "abc" },
+    source: { revision: "a7b0fb2b5c" },
     run: { url: `https://example.test/${harness}` },
   },
 });
@@ -46,8 +47,8 @@ const report = (overrides = {}) => ({
     comparison: {
       compatible: true,
       complete: true,
-      results: [result("eve-code"), result("opencode")],
-      summary: { scores: [score("eve-code", 8), score("opencode", 7)] },
+      results: [result("eve", "bench-agent"), result("opencode")],
+      summary: { scores: [score("bench-agent", 8), score("opencode", 7)] },
     },
   },
   ...overrides,
@@ -64,20 +65,20 @@ test("summarizes each harness with its own measurement time", () => {
       measuredAt,
     ]),
     [
-      ["eve-code", "a7b0fb2", 8, "2026-09-29T00:00:00.000Z"],
+      ["eve", "a7b0fb2", 8, "2026-09-29T00:00:00.000Z"],
       ["opencode", "1.18.30", 7, "2026-09-30T00:00:00.000Z"],
     ],
   );
 });
 
-test("never publishes an incomplete, partial, or eve-code-less run", () => {
+test("never publishes an incomplete, partial, or eve-less run", () => {
   assert.match(snapshotFromReport(report({ status: "incomplete" })).skip, /incomplete/);
   const probe = report();
   probe.manifest.task = "a";
   assert.match(snapshotFromReport(probe).skip, /full-dataset/);
   const peerless = report();
   peerless.comparison.comparison.results = [result("opencode")];
-  assert.match(snapshotFromReport(peerless).skip, /no eve-code/);
+  assert.match(snapshotFromReport(peerless).skip, /no eve/);
 });
 
 test("replaces only the measured dataset", () => {

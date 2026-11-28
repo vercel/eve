@@ -36,6 +36,7 @@
         "!.agents/**",
         "!.changeset/**",
         "!.github/**",
+        "!apps/bench-agent/**",
         "!apps/benchmarks/**",
         "!apps/docs/**",
         "!apps/fixtures/**",
@@ -56,6 +57,7 @@
         "!.agents/**",
         "!.changeset/**",
         "!.github/**",
+        "!apps/bench-agent/**",
         "!apps/benchmarks/**",
         "!apps/fixtures/**",
         "!apps/frameworks/**",
@@ -117,6 +119,7 @@
       "inputs": [
         "$TURBO_DEFAULT$",
         "!.agents/**",
+        "!apps/bench-agent/**",
         "!apps/docs/**",
         "!apps/fixtures/**",
         "!apps/frameworks/**",

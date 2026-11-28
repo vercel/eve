@@ -446,7 +446,7 @@ Sessions saved by eve 0.68 or earlier store extension state per package, not per
 ## What to read next
 
 - [Integrations](/integrations): browse ready-to-install extensions using the Extensions filter
-- [Code extension](/docs/code-extension): mount eve-code, the coding extension that ships in `eve`, and see its benchmark results
+- [Code extension](/docs/code-extension): mount eve-code, the coding extension that ships in `eve`, and see the latest `eve` benchmark results
 - [Tools](/docs/tools): static tools, approval, and tool output
 - [Dynamic capabilities](/docs/guides/dynamic-capabilities): dynamic connections, tools, skills, and instructions
 - [Instructions](/docs/instructions): static and TypeScript instructions
