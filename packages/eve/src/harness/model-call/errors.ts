@@ -20,6 +20,10 @@ const UNSUPPORTED_PROVIDER_TOOL_MATCHERS: readonly ((text: string) => string | u
   (text) => /Input tag ['"]([\w.-]+)['"] found using ['"]type['"] does not match/i.exec(text)?.[1],
   (text) => /Invalid value: ['"]([\w.-]+)['"]/i.exec(text)?.[1],
   (text) => (/web search is not supported for this request/i.test(text) ? "web_search" : undefined),
+  (text) =>
+    /Invalid encrypted_content in (?:web_)?search_result block/i.test(text)
+      ? "web_search"
+      : undefined,
 ];
 
 export interface UpstreamRejectionSummary {
