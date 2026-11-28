@@ -15,7 +15,11 @@ import {
 const TRIALS = 5;
 /** Read by scripts/eval-metrics/standard.mjs (same prefix there) into `overhead.slack_new_thread_ms`. */
 const METRIC_LOG_PREFIX = "EVE_SLACK_NEW_THREAD_METRIC=";
-/** The thread's session is looked up once its turn has likely started, so the lookups stay off the measured path. */
+/**
+ * The thread's session is looked up once its turn has likely started, so the
+ * lookups stay off the measured path. A model call later than this (a cold
+ * hosted path) may overlap the polling; those trials say so in the log.
+ */
 const FIRST_LOOKUP_MS = 1_500;
 const LOOKUP_INTERVAL_MS = 250;
 const LOOKUP_TIMEOUT_MS = 60_000;
@@ -28,7 +32,8 @@ export default defineEval({
   async test(t) {
     const samples: Array<{ modelCallMs: number; trial: number }> = [];
 
-    // Logged even when a trial fails, so the samples taken so far still count.
+    // Logged even when a trial fails, so the samples taken so far are kept;
+    // the metric counts only an attempt where every planned trial was measured.
     try {
       for (let trial = 1; trial <= TRIALS; trial += 1) {
         // A new channel per trial, so every mention starts a new thread and session.
@@ -42,13 +47,20 @@ export default defineEval({
         if (modelCallMs === undefined)
           throw new Error(`Unexpected reply: ${turn.reply ?? "(none)"}`);
         samples.push({ modelCallMs, trial });
-        t.log(`trial ${trial}/${TRIALS}: model called ${modelCallMs} ms after the webhook arrived`);
+        const overlap =
+          modelCallMs > FIRST_LOOKUP_MS
+            ? " (after session polling began, which may have added load)"
+            : "";
+        t.log(
+          `trial ${trial}/${TRIALS}: model called ${modelCallMs} ms after the webhook arrived${overlap}`,
+        );
       }
     } finally {
       t.log(
         `${METRIC_LOG_PREFIX}${JSON.stringify({
           schemaVersion: 1,
           slackApiLatencyMs: SLACK_API_LATENCY_MS,
+          trials: TRIALS,
           samples,
           unit: "milliseconds",
         })}`,
@@ -108,34 +120,39 @@ async function threadSession(t: EveEvalContext, channel: string, ts: string): Pr
   const deadline = Date.now() + LOOKUP_TIMEOUT_MS;
   await sleep(FIRST_LOOKUP_MS);
   for (;;) {
-    const sessionId = await lookupSession(t, channel, ts);
-    if (sessionId !== null) return sessionId;
-    if (Date.now() > deadline) throw new Error(`No session for Slack thread ${channel}:${ts}.`);
+    const lookup = await lookupSession(t, channel, ts);
+    if (lookup.sessionId !== null) return lookup.sessionId;
+    if (Date.now() > deadline)
+      throw new Error(
+        `No session for Slack thread ${channel}:${ts} after ${LOOKUP_TIMEOUT_MS} ms (last lookup: ${lookup.outcome}).`,
+      );
     await sleep(LOOKUP_INTERVAL_MS);
   }
 }
 
 /**
- * One lookup: the session id, or null while there is none yet. A server error
- * or dropped connection (a hosted instance recycling) also reads as not yet,
- * so it is retried until the deadline; a client error fails at once.
+ * One lookup: the session id, or null while there is none yet, with what the
+ * lookup saw. A server error or dropped connection (a hosted instance
+ * recycling) also reads as not yet, so it is retried until the deadline, and
+ * the timeout reports it; a client error fails at once.
  */
 async function lookupSession(
   t: EveEvalContext,
   channel: string,
   ts: string,
-): Promise<string | null> {
+): Promise<{ sessionId: string | null; outcome: string }> {
   const query = new URLSearchParams({ channel, ts });
   let response: Response;
   try {
     response = await t.target.fetch(`${SLACK_SESSION_ROUTE}?${query}`);
-  } catch {
-    return null;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { sessionId: null, outcome: `request failed: ${reason}` };
   }
-  if (response.status >= 500) return null;
+  if (response.status >= 500) return { sessionId: null, outcome: `HTTP ${response.status}` };
   if (!response.ok) throw new Error(`Session lookup failed (${response.status}).`);
   const { sessionId } = (await response.json()) as { sessionId: string | null };
-  return sessionId;
+  return { sessionId, outcome: "no session yet" };
 }
 
 function sleep(ms: number): Promise<void> {
