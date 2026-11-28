@@ -35,7 +35,7 @@ on:
         type: string
         default: ""
       release:
-        description: Published eve version to backfill, e.g. 0.61.0 (empty to benchmark main)
+        description: Published eve version to backfill, e.g. 0.61.0 or 1.0.0-rc.17 (empty to benchmark main)
         type: string
         default: ""
 
@@ -82,10 +82,10 @@ jobs:
         run: |
           if [ -z "$RELEASE" ]; then
             echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-          elif [[ "$RELEASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          elif [[ "$RELEASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "ref=refs/tags/eve@${RELEASE}" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::release must be a published eve version such as 0.61.0 (got \"${RELEASE}\")."
+            echo "::error::release must be a published eve version such as 0.61.0 or 1.0.0-rc.17 (got \"${RELEASE}\")."
             exit 1
           fi
 
@@ -608,7 +608,15 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build eve package
-        run: pnpm build:eve
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          # The root build:eve script first ships in eve 0.86.0.
+          if [ -n "$RELEASE" ]; then
+            pnpm --filter eve build
+          else
+            pnpm build:eve
+          fi
 
       - name: Record startup job metadata
         env:

@@ -6,15 +6,17 @@
 
 export const NPM_PACKUMENT_URL = "https://registry.npmjs.org/eve";
 
-const VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
+const VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
 
 /** First release whose `eve eval` has each flag the benchmark passes. */
 const EVAL_FLAG_RELEASES = { keepState: "0.83.1" };
 
-/** @param {string} version e.g. "0.61.0" */
+/** @param {string} version e.g. "0.61.0" or "1.0.0-rc.17" */
 export function releaseTag(version) {
   if (!VERSION.test(version))
-    throw new Error(`Release "${version}" must be a published eve version such as 0.61.0.`);
+    throw new Error(
+      `Release "${version}" must be a published eve version such as 0.61.0 or 1.0.0-rc.17.`,
+    );
   return `eve@${version}`;
 }
 
@@ -51,13 +53,14 @@ export async function releasePublishedAt(version, fetchImpl = fetch) {
   return new Date(publishedAt).toISOString();
 }
 
+/** A prerelease sorts before its version (1.0.0-rc.17 < 1.0.0); thresholds are x.y.z. */
 function compareVersions(a, b) {
   const parse = (version) => {
     const match = VERSION.exec(version);
-    if (match === null) throw new Error(`"${version}" is not an x.y.z version.`);
-    return match.slice(1).map(Number);
+    if (match === null) throw new Error(`"${version}" is not an x.y.z[-prerelease] version.`);
+    return [...match.slice(1, 4).map(Number), match[4] === undefined ? 1 : 0];
   };
   const [left, right] = [parse(a), parse(b)];
-  for (let i = 0; i < 3; i += 1) if (left[i] !== right[i]) return left[i] - right[i];
+  for (let i = 0; i < 4; i += 1) if (left[i] !== right[i]) return left[i] - right[i];
   return 0;
 }
