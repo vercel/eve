@@ -1,15 +1,15 @@
 ---
 title: "Code Extension"
-description: "Mount eve's coding extension, eve-code, and see its latest benchmark results against other coding agent harnesses."
+description: "Mount eve's coding extension, eve-code, and see the latest stock eve benchmark results against other coding agent harnesses."
 ---
 
 `eve/extensions/code` (eve-code) turns an eve agent into a coding agent. It ships inside the `eve` package, so you mount it without installing anything else. The extension adds coding instructions that steer the model toward eve's default [file tools](/docs/concepts/built-in-tools#default-tools), the project's `AGENTS.md`, coding skills, and helpers that install coding tools in the sandbox. GitHub and pull request work lives in the companion [`eve/extensions/git`](#publish-with-the-git-extension) extension.
 
 ## Benchmark results
 
-<EveCodeBenchmark dataset="deepswe-lean" />
+<EveBenchmark dataset="deepswe-lean" />
 
-These results show baseline performance, with each harness in its standard setup and high reasoning. Other models, settings, or tasks can perform differently.
+These results show baseline performance of stock `eve` (without `eve/extensions/code`) against peer coding agent harnesses, with each harness in its standard setup and high reasoning. Other models, settings, or tasks can perform differently.
 
 <details>
 <summary>How the benchmark works</summary>
@@ -31,8 +31,8 @@ The line on each correctness row shows the 95% interval. When the lines of two h
 <details>
 <summary>How the results update</summary>
 
-1. The `eve-code` workflow runs on `main` with the `deepswe-lean` dataset every Monday at 06:00 UTC. A maintainer can also start it manually on `main`.
-2. The workflow runs eve-code, opencode, pi, and [fx](https://fx.sh) on each benchmark model, one model at a time. It saves each complete result in the eve-bench result store.
+1. The `eve` workflow runs on `main` with the `deepswe-lean` dataset every Monday at 06:00 UTC. A maintainer can also start it manually on `main`.
+2. The workflow runs eve, opencode, pi, and [fx](https://fx.sh) on each benchmark model, one model at a time. It saves each complete result in the eve-bench result store.
 3. The workflow opens a pull request with a summary of the default Anthropic model's result. This page shows only that model.
 4. After a maintainer approves and merges the pull request, the next docs deployment shows the new results.
 

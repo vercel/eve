@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { renderBenchmarkMarkdown } from "./eve-code-format";
-import type { EveCodeDatasetResults, EveCodeHarnessScore } from "./eve-code-results";
+import { renderBenchmarkMarkdown } from "./eve-format";
+import type { EveDatasetResults, EveHarnessScore } from "./eve-results";
 
-const score: EveCodeHarnessScore = {
+const score: EveHarnessScore = {
   harness: "alice",
   version: null,
   resolved: 2,
@@ -20,7 +20,7 @@ const score: EveCodeHarnessScore = {
   measuredAt: "2026-10-03T12:00:00Z",
 };
 
-const results: EveCodeDatasetResults = {
+const results: EveDatasetResults = {
   dataset: { name: "example", version: "v1" },
   model: { id: "example-model" },
   attempts: 3,

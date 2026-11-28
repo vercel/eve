@@ -1,5 +1,5 @@
 export const BENCHMARK_HARNESSES = [
-  "eve-code",
+  "eve",
   "codex",
   "opencode",
   "claude-code",
@@ -9,8 +9,8 @@ export const BENCHMARK_HARNESSES = [
   "oracle",
 ];
 
-/** Harnesses compared on every automatic run; eve-code against opencode, pi, and fx. */
-export const DEFAULT_HARNESSES = ["eve-code", "opencode", "pi", "fx"];
+/** Harnesses compared on every automatic run; eve against opencode, pi, and fx. */
+export const DEFAULT_HARNESSES = ["eve", "opencode", "pi", "fx"];
 
 /**
  * eve-bench datasets a benchmark can run, with the settings each was calibrated for.
@@ -97,10 +97,10 @@ function request({ dataset, harnesses, families }, models, sha, pr) {
   return {
     harness: harnesses.join(","),
     slug: harnesses.join("+"),
-    // eve-bench builds the agent checkout only for eve-code and rejects agent
+    // eve-bench builds the agent checkout only for eve and rejects agent
     // inputs without it. Such a run is measured but never published or compared
     // with stored results, which are keyed by the agent repository.
-    agentSource: harnesses.includes("eve-code"),
+    agentSource: harnesses.includes("eve"),
     dataset,
     ...BENCHMARK_DATASETS[dataset],
     models: families.map((family) => {
