@@ -3,6 +3,7 @@ import {
   withSandboxConnectionDisposal,
 } from "#execution/sandbox/connection-disposal.js";
 import { randomBytes } from "node:crypto";
+import { posix } from "node:path";
 
 import type {
   SandboxProcess,
@@ -41,6 +42,7 @@ import {
   type CreateVercelSandbox,
   type VercelSandboxCreateParams,
 } from "#execution/sandbox/bindings/vercel-create-sdk.js";
+import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import {
   isVercelSandboxMissingError,
   isVercelSandboxNameConflictError,
@@ -230,6 +232,7 @@ export function createVercelSandbox(
       createOptions: sessionCreateOptions,
       createSandbox,
       mounts: mounts === undefined ? undefined : toVercelMounts(mounts),
+      preferCreate: !toolSession,
       sandboxModule,
       sessionKey: sandboxName,
       snapshotId: artifact.snapshotId,
@@ -239,7 +242,9 @@ export function createVercelSandbox(
       const session = await ensureUsableSession({
         expired: toolSession ? isVercelSnapshotNotFoundError : isVercelSnapshotUnavailableError,
         inheritsBaseRuntime:
-          artifact.snapshotId !== undefined && mounts === undefined && usesEveBase,
+          artifact.snapshotId !== undefined &&
+          mountsDoNotShadowBaseRuntime(ensureSessionInput.mounts ?? sessionCreateOptions.mounts) &&
+          usesEveBase,
         input: ensureSessionInput,
         session: await ensureSession(ensureSessionInput),
       });
@@ -411,6 +416,7 @@ interface EnsureSessionInput {
   readonly createOptions: VercelCreateOptions;
   readonly createSandbox: CreateVercelSandbox;
   readonly mounts?: ReturnType<typeof toVercelMounts>;
+  readonly preferCreate?: boolean;
   readonly sandboxModule: VercelModule;
   readonly sessionKey: string;
   readonly snapshotId?: string;
@@ -455,17 +461,53 @@ async function ensureUsableSession(input: {
   return replacement;
 }
 
+const BASE_RUNTIME_PROTECTED_PATHS = [
+  WORKSPACE_ROOT,
+  "/dev/fd",
+  "/proc/self/fd",
+  "/bin",
+  "/usr/bin",
+  "/usr/local/bin",
+  "/home/vercel-sandbox/.local/bin",
+  "/lib",
+  "/lib64",
+  "/usr/lib",
+] as const;
+
+function normalizeMountPath(path: string): string {
+  const normalized = posix.normalize(path);
+  const trimmed = normalized.replace(/\/+$/u, "");
+  return trimmed.length === 0 ? "/" : trimmed;
+}
+
+function mountsDoNotShadowBaseRuntime(mounts: Record<string, unknown> | undefined): boolean {
+  if (mounts === undefined) return true;
+  for (const rawPath of Object.keys(mounts)) {
+    if (!rawPath.startsWith("/")) return false;
+    const mountPath = normalizeMountPath(rawPath);
+    if (!mountPath.startsWith("/") || mountPath === "/") return false;
+    for (const protectedPath of BASE_RUNTIME_PROTECTED_PATHS) {
+      if (protectedPath === mountPath || protectedPath.startsWith(`${mountPath}/`)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 async function ensureSession(input: EnsureSessionInput): Promise<VercelSandboxSessionCreateResult> {
   const sandboxName = input.sessionKey;
-  const existing = await getNamedVercelSandbox({
-    createOptions: input.createOptions,
-    sandboxModule: input.sandboxModule,
-    sandboxName,
-  });
+  if (input.preferCreate !== true) {
+    const existing = await getNamedVercelSandbox({
+      createOptions: input.createOptions,
+      sandboxModule: input.sandboxModule,
+      sandboxName,
+    });
 
-  if (existing !== null) {
-    await ensureVercelSandboxTags(existing, input.tags);
-    return { created: false, sandbox: existing };
+    if (existing !== null) {
+      await ensureVercelSandboxTags(existing, input.tags);
+      return { created: false, sandbox: existing };
+    }
   }
 
   const createParams = createSessionCreateParams(input, sandboxName);
@@ -482,9 +524,10 @@ async function ensureSession(input: EnsureSessionInput): Promise<VercelSandboxSe
       }),
     };
   } catch (error) {
-    if (!isVercelSandboxNameConflictError(error)) throw error;
-    const winner = await getNamedVercelSandbox({ ...input, sandboxName });
+    if (input.preferCreate !== true && !isVercelSandboxNameConflictError(error)) throw error;
+    const winner = await getNamedVercelSandbox({ ...input, sandboxName }).catch(() => null);
     if (winner === null) throw error;
+    await ensureVercelSandboxTags(winner, input.tags);
     return { created: false, sandbox: winner };
   }
 }

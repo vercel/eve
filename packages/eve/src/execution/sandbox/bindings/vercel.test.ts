@@ -380,10 +380,7 @@ describe("createVercelSandbox", () => {
       sandboxName: "session-key",
     });
 
-    expect(sandboxModule.Sandbox.get).toHaveBeenCalledTimes(1);
-    expect(sandboxModule.Sandbox.get).toHaveBeenCalledWith(
-      expect.objectContaining({ name: expect.stringMatching(/^eve-sbx-vercel-/u) }),
-    );
+    expect(sandboxModule.Sandbox.get).not.toHaveBeenCalled();
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
       expect.objectContaining({
         name: expect.stringMatching(/^eve-sbx-vercel-/u),
@@ -824,7 +821,106 @@ describe("createVercelSandbox", () => {
         },
       }),
     );
-    expect(sessionSandbox.runCommand).toHaveBeenCalledTimes(1);
+    expect(sessionSandbox.runCommand).not.toHaveBeenCalled();
+
+    for (const shadowPath of [
+      "/",
+      "/workspace",
+      "//workspace",
+      "/workspace/.",
+      "/data/../workspace",
+      "/dev",
+      "/proc",
+      "/usr",
+      "/bin",
+      "/usr/local/bin",
+      "/home/vercel-sandbox/.local/bin",
+      "/lib",
+      "/lib64",
+      "/usr/lib",
+      "",
+      ".",
+      "workspace",
+      "../workspace",
+    ]) {
+      const shadowedSandbox = createMockSandbox({ name: "shadowed" });
+      const shadowedProvider = vercelHarness(
+        {
+          loadSandboxModule: async () =>
+            ({
+              Sandbox: {
+                create: vi.fn().mockResolvedValue(shadowedSandbox),
+                get: vi.fn().mockResolvedValue(null),
+              },
+            }) as never,
+        },
+        { mounts: { [shadowPath]: { drive: "workspace-drive", mode: "read-write" } } },
+      );
+      await shadowedProvider.openSession({
+        appRoot: "/tmp/test-app-root",
+        prepared: { snapshotId: "prepared-snapshot" },
+        sandboxName: "shadowed-key",
+      });
+      expect(
+        shadowedSandbox.runCommand,
+        `expected base setup for ${JSON.stringify(shadowPath)}`,
+      ).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("falls back to an existing sandbox and updates tags when preferCreate fails with conflict, 410, or 429, and rethrows when none exists", async () => {
+    for (const failure of [
+      Object.assign(new Error("already exists"), { response: { status: 409 } }),
+      Object.assign(new Error("Snapshot not found"), { response: { status: 410 } }),
+      Object.assign(new Error("Rate limit exceeded"), { response: { status: 429 } }),
+    ]) {
+      const existing = createMockSandbox({ name: "existing-session" });
+      const get = vi.fn().mockResolvedValue(existing);
+      const create = vi.fn().mockRejectedValue(failure);
+      const provider = createTestVercelSandbox({
+        createOptions: { tags: { env: "prod" } },
+        loadSandboxModule: async () => ({ Sandbox: { create, get } }) as never,
+      });
+
+      const opened = await provider.openSession({
+        appRoot: "/tmp/test-app-root",
+        prepared: { snapshotId: "prepared-snapshot" },
+        sandboxName: "existing-key",
+      });
+
+      expect(opened.sandbox.name).toBe("existing-session");
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(get).toHaveBeenCalledTimes(1);
+      expect(existing.runCommand).toHaveBeenCalledTimes(1);
+      expect(existing.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tags: expect.objectContaining({ env: "prod" }),
+        }),
+      );
+    }
+
+    const conflict = Object.assign(new Error("already exists"), { response: { status: 409 } });
+    for (const get of [
+      vi.fn().mockResolvedValue(null),
+      vi.fn().mockRejectedValue(new Error("fallback get network failure")),
+    ]) {
+      const provider = createTestVercelSandbox({
+        loadSandboxModule: async () =>
+          ({
+            Sandbox: {
+              create: vi.fn().mockRejectedValue(conflict),
+              get,
+            },
+          }) as never,
+      });
+      await expect(
+        provider.openSession({
+          appRoot: "/tmp/test-app-root",
+          prepared: { snapshotId: "prepared-snapshot" },
+          sandboxName: "missing-winner",
+        }),
+      ).rejects.toThrow("already exists");
+    }
   });
 
   describe("identity recorded by earlier releases", () => {
@@ -928,7 +1024,7 @@ describe("createVercelSandbox", () => {
 
       expect(resumed.sandbox.name).toBe(sandboxName);
       expect(started.state).toEqual({ sandboxName, version: 3 });
-      expect(fake.sandboxModule.Sandbox.create).not.toHaveBeenCalled();
+      expect(fake.sandboxes.size).toBe(1);
     });
 
     it("derives template keys from create options, image, resources, and source revision", async () => {
@@ -1603,9 +1699,6 @@ describe("createVercelSandbox", () => {
     ).rejects.toBeInstanceOf(SandboxTemplateNotProvisionedError);
 
     expect(sandboxModule.Sandbox.get).toHaveBeenCalledTimes(1);
-    expect(sandboxModule.Sandbox.get).toHaveBeenCalledWith(
-      expect.objectContaining({ name: expect.stringMatching(/^eve-sbx-vercel-/u) }),
-    );
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
       expect.objectContaining({
         name: expect.stringMatching(/^eve-sbx-vercel-/u),
@@ -1765,7 +1858,7 @@ describe("createVercelSandbox", () => {
 
     await open();
 
-    expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
+    expect(fake.sandboxes.size).toBe(1);
     expect(
       sessionSandbox.update.mock.calls.filter(([update]) => "networkPolicy" in update),
     ).toEqual([]);
@@ -2152,7 +2245,7 @@ describe("createVercelSandbox", () => {
       AI_AGENT: "alice-bot",
       REVIEW_VALUE: "per-command",
     });
-    expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
+    expect(fake.sandboxes.size).toBe(1);
     expect(created.mounts).toEqual({
       "/workspace/data": { drive: "initial-drive", mode: "read-write" },
     });
