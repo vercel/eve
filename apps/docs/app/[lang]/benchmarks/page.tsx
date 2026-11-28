@@ -1,18 +1,23 @@
 import type { Metadata } from "next";
-import { canonicalAlternates, canonicalRoutes } from "@/lib/geistdocs/canonical";
-import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
+import { Suspense } from "react";
+import { eveBenchmark, orderedModels } from "@/lib/evals/eve-results";
 import { benchmarkResults, benchmarkRows } from "@/lib/evals/results";
-import { ResultsTable } from "./results-table";
+import { canonicalAlternates, canonicalRoutes } from "@/lib/geistdocs/canonical";
+import { supportedLanguages } from "@/lib/geistdocs/languages";
+import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
+import { BenchmarksHub, type HubView } from "./benchmarks-hub";
 
-const title = "Model Benchmarks - eve";
+const title = "Benchmarks - eve";
 const description =
-  "See how coding agents perform on eve project authoring tasks with and without eve's generated guidance.";
+  "Compare stock eve against peer coding agent harnesses across OpenAI and Anthropic models on DeepSWE-lean, plus eve project authoring benchmarks.";
 const titleMetadata = pageTitleMetadata(title);
 
 export const metadata: Metadata = {
   ...titleMetadata,
   description,
-  alternates: canonicalAlternates(canonicalRoutes.benchmarks),
+  alternates: canonicalAlternates(canonicalRoutes.benchmarks, {
+    types: { "text/markdown": "/benchmarks.md" },
+  }),
   openGraph: {
     ...titleMetadata.openGraph,
     images: ["/benchmarks/opengraph-image"],
@@ -25,81 +30,63 @@ export const metadata: Metadata = {
   },
 };
 
-const ModelBenchmarksPage = () => {
-  const rows = benchmarkRows(benchmarkResults);
-  const previouslyMeasured = (benchmarkResults.previouslyMeasured ?? []).flatMap((measurement) =>
-    benchmarkRows({ ...benchmarkResults, ...measurement }),
-  );
-  const publishedAt = formatDate(benchmarkResults.generatedAt);
-  const revision = benchmarkResults.suite.eveRevision;
+export const generateStaticParams = () => supportedLanguages.map((lang) => ({ lang }));
+
+const authoringRows = benchmarkRows(benchmarkResults);
+const authoringRetiredRows = (benchmarkResults.previouslyMeasured ?? []).flatMap((measurement) =>
+  benchmarkRows({ ...benchmarkResults, ...measurement }),
+);
+const harnessDataset = eveBenchmark.datasets["deepswe-lean"];
+const availableFamilies = new Set(
+  harnessDataset ? orderedModels(harnessDataset).map((entry) => entry.family) : [],
+);
+const defaultFamily = harnessDataset
+  ? (orderedModels(harnessDataset)[0]?.family ?? "openai")
+  : "openai";
+
+const ResolvedBenchmarksHub = async ({
+  searchParams,
+}: {
+  searchParams: PageProps<"/[lang]/benchmarks">["searchParams"];
+}) => {
+  const params = await searchParams;
+  const viewParam = Array.isArray(params.view) ? params.view[0] : params.view;
+  const modelParam = Array.isArray(params.model) ? params.model[0] : params.model;
+  const initialView: HubView = viewParam === "authoring" ? "authoring" : "harness";
+  const initialFamily =
+    typeof modelParam === "string" && availableFamilies.has(modelParam)
+      ? modelParam
+      : defaultFamily;
 
   return (
-    <main className="mx-auto w-full min-w-0 max-w-[1080px] px-4 pb-32 sm:px-6">
-      <section className="flex min-w-0 flex-col items-center px-0 pt-16 pb-12 text-center sm:px-4">
-        <h1 className="text-gray-1000 text-heading-48 sm:text-heading-64">Model Benchmarks</h1>
-        <p className="mt-5 max-w-3xl text-gray-900 text-lg">
-          Performance of coding agents creating and changing eve projects, measured by deterministic
-          checks against the files, commands, and simulated external interactions each run produces
-          <sup>1</sup>.
-        </p>
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-gray-800 text-sm">
-          <span>
-            Last published: <span className="font-medium text-gray-1000">{publishedAt}</span>
-          </span>
-          <span aria-hidden="true" className="hidden text-gray-500 sm:inline">
-            ·
-          </span>
-          <span>
-            eve revision: {revision ? <RevisionLink revision={revision} /> : <NotAvailable />}
-          </span>
-        </div>
-      </section>
-
-      <section aria-labelledby="current-results">
-        <h2 className="sr-only" id="current-results">
-          Current results
-        </h2>
-        <ResultsTable rows={rows} />
-      </section>
-
-      {previouslyMeasured.length > 0 ? (
-        <section className="mt-8" aria-labelledby="retired-models">
-          <h2 className="text-heading-24 text-gray-1000" id="retired-models">
-            Retired Models
-          </h2>
-          <div className="mt-3">
-            <ResultsTable rows={previouslyMeasured} showMeasurementDate />
-          </div>
-        </section>
-      ) : null}
-
-      <p className="mt-8 text-gray-700 text-sm leading-6">
-        <sup>1</sup> Each model completes the same deterministic eve authoring tasks three times
-        with and without the guidance files generated by <code>eve init</code>; success rates
-        include every scheduled run, while duration, tokens, and tool calls average valid runs. Cost
-        estimates apply provider public list prices to recorded token usage.
-      </p>
-    </main>
+    <BenchmarksHub
+      authoringPublishedAt={benchmarkResults.generatedAt}
+      authoringRetiredRows={authoringRetiredRows}
+      authoringRevision={benchmarkResults.suite.eveRevision}
+      authoringRows={authoringRows}
+      harnessDataset={harnessDataset}
+      initialFamily={initialFamily}
+      initialView={initialView}
+    />
   );
 };
 
-const RevisionLink = ({ revision }: { revision: string }) => (
-  <a
-    className="font-mono font-medium text-gray-1000 underline underline-offset-4"
-    href={`https://github.com/vercel/eve/commit/${revision}`}
+const BenchmarksPage = ({ searchParams }: PageProps<"/[lang]/benchmarks">) => (
+  <Suspense
+    fallback={
+      <BenchmarksHub
+        authoringPublishedAt={benchmarkResults.generatedAt}
+        authoringRetiredRows={authoringRetiredRows}
+        authoringRevision={benchmarkResults.suite.eveRevision}
+        authoringRows={authoringRows}
+        harnessDataset={harnessDataset}
+        initialFamily={defaultFamily}
+        initialView="harness"
+      />
+    }
   >
-    {revision.slice(0, 8)}
-  </a>
+    <ResolvedBenchmarksHub searchParams={searchParams} />
+  </Suspense>
 );
 
-const NotAvailable = () => <span className="text-gray-700">N/A</span>;
-
-function formatDate(value: string | null): string {
-  if (value === null) return "Not yet published";
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "long",
-    timeZone: "UTC",
-  }).format(new Date(value));
-}
-
-export default ModelBenchmarksPage;
+export default BenchmarksPage;

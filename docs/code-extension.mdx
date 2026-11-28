@@ -9,7 +9,7 @@ description: "Mount eve's coding extension, eve-code, and see the latest stock e
 
 <EveBenchmark dataset="deepswe-lean" />
 
-These results show baseline performance of stock `eve` (without `eve/extensions/code`) against peer coding agent harnesses, with each harness in its standard setup and high reasoning. Other models, settings, or tasks can perform differently.
+These results show baseline performance of stock `eve` (without `eve/extensions/code`) against peer coding agent harnesses across OpenAI and Anthropic models, with each harness in its standard setup and high reasoning. See the [Benchmarks](/benchmarks) page for the full multi-model scorecard, per-task matrix, prompt and tool overhead breakdown, and eve authoring benchmarks.
 
 <details>
 <summary>How the benchmark works</summary>
@@ -32,8 +32,8 @@ The line on each correctness row shows the 95% interval. When the lines of two h
 <summary>How the results update</summary>
 
 1. The `eve` workflow runs on `main` with the `deepswe-lean` dataset every Monday at 06:00 UTC. A maintainer can also start it manually on `main`.
-2. The workflow runs eve, opencode, pi, and [fx](https://fx.sh) on each benchmark model, one model at a time. It saves each complete result in the eve-bench result store.
-3. The workflow opens a pull request with a summary of the default Anthropic model's result. This page shows only that model.
+2. The workflow runs eve, opencode, pi, and [fx](https://fx.sh) on each benchmark model (OpenAI and Anthropic), one model at a time, and saves each complete result in the eve-bench result store.
+3. The workflow opens a pull request refreshing the public snapshot with every model family produced in that run.
 4. After a maintainer approves and merges the pull request, the next docs deployment shows the new results.
 
 The workflow skips incomplete runs, single-task runs, and pull request runs. Results can be a week or more older than `main`, because the workflow runs weekly and each refresh waits for review. Select a harness name to open the GitHub Actions run for that result.

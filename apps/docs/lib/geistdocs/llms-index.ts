@@ -93,6 +93,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 ## Optional
 
+- [Benchmarks](${EVE_ORIGIN}/benchmarks.md): Compare stock eve against peer coding agent harnesses across OpenAI and Anthropic models and review eve authoring benchmarks.
 - [Changelog](${EVE_ORIGIN}/changelog.md): Read eve release notes, including breaking changes and fixes. Follow the next-page links for older releases.
 - [Integrations](${EVE_ORIGIN}/integrations): Browse official channels, connections, extensions, and observability integrations.
 - [Templates](${templateGalleryUrl}): Browse eve example projects on Vercel.

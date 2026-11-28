@@ -17,10 +17,14 @@ describe("markdownRoutes", () => {
     expect(rewriteIntegration("slak")).toBe("/en/llms.mdx/integrations/slak");
   });
 
-  it("keeps docs Markdown routing intact", () => {
+  it("keeps docs and benchmarks Markdown routing intact", () => {
     expect(markdownRoutes).toContainEqual({
       from: "/docs/*path",
       to: "/[lang]/llms.mdx/*path",
+    });
+    expect(markdownRoutes).toContainEqual({
+      from: "/benchmarks",
+      to: "/[lang]/benchmarks.md",
     });
   });
 });

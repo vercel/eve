@@ -162,16 +162,13 @@ jobs:
   docs-snapshot:
     name: Refresh docs benchmark results
     needs: [request, benchmark]
-    # The docs report deepswe-lean on the default (Anthropic) model only: their
-    # component renders one model per dataset. deepswe-lean runs weekly and from
-    # manual dispatches on main; only trusted main runs publish to the result store.
-    # Another family's failure does not hold back the default family's refresh.
+    # Refresh the docs snapshot after any weekly or manually dispatched deepswe-lean
+    # run on main, merging every model family that produced a report artifact.
     if: >-
       !cancelled() &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
-      needs.request.outputs.dataset == 'deepswe-lean' &&
-      contains(fromJSON(needs.request.outputs.models).*.family, 'anthropic')
+      needs.request.outputs.dataset == 'deepswe-lean'
     concurrency:
       group: eve-docs-snapshot
       cancel-in-progress: false
@@ -198,21 +195,34 @@ jobs:
       - name: Open snapshot pull request
         env:
           GH_TOKEN: ${{ github.token }}
-          ARTIFACT: ${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}-anthropic
+          ARTIFACT_PREFIX: ${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}
+          MODELS_JSON: ${{ needs.request.outputs.models }}
           FILE: apps/docs/lib/evals/eve-benchmark.json
           BRANCH: bot/eve-benchmark-snapshot
           TITLE: "chore: refresh eve benchmark results"
         run: |
           set -euo pipefail
-          if ! gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n "$ARTIFACT" -D "$RUNNER_TEMP/bench" ||
-            [ ! -f "$RUNNER_TEMP/bench/report.json" ]; then
-            echo "::notice::eve docs snapshot not updated: the run uploaded no $ARTIFACT report."
+          mapfile -t families < <(node -e 'for (const m of JSON.parse(process.env.MODELS_JSON)) console.log(m.family)')
+          reports=()
+          for family in "${families[@]}"; do
+            artifact="${ARTIFACT_PREFIX}-${family}"
+            dir="$RUNNER_TEMP/bench-${family}"
+            if gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n "$artifact" -D "$dir" &&
+              [ -f "$dir/report.json" ]; then
+              reports+=("$dir/report.json")
+            else
+              echo "::notice::eve docs snapshot skipped $artifact: report.json not uploaded."
+            fi
+          done
+          if [ "${#reports[@]}" -eq 0 ]; then
+            echo "::notice::eve docs snapshot not updated: no reports were uploaded."
             exit 0
           fi
+
           head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" -q .object.sha)
           gh api "repos/$GITHUB_REPOSITORY/contents/$FILE?ref=$head" -H "Accept: application/vnd.github.raw" > "$FILE"
           cp "$FILE" "$RUNNER_TEMP/before.json"
-          node .github/scripts/eve-docs-snapshot.mjs "$RUNNER_TEMP/bench/report.json" "$FILE"
+          node .github/scripts/eve-docs-snapshot.mjs --updated-file "$RUNNER_TEMP/updated.txt" "${reports[@]}" "$FILE"
           if cmp -s "$FILE" "$RUNNER_TEMP/before.json"; then exit 0; fi
 
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" > /dev/null 2>&1; then
@@ -224,8 +234,9 @@ jobs:
           gh api graphql --input "$RUNNER_TEMP/commit.json" -q .data.createCommitOnBranch.commit.url
 
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          families_list=$(node -e 'const fs = require("node:fs"); console.log(fs.readFileSync(process.argv[1], "utf8").trim().split("\n").filter(Boolean).join(", "));' "$RUNNER_TEMP/updated.txt")
           cat > "$RUNNER_TEMP/body.md" <<EOF
-          Refreshes \`$FILE\` from the deepswe-lean \`anthropic\` report of $run_url.
+          Refreshes \`$FILE\` from the deepswe-lean ($families_list) reports of $run_url.
 
           GitHub holds workflow runs on pull requests that \`GITHUB_TOKEN\` opens until a maintainer approves them. To run the required checks, select **Approve workflows to run** on this PR, as on the Version Packages PR. Then review and approve the PR; auto-merge squashes it once checks pass.
 
