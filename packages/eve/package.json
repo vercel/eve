@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [

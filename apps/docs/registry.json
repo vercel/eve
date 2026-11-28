@@ -11,7 +11,7 @@
       "meta": {
         "eve": {
           "hidden": true,
-          "requires": ">=0.62.0",
+          "requires": ">=1.6.0",
           "setup": [
             {
               "package": "eve",
@@ -52,7 +52,7 @@
               ]
             }
           ],
-          "requires": ">=0.62.0"
+          "requires": ">=1.6.0"
         }
       },
       "files": [
