@@ -146,4 +146,32 @@ describe("resolveScheduleCollection", () => {
     expect(readScheduleCollectionSource(copy.definition)?.application).toBe("copy");
     expect(readScheduleCollectionSource(shared)).toBeUndefined();
   });
+
+  it("lets the imported export of a module that one application resolved name its source", async () => {
+    const own = defineDynamicSchedules({
+      description: "one application's schedules",
+      inputSchema: z.object({ note: z.string() }),
+      run: async () => {},
+      auth: async () => ({ type: "service", id: "crons" }) as never,
+    });
+    const moduleMap = buildModuleMap("schedules/crons.ts", { default: own });
+    const collection = {
+      application: "root",
+      logicalPath: "schedules/crons.ts",
+      name: "crons",
+      providerKind: "vercel",
+      sourceId: "schedules/crons.ts",
+      sourceKind: "module" as const,
+    };
+    const scope = { moduleMap, nodeId: undefined, toolFiles: new Set<string>() };
+
+    await resolveScheduleCollection(collection, scope);
+    await resolveScheduleCollection(collection, scope);
+
+    expect(readScheduleCollectionSource(own)).toMatchObject({
+      application: "root",
+      collection: "crons",
+      sourceId: "schedules/crons.ts",
+    });
+  });
 });
