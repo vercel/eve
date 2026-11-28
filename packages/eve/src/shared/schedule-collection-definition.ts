@@ -33,12 +33,31 @@ export function stampScheduleCollectionSource(
   });
 }
 
+const RESOLVED = new WeakMap<object, Map<string, ScheduleCollectionSourceIdentity>>();
+
+/**
+ * Remembers which application resolved the module's own export. A module that two applications resolve is stamped on a copy
+ * per application, so the reference an author imports carries no stamp itself; `readScheduleCollectionSource` finds the
+ * identity through this record when exactly one application resolved the module, and finds none when it is ambiguous.
+ */
+export function recordResolvedScheduleCollection(
+  authored: object,
+  identity: ScheduleCollectionSourceIdentity,
+): void {
+  const identities = RESOLVED.get(authored) ?? new Map<string, ScheduleCollectionSourceIdentity>();
+  identities.set(`${identity.application}\0${identity.sourceId}`, Object.freeze({ ...identity }));
+  RESOLVED.set(authored, identities);
+}
+
 export function readScheduleCollectionSource(
   value: object,
 ): ScheduleCollectionSourceIdentity | undefined {
-  return Reflect.get(value, SCHEDULE_COLLECTION_SOURCE) as
+  const stamped = Reflect.get(value, SCHEDULE_COLLECTION_SOURCE) as
     | ScheduleCollectionSourceIdentity
     | undefined;
+  if (stamped !== undefined) return stamped;
+  const resolved = RESOLVED.get(value);
+  return resolved?.size === 1 ? [...resolved.values()][0] : undefined;
 }
 
 export function isScheduleCollectionDefinition(value: unknown): boolean {

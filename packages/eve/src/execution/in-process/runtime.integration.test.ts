@@ -8,6 +8,8 @@ import { defineAgent } from "#public/definitions/agent.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 
+import { createSession, internalSession } from "#channel/session.js";
+import { ANONYMOUS_SESSION_AUTH_CONTEXT } from "#channel/principal-identity.js";
 import { createChannelAddress } from "#channel/channel-address.js";
 import type { Runtime } from "#channel/types.js";
 import type { DeliveryTiming } from "#execution/in-process/inbox-transport.js";
@@ -260,6 +262,43 @@ describe("the in-process runtime", () => {
         expect(deployed.violations).toEqual([]);
       } finally {
         await inProcess.dispose();
+      }
+    });
+  });
+
+  it("answers ownership for the principal that created the session, and no one else", async () => {
+    const test = await createTestRuntime({ agent: { name: "in-process-owner" } });
+    await test.run(async () => {
+      const runtime = createTestInProcessRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      const principal = (id: string) =>
+        ({
+          attributes: {},
+          authenticator: "workspace-token",
+          principalId: id,
+          principalType: "service",
+        }) as const;
+      const wsA = principal("workspace:ws_a");
+      const wsB = principal("workspace:ws_b");
+      try {
+        const { session } = await address(runtime, "owner-token").create({ auth: wsA });
+        const joined = await address(runtime, "owner-token").create({ auth: wsB });
+
+        expect(joined.session.id).toBe(session.id);
+        const owned = internalSession(session);
+        await expect(owned.ownedBy(wsA)).resolves.toBe(true);
+        await expect(owned.ownedBy(wsB)).resolves.toBe(false);
+        await expect(owned.ownedBy(null)).resolves.toBe(false);
+        await expect(createSession("session_unknown", runtime).ownedBy(wsA)).resolves.toBe(false);
+
+        const anonymous = await address(runtime, "anonymous-owner-token").create({ auth: null });
+        const anonymousOwned = internalSession(anonymous.session);
+        await expect(anonymousOwned.ownedBy(null)).resolves.toBe(true);
+        await expect(anonymousOwned.ownedBy(ANONYMOUS_SESSION_AUTH_CONTEXT)).resolves.toBe(true);
+        await expect(anonymousOwned.ownedBy(wsA)).resolves.toBe(false);
+      } finally {
+        await runtime.dispose();
       }
     });
   });

@@ -190,6 +190,12 @@ export default defineTool({
 
 Call the client inside an active eve context, not at module scope.
 
+In code that runs outside a turn, such as an HTTP channel route handler, pass the caller's verified principal as `auth`, for example the result of `routeAuth`. The client acts as that principal, and `scope` resolves from it, so one principal's client never reaches another's schedules. `invoke` isn't available outside a turn. Passing `auth` inside a turn throws, because a turn's principal never changes.
+
+```ts
+const client = await schedules(requests, { auth: principal });
+```
+
 The `name` you pass is a display label, and several schedules can share it. It must start with an ASCII letter or digit, contain only letters, digits, `.`, `_`, or `-`, and have at most 256 characters. eve truncates it to 218 characters and appends `--` plus a UUID to make the unique management name.
 
 Receipts and reads return that unique `name`, which management calls take, plus `displayName`. In callbacks and events, they are `occurrence.name` and `occurrence.displayName`. Approval covers the label, timing, and payload, before the unique name exists.
@@ -268,7 +274,7 @@ Your provider owns schedule storage, timing, and occurrence delivery. eve handle
 | Delivery             | Deliver the stored payload with an occurrence's `executionId`, `name`, `scheduleId`, and `scheduledAt`. Keep `executionId` stable across retries.      |
 | Timing checks        | Optional `validateExpression`, sync or async. Throw for a cron or one-time expression your backend can't run. eve calls it before it prepares a write. |
 
-`ScheduleProviderContext` is also exported from `eve/schedules`. It supplies an `abortSignal`, an `operationId` for recognizing retried operations, and a delivery `target`. Use `target.deliver`, when present, to dispatch an occurrence through eve. Your backend must arrange when occurrences fire and how they retry; the management interface alone does not start a clock.
+`ScheduleProviderContext` is also exported from `eve/schedules`. It supplies an `abortSignal`, the authorized `scope` that `namespace` is derived from, an `operationId` for recognizing retried operations, and a delivery `target`. Use `target.deliver`, when present, to dispatch an occurrence through eve. Your backend must arrange when occurrences fire and how they retry; the management interface alone does not start a clock.
 
 For fixed cron jobs without runtime management, use [Schedules](./schedules).
 

@@ -12,18 +12,30 @@ import {
 } from "#internal/invocation/metadata.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 
-export async function readOwnedInvocationRun(sessionId: string, auth: SessionAuthContext | null) {
+async function getRunOrUndefined(sessionId: string, options?: { resolveData: "none" }) {
   const world = await getWorld();
   try {
-    const run = await world.runs.get(sessionId);
-    if (run.attributes[INVOCATION_TOKEN_ATTRIBUTE] === undefined) return undefined;
-    return run.attributes[INVOCATION_OWNER_ATTRIBUTE] === invocationOwnerKey(auth)
-      ? run
-      : undefined;
+    return await world.runs.get(sessionId, options);
   } catch (error) {
     if (isMissingRun(error)) return undefined;
     throw error;
   }
+}
+
+export async function readOwnedInvocationRun(sessionId: string, auth: SessionAuthContext | null) {
+  const run = await getRunOrUndefined(sessionId);
+  if (run === undefined || run.attributes[INVOCATION_TOKEN_ATTRIBUTE] === undefined) {
+    return undefined;
+  }
+  return run.attributes[INVOCATION_OWNER_ATTRIBUTE] === invocationOwnerKey(auth) ? run : undefined;
+}
+
+export async function sessionOwnedBy(
+  sessionId: string,
+  auth: SessionAuthContext | null,
+): Promise<boolean> {
+  const run = await getRunOrUndefined(sessionId, { resolveData: "none" });
+  return run?.attributes[INVOCATION_OWNER_ATTRIBUTE] === invocationOwnerKey(auth);
 }
 
 function isMissingRun(error: unknown): boolean {

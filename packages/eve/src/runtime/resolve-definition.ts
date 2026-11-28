@@ -13,7 +13,10 @@ import { memoryMismatch, normalizeMemoryDefinition } from "#internal/authored-de
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
 import type { DynamicSchedulesDefinition } from "#public/schedules/subscription.js";
 import { scheduleCollectionToolSlot } from "#shared/schedule-collection-tools.js";
-import { stampScheduleCollectionSource } from "#shared/schedule-collection-definition.js";
+import {
+  recordResolvedScheduleCollection,
+  stampScheduleCollectionSource,
+} from "#shared/schedule-collection-definition.js";
 import { namedScopeDefinition } from "#runtime/schedules/named-scope.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type {
@@ -78,14 +81,16 @@ export async function resolveScheduleCollection(
     ) as DynamicSchedulesDefinition<unknown>;
     const definition =
       collection.namedScope === undefined
-        ? authored
+        ? { ...authored }
         : namedScopeDefinition(authored, collection.namedScope.name);
-    stampScheduleCollectionSource(definition, {
+    const identity = {
       application: collection.application,
       collection: collection.name,
       logicalPath: collection.logicalPath,
       sourceId: collection.sourceId,
-    });
+    };
+    stampScheduleCollectionSource(definition, identity);
+    recordResolvedScheduleCollection(authored, identity);
     const namedScope = collection.namedScope;
     const scopeEntry = namedScope === undefined ? undefined : authored.scopes?.[namedScope.name];
     const scopeDescription = typeof scopeEntry === "object" ? scopeEntry.description : undefined;

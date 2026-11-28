@@ -66,6 +66,7 @@ export interface InternalSession extends Session {
   getStreamTailIndex(): Promise<number>;
   getStreamVersion?(): Promise<string | undefined>;
   hasRunnableOwner(): Promise<boolean>;
+  ownedBy(auth: SessionAuthContext | null): Promise<boolean>;
 }
 
 export function internalSession(session: Session): InternalSession {
@@ -276,6 +277,9 @@ export function createSession(
     },
     async hasRunnableOwner() {
       return (await runtime.hasRunnableOwner?.(id)) ?? true;
+    },
+    async ownedBy(auth) {
+      return (await runtime.ownsSession?.(id, auth)) ?? false;
     },
     async getChildBinding(childSessionId: string) {
       return await runtime.readChildBinding?.(id, childSessionId);

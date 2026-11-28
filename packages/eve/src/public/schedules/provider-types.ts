@@ -1,4 +1,4 @@
-import type { ScheduleOccurrence } from "#public/schedules/subscription.js";
+import type { ScheduleOccurrence, ScheduleScopeValue } from "#public/schedules/subscription.js";
 
 /**
  * An occurrence a schedule provider hands back to eve to run, with the schedule's stored payload.
@@ -26,5 +26,7 @@ export interface ScheduleProviderContext {
   readonly collection: string;
   readonly namespace: string;
   readonly operationId: string;
+  /** The authorized scope that `namespace` is derived from. */
+  readonly scope: ScheduleScopeValue;
   readonly target: ScheduleDeliveryTarget;
 }

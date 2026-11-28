@@ -20,6 +20,8 @@ import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { bootInitialOwner } from "#execution/session/owner-boot.js";
 import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
 import { runPreparedSession } from "#execution/session/program.js";
+import { sessionOwnerAuth } from "#channel/conversation-context.js";
+import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import { createUlid } from "#shared/ulid.js";
 import { createInProcessHost, type InProcessHost, type InProcessHostOptions } from "./host.js";
 import type { WorkflowFunction } from "./runs.js";
@@ -55,15 +57,18 @@ export function createInProcessRuntime(
 
 function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcessRuntime {
   const { inboxes, lines, running } = host;
+  const owners = new Map<string, string>();
 
   const startEntry = (
     entry: Omit<InitialWorkflowEntryInput, "ownerDeploymentId">,
     continuationToken: string | undefined,
+    ownerKey?: string,
   ): Promise<{ readonly sessionId: string; readonly claimedContinuation: boolean }> =>
-    host.working(() => bootEntry(entry, continuationToken));
+    host.working(() => bootEntry(entry, continuationToken, ownerKey));
   const bootEntry = async (
     entry: Omit<InitialWorkflowEntryInput, "ownerDeploymentId">,
     continuationToken: string | undefined,
+    ownerKey: string | undefined,
   ): Promise<{ readonly sessionId: string; readonly claimedContinuation: boolean }> => {
     const sessionId = `session_${createUlid()}`;
     const sessionWritable = lines.open(sessionId);
@@ -87,6 +92,7 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
       if (holder === undefined) throw new Error("The session's address is held elsewhere.");
       return { claimedContinuation: false, sessionId: holder };
     }
+    if (ownerKey !== undefined) owners.set(sessionId, ownerKey);
     const session = runPreparedSession(boot.session, boot.inbox, host.sessionHost).then(
       () => undefined,
       () => undefined,
@@ -99,7 +105,11 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
   return {
     async createSession(input: RunInput): Promise<RunHandle> {
       const prepared = await prepareInitialEntry(config, input);
-      const started = await startEntry(prepared.entry, input.continuationToken);
+      const started = await startEntry(
+        prepared.entry,
+        input.continuationToken,
+        invocationOwnerKey(sessionOwnerAuth(input)),
+      );
       const delivery = prepared.input.delivery;
       if (!started.claimedContinuation) {
         return {
@@ -117,6 +127,10 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
         sessionId: started.sessionId,
         ...(delivery !== undefined && { deliveryId: delivery.deliveryId }),
       };
+    },
+
+    async ownsSession(sessionId, auth) {
+      return owners.get(sessionId) === invocationOwnerKey(auth);
     },
 
     startEntry: (entry) => startEntry(entry, undefined),

@@ -142,6 +142,7 @@ describe("dispatchChannelRequest", () => {
     const currentProjects: Array<Awaited<ReturnType<typeof resolveVercelOidcCurrentProject>>> = [];
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           handler: async (request) => {
@@ -185,6 +186,7 @@ describe("dispatchChannelRequest", () => {
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           fetch: async (_request: Request, ctx: { waitUntil: (t: Promise<unknown>) => void }) => {
@@ -267,6 +269,7 @@ describe("dispatchChannelRequest", () => {
     let capturedArgs: RouteHandlerArgs | undefined;
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           handler: async (_req, args) => {
@@ -332,6 +335,7 @@ describe("dispatchChannelRequest", () => {
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           handler: async (_req, args) => {
@@ -379,6 +383,7 @@ describe("dispatchChannelRequest", () => {
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           handler: async (_req, args) => {
@@ -423,6 +428,7 @@ describe("dispatchChannelRequest", () => {
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           handler: async (_req, args) => {
@@ -479,6 +485,7 @@ describe("dispatchChannelRequest", () => {
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           handler: async (_req, args) => {
@@ -519,6 +526,7 @@ describe("dispatchChannelRequest", () => {
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           handler: async (_req, args) =>
@@ -564,6 +572,7 @@ describe("dispatchChannelRequest", () => {
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           handler: async (_req, args) =>
@@ -606,6 +615,7 @@ describe("dispatchChannelRequest", () => {
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           handler: async (_req, args) => {
@@ -645,6 +655,7 @@ describe("dispatchChannelRequest", () => {
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           fetch: async () => new Response("not used"),
@@ -690,6 +701,7 @@ describe("dispatchChannelRequest", () => {
   it("rejects websocket upgrades when no websocket channel matches", async () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [],
       runtime,
     });
@@ -714,6 +726,7 @@ describe("dispatchChannelRequest", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           fetch: async () => {
@@ -758,6 +771,7 @@ describe("dispatchChannelRequest", () => {
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           fetch: async (_req, ctx: { waitUntil: (t: Promise<unknown>) => void }) => {
@@ -797,6 +811,7 @@ describe("dispatchChannelRequest", () => {
     const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           fetch: async (_req, ctx: { waitUntil: (t: Promise<unknown>) => void }) => {
@@ -830,6 +845,7 @@ describe("dispatchChannelRequest", () => {
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         slackChannel(
           async (_request, ctx: { waitUntil: (t: Promise<unknown>) => void }) =>
@@ -875,6 +891,7 @@ describe("dispatchChannelRequest", () => {
     );
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [slackChannel(async () => new Response("unused"), { handler })],
       runtime: createRuntime(),
     });
@@ -893,6 +910,7 @@ describe("dispatchChannelRequest", () => {
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           fetch: async () => new Response("ok"),
@@ -966,6 +984,7 @@ function mockRouteSendRuntime(): Runtime {
   });
   mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
     agentName: "test-agent",
+    compiledArtifactsSource: { kind: "bundled" },
     channels: [
       slackChannel(async () => new Response("unused"), {
         adapter: { kind: "channel:slack" },
@@ -1016,6 +1035,7 @@ describe("dispatchChannelRequest tracing", () => {
   it("uses the semantic request name", async () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [slackChannel(async () => new Response("ok"))],
       runtime,
     });
@@ -1034,6 +1054,7 @@ describe("dispatchChannelRequest tracing", () => {
     let spansDuringHandler = -1;
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         slackChannel(
           async () => {
@@ -1084,6 +1105,7 @@ describe("dispatchChannelRequest tracing", () => {
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         slackChannel(async () => new Response("ok"), {
           adapter: { kind: "http" },
@@ -1102,6 +1124,7 @@ describe("dispatchChannelRequest tracing", () => {
   it("keeps the request span open until a streamed response body is consumed", async () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         slackChannel(
           async () =>
@@ -1133,6 +1156,7 @@ describe("dispatchChannelRequest tracing", () => {
     const sourceCancelled = createDeferred<unknown>();
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         slackChannel(
           async () =>
@@ -1158,6 +1182,7 @@ describe("dispatchChannelRequest tracing", () => {
   it("makes a span created inside the handler a child of the request span", async () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         slackChannel(async () => {
           await Promise.resolve();
@@ -1216,6 +1241,7 @@ describe("dispatchChannelRequest tracing", () => {
     const parentId = "b7ad6b7169203331";
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [slackChannel(async () => new Response("ok"))],
       runtime,
     });
@@ -1238,6 +1264,7 @@ describe("dispatchChannelRequest tracing", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         slackChannel(async () => {
           throw new Error("handler exploded");
@@ -1284,6 +1311,7 @@ describe("dispatchChannelRequest tracing", () => {
   it("still emits a 404 span with the route but no channel identity when nothing matches", async () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [],
       runtime,
     });
@@ -1312,6 +1340,7 @@ describe("dispatchChannelRequest tracing", () => {
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [
         {
           fetch: async () => new Response("ok"),
@@ -1371,6 +1400,7 @@ describe("dispatchChannelRequest without an OTel provider", () => {
     const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [slackChannel(async () => new Response("ok"))],
       runtime,
     });
@@ -1412,6 +1442,7 @@ describe("dispatchChannelRequest with request tracing not enabled", () => {
     const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
+      compiledArtifactsSource: { kind: "bundled" },
       channels: [slackChannel(async () => new Response("ok"))],
       runtime,
     });
