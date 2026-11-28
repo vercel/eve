@@ -448,14 +448,19 @@ async function runSessionLoop(
               outcome: "ignored",
               source: next.kind,
             });
+          void startTimer().catch(() => {});
           continue;
         case "turn":
+          void startTimer().catch(() => {});
           return await runDeliveredTurn(next);
         case "cancel-turn":
+          void startTimer().catch(() => {});
           continue;
       }
     }
   };
+  const defersTimer = boot.start.kind === "first-message";
+  const startTimer = (): Promise<void> => sessionTimeout?.start() ?? Promise.resolve();
   const runInitialAction = async (): Promise<SessionActionResult> => {
     if (boot.compactFirst === true) {
       await runTurn({ control: "compact" });
@@ -482,6 +487,7 @@ async function runSessionLoop(
           )
           .finally(() => {
             prewarmSettled = true;
+            if (awaitingFirstInput) void startTimer().catch(() => {});
           });
         return await awaitPrewarmedAction();
       case "parked":
@@ -497,12 +503,13 @@ async function runSessionLoop(
   try {
     const [actionResult, timerResult] = await Promise.allSettled([
       runInitialAction(),
-      sessionTimeout?.start(),
+      defersTimer ? undefined : startTimer(),
     ]);
     if (timerResult.status === "rejected") throw timerResult.reason;
     if (actionResult.status === "rejected") throw actionResult.reason;
     const initial = actionResult.value;
     if (initial.kind !== "action") return initial;
+    if (defersTimer) await startTimer();
     let action = initial.action;
 
     while (true) {
