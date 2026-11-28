@@ -14,7 +14,9 @@ export const generateVideoInputSchema = z.object({
   prompt: str().describe("Visual description of the video to generate, edit, or extend."),
   video: str()
     .optional()
-    .describe("Existing video to edit/extend (https:// URL, storageKey, or sandbox path)."),
+    .describe(
+      "Existing video to edit/extend (https:// URL, storageKey from this session, or sandbox path).",
+    ),
   extend: z
     .boolean()
     .optional()

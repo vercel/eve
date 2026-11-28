@@ -7,7 +7,11 @@ import { always, type ApprovalConfiguration } from "eve/tools/approval";
 import { FatalError, type WorkflowWebhookRequest } from "eve/workflow";
 
 import extension from "../../extension/extension.ts";
-import { createIdempotencyKey, isTransientProviderError } from "../../extension/lib/engine.ts";
+import {
+  createIdempotencyKey,
+  isTransientProviderError,
+  sessionVideoPrefix,
+} from "../../extension/lib/engine.ts";
 import { downloadVideoBytes } from "../../extension/lib/media.ts";
 import { slackVideoRenderer } from "../../extension/lib/slack.ts";
 import { inMemory } from "../../extension/lib/storage/in-memory.ts";
@@ -27,6 +31,7 @@ const {
 const SIG = new AbortController().signal;
 const C = "https://cdn.example.com";
 const SRC = `${C}/clip.mp4`;
+const OWN = sessionVideoPrefix("session-1");
 const GROK = "spacexai/grok-imagine-video";
 const WH_URL = "https://agent.example.com/.well-known/workflow/v1/webhook/tok";
 const signHdr = (sec: string, body: string, ts: number) =>
@@ -367,10 +372,10 @@ describe("video iteration routing across Grok, Seedance, and FLUX 3", () => {
     assert.match(k1, /^inputs\/.*\/video\.mp4$/);
     deq(f.startCalls[3].providerOptions, xaiOpts({ videoUrl: `https://cdn.test/grok/${k1}` }));
 
-    await putFile(storage, "videos/prior.mp4");
+    await putFile(storage, `${OWN}/prior.mp4`);
     const fromKey = await sub({
       prompt: "Key",
-      video: "videos/prior.mp4",
+      video: `${OWN}/prior.mp4`,
       extend: true,
       duration: 4,
     });
@@ -397,7 +402,7 @@ describe("video iteration routing across Grok, Seedance, and FLUX 3", () => {
     }
 
     const privBacking = inMemory({ visibility: "private" });
-    await putFile(privBacking, "videos/priv.mp4");
+    await putFile(privBacking, `${OWN}/priv.mp4`);
     const signedStorage: VideoStorage = {
       put: (i) => privBacking.put(i),
       get: (i) => privBacking.get(i),
@@ -406,11 +411,11 @@ describe("video iteration routing across Grok, Seedance, and FLUX 3", () => {
     };
     const privGrok = mkAsync({ modelId: GROK, provider: "gateway" });
     extension({ model: privGrok.model, storage: signedStorage });
-    const privFromKey = await sub({ prompt: "PrivEdit", video: "videos/priv.mp4" });
+    const privFromKey = await sub({ prompt: "PrivEdit", video: `${OWN}/priv.mp4` });
     if (privFromKey.kind !== "async") assert.fail();
     eq(privFromKey.handle.stagedInputKeys, undefined);
     deq(privGrok.startCalls[0].providerOptions, {
-      xai: { videoUrl: "https://signed.example.com/videos/priv.mp4?sig=ok" },
+      xai: { videoUrl: `https://signed.example.com/${OWN}/priv.mp4?sig=ok` },
     });
     const privFromSb = await sub(
       { prompt: "PrivSb", video: "clips/local.mp4", extend: true, duration: 5 },
@@ -463,9 +468,9 @@ describe("video iteration routing across Grok, Seedance, and FLUX 3", () => {
     const k = staged.handle.stagedInputKeys![0];
     deq(flux.startCalls[1].inputReferences, [ref(`https://cdn.test/m/${k}`, "video/mp4")]);
 
-    await putFile(storage, "videos/stored.mp4");
-    await sub({ prompt: "NoSb", video: "videos/stored.mp4" });
-    await sub({ prompt: "EmptySb", video: "videos/stored.mp4" }, { sandbox: mkSb() });
+    await putFile(storage, `${OWN}/stored.mp4`);
+    await sub({ prompt: "NoSb", video: `${OWN}/stored.mp4` });
+    await sub({ prompt: "EmptySb", video: `${OWN}/stored.mp4` }, { sandbox: mkSb() });
     const inlineFile = [{ type: "file", data: H.MP4_BYTES, mediaType: "video/mp4" }];
     for (const i of [2, 3]) deq(flux.startCalls[i].inputReferences, inlineFile);
 
@@ -473,6 +478,9 @@ describe("video iteration routing across Grok, Seedance, and FLUX 3", () => {
       () => sub({ prompt: "Miss", video: "videos/missing.mp4" }),
       /not found in storage/,
     );
+    const foreign = `${sessionVideoPrefix("session-2")}/theirs.mp4`;
+    await putFile(storage, foreign);
+    await failStep(() => sub({ prompt: "Foreign", video: foreign }), /not found in storage/);
     eq(flux.startCalls.length, 4);
 
     const midPng = H.createSizedPng(120 * 1024);
@@ -1079,8 +1087,47 @@ describe("slackVideoRenderer", () => {
       await preEv["call.settled"]!(s1, typedBadCtx, async () => undefined);
       await preEv["content.completed"]!(replyFact, typedBadCtx, async () => undefined);
       deq(fallbackUploads, ["clip.mp4"]);
+
+      const codeUploads: string[] = [];
+      const codeCtx: object = {
+        view: v1,
+        channel: {
+          state: {},
+          slack: {
+            channelId: "C123",
+            threadTs: "",
+            codeChannel: true,
+            request: async () => assert.fail("code channels must not pre-upload"),
+            uploadFiles: async (files: readonly { filename: string }[]) =>
+              void codeUploads.push(files[0].filename),
+          },
+        },
+      };
+      const typedCodeCtx = codeCtx as typeof typedPreCtx;
+      await preEv["call.settled"]!(s1, typedCodeCtx, async () => undefined);
+      await preEv["content.completed"]!(replyFact, typedCodeCtx, async () => undefined);
+      deq(codeUploads, ["clip.mp4"]);
     } finally {
       globalThis.fetch = origFetch;
     }
+
+    const otherStorage = inMemory();
+    await putFile(otherStorage, "videos/2026-11-26/other.mp4", H.MP4_BYTES, "video/mp4");
+    const sharedState: Record<string, unknown> = {};
+    const sharedUploads: string[] = [];
+    const { view: vA, settled: sA } = buildView("cA", "video__generate", "completed", out1);
+    const { view: vB, settled: sB } = buildView("cB", "clip__generate", "completed", {
+      videos: [{ storageKey: "videos/2026-11-26/other.mp4", mediaType: "video/mp4" }],
+    });
+    const onShared = async (files: readonly { filename: string }[]) =>
+      void sharedUploads.push(files[0].filename);
+    const evA = slackVideoRenderer({ storage }).events!;
+    const evB = slackVideoRenderer({ storage: otherStorage, mount: "clip" }).events!;
+    await evA["call.settled"]!(sA, mkSlackCtx(vA, sharedState, onShared), async () => undefined);
+    await evB["call.settled"]!(sB, mkSlackCtx(vB, sharedState, onShared), async () => undefined);
+    const sharedCtx = mkSlackCtx(vA, sharedState, onShared);
+    await evA["content.completed"]!(replyFact, sharedCtx, async () => undefined);
+    await evB["content.completed"]!(replyFact, sharedCtx, async () => undefined);
+    deq(sharedUploads, ["clip.mp4", "other.mp4"]);
   });
 });

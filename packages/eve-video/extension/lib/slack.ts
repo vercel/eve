@@ -64,7 +64,12 @@ export function slackVideoRenderer(options: SlackVideoRendererOptions = {}): Sla
     videos: readonly PendingVideo[],
   ): Promise<PendingVideo[]> => {
     const storage = options.storage ?? resolveConfiguredStorage(undefined);
-    if (!storage?.get || typeof channel.slack.request !== "function" || !channel.slack.channelId) {
+    if (
+      !storage?.get ||
+      channel.slack.codeChannel ||
+      typeof channel.slack.request !== "function" ||
+      !channel.slack.channelId
+    ) {
       return [...videos];
     }
     const staged: PendingVideo[] = [];
@@ -86,8 +91,10 @@ export function slackVideoRenderer(options: SlackVideoRendererOptions = {}): Sla
     return staged;
   };
 
+  const stateKey = `${STATE_KEY}:${targetTool}`;
+
   const flush = async (channel: SlackEventContext): Promise<void> => {
-    const state = videoState(channel);
+    const state = videoState(channel, stateKey);
     if (!state.pending.length) return;
     const batch = state.pending.splice(0, state.pending.length);
     const storage = options.storage ?? resolveConfiguredStorage(undefined);
@@ -149,7 +156,7 @@ export function slackVideoRenderer(options: SlackVideoRendererOptions = {}): Sla
         }
         const videos = extractVideos(observed.output);
         if (!videos.length) return;
-        const state = videoState(ctx.channel);
+        const state = videoState(ctx.channel, stateKey);
         if (
           state.uploaded.includes(fact.data.callId) ||
           state.pending.some((p) => p.callId === fact.data.callId)
@@ -214,11 +221,10 @@ async function completeSlackUpload(
   ready: readonly { readonly fileId: string; readonly filename: string }[],
 ): Promise<boolean> {
   try {
-    const threadTs = channel.slack.codeChannel ? "" : channel.slack.threadTs;
     const res = await channel.slack.request("files.completeUploadExternal", {
       channel_id: channel.slack.channelId,
       files: ready.map((item) => ({ id: item.fileId, title: item.filename })),
-      ...(threadTs && { thread_ts: threadTs }),
+      ...(channel.slack.threadTs && { thread_ts: channel.slack.threadTs }),
     });
     return res.ok === true;
   } catch {
@@ -226,11 +232,11 @@ async function completeSlackUpload(
   }
 }
 
-function videoState(channel: SlackEventContext): SlackVideoState {
-  const existing = Reflect.get(channel.state, STATE_KEY);
+function videoState(channel: SlackEventContext, key: string): SlackVideoState {
+  const existing = Reflect.get(channel.state, key);
   if (isSlackVideoState(existing)) return existing;
   const fresh: SlackVideoState = { uploaded: [], pending: [] };
-  Reflect.set(channel.state, STATE_KEY, fresh);
+  Reflect.set(channel.state, key, fresh);
   return fresh;
 }
 

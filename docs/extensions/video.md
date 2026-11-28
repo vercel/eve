@@ -171,7 +171,7 @@ Pass `storage: r2VideoStorage` to `video(...)` in `agent/extensions/video.ts`.
 
 When your agent has a [sandbox](/docs/sandbox), `video__generate` can read input media from sandbox paths and write generated videos directly to disk.
 
-- **Inputs (`video`, `start`, `end`, `references`):** pass public `https://` URLs, sandbox file paths, or a `storageKey` when configured storage implements `get`. `video` accepts videos (MP4, WebM, MOV); `start` and `end` accept images (PNG, JPEG, WebP, GIF); `references` accepts images, videos, or audio (MP3, WAV, OGG, FLAC, M4A). Non-HTTPS URLs, embedded credentials, and private, loopback, link-local, or metadata hosts are blocked before any request runs.
+- **Inputs (`video`, `start`, `end`, `references`):** pass public `https://` URLs, sandbox file paths, or a `storageKey` from the same session when configured storage implements `get`. `video` accepts videos (MP4, WebM, MOV); `start` and `end` accept images (PNG, JPEG, WebP, GIF); `references` accepts images, videos, or audio (MP3, WAV, OGG, FLAC, M4A). Non-HTTPS URLs, embedded credentials, and private, loopback, link-local, or metadata hosts are blocked before any request runs.
 - **Automatic staging:** for AI Gateway asynchronous models, local inputs that would exceed the inline request budget (and any local bytes passed to Grok edit/extend) upload incrementally to public HTTPS storage (`ttlDays: 1`) before the request and are deleted in `finally` when the task ends. Direct provider models (such as `@ai-sdk/google`) keep local inputs inline.
 - **Output (`path`):** pass `path` (for example `output/clip.mp4`) to save videos into the sandbox. When `n > 1`, `@eve/video` writes `output/clip.mp4`, `output/clip-1.mp4`, and so on. When both storage and `path` are present, `@eve/video` writes to both and returns both `url` and `path`; set `storage: false` to write only to the sandbox.
 
@@ -248,22 +248,22 @@ export default slackChannel({
 
 ### Tool input parameters (`<mount>__generate`)
 
-| Parameter     | Type       | Required | Description                                                                                                            |
-| ------------- | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `prompt`      | `string`   | Yes      | Visual description of the video to generate, or the edit or continuation to apply to `video`.                          |
-| `video`       | `string`   | No       | Existing video to edit or extend: a public `https://` URL, a `storageKey` from an earlier run, or a sandbox file path. |
-| `extend`      | `boolean`  | No       | Continue from `video`'s last frame instead of editing in place. Requires `video`.                                      |
-| `start`       | `string`   | No       | Opening frame image as a public `https://` URL or sandbox file path. Cannot be combined with `video`.                  |
-| `end`         | `string`   | No       | Closing frame image as a public `https://` URL or sandbox file path. Cannot be combined with `video`.                  |
-| `references`  | `string[]` | No       | Up to 16 reference images, videos, or audio clips as public `https://` URLs or sandbox file paths.                     |
-| `duration`    | `number`   | No       | Target duration in seconds.                                                                                            |
-| `aspectRatio` | `string`   | No       | Aspect ratio such as `"16:9"`, `"9:16"`, `"1:1"`, or `"auto"`.                                                         |
-| `resolution`  | `string`   | No       | Output resolution: `"480p"`, `"720p"`, `"1080p"`, `"4k"`, or `"widthxheight"` such as `"1280x720"`.                    |
-| `audio`       | `boolean`  | No       | Generate synchronized audio alongside the video.                                                                       |
-| `n`           | `number`   | No       | Number of video variations to generate. Defaults to `1`; capped by `limits.maxVideosPerCall`.                          |
-| `fps`         | `number`   | No       | Target frame rate in frames per second.                                                                                |
-| `seed`        | `number`   | No       | Integer seed for reproducible output when supported by the model.                                                      |
-| `path`        | `string`   | No       | Sandbox file path where generated videos are written.                                                                  |
+| Parameter     | Type       | Required | Description                                                                                                                                |
+| ------------- | ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `prompt`      | `string`   | Yes      | Visual description of the video to generate, or the edit or continuation to apply to `video`.                                              |
+| `video`       | `string`   | No       | Existing video to edit or extend: a public `https://` URL, a `storageKey` from an earlier run in the same session, or a sandbox file path. |
+| `extend`      | `boolean`  | No       | Continue from `video`'s last frame instead of editing in place. Requires `video`.                                                          |
+| `start`       | `string`   | No       | Opening frame image as a public `https://` URL or sandbox file path. Cannot be combined with `video`.                                      |
+| `end`         | `string`   | No       | Closing frame image as a public `https://` URL or sandbox file path. Cannot be combined with `video`.                                      |
+| `references`  | `string[]` | No       | Up to 16 reference images, videos, or audio clips as public `https://` URLs or sandbox file paths.                                         |
+| `duration`    | `number`   | No       | Target duration in seconds.                                                                                                                |
+| `aspectRatio` | `string`   | No       | Aspect ratio such as `"16:9"`, `"9:16"`, `"1:1"`, or `"auto"`.                                                                             |
+| `resolution`  | `string`   | No       | Output resolution: `"480p"`, `"720p"`, `"1080p"`, `"4k"`, or `"widthxheight"` such as `"1280x720"`.                                        |
+| `audio`       | `boolean`  | No       | Generate synchronized audio alongside the video.                                                                                           |
+| `n`           | `number`   | No       | Number of video variations to generate. Defaults to `1`; capped by `limits.maxVideosPerCall`.                                              |
+| `fps`         | `number`   | No       | Target frame rate in frames per second.                                                                                                    |
+| `seed`        | `number`   | No       | Integer seed for reproducible output when supported by the model.                                                                          |
+| `path`        | `string`   | No       | Sandbox file path where generated videos are written.                                                                                      |
 
 ### Tool output (`GenerateVideoToolOutput`)
 

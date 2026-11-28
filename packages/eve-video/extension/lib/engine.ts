@@ -58,6 +58,9 @@ export type CheckAndPersistStepResult =
 export const createIdempotencyKey = (sessionId: string, callId: string): string =>
   createHash("sha256").update(`${sessionId}:${callId}`).digest("hex");
 
+export const sessionVideoPrefix = (sessionId: string): string =>
+  `videos/${createHash("sha256").update(sessionId).digest("hex").slice(0, 32)}`;
+
 export async function submitToolVideoJob(
   config: t.VideoExtensionConfig,
   input: t.GenerateVideoToolInput,
@@ -243,7 +246,8 @@ export async function submitToolVideoJob(
     let fromStorageKey: string | undefined;
     if (data === null && storage?.get) {
       const key = tryKey(trimmed);
-      const stored = key ? await storage.get({ key, signal }) : null;
+      const owned = key?.startsWith(`${sessionVideoPrefix(ctx.session.id)}/`) ? key : undefined;
+      const stored = owned ? await storage.get({ key: owned, signal }) : null;
       if (stored) {
         ({ data, mediaType: declared } = stored);
         fromStorageKey = stored.key;
@@ -497,7 +501,7 @@ async function finalizeVideos(
   if (sandboxPath && !sandbox) throw new Error('Cannot write video to "path" without a sandbox.');
   if (!storage && !sandboxPath) throw new Error(NO_DEST);
 
-  const [baseId, dir] = [uid(), `videos/${day()}`];
+  const [baseId, dir] = [uid(), `${sessionVideoPrefix(ctx.session.id)}/${day()}`];
   const storedKeys: string[] = [];
   const videos: t.GeneratedVideoItem[] = [];
 
