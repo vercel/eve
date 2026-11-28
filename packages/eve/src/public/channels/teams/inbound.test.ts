@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { defaultTeamsAuth } from "#public/channels/teams/defaults.js";
 import {
   formatTeamsContextBlock,
   parseTeamsActivity,
@@ -15,6 +16,15 @@ describe("Teams inbound parsing", () => {
       type: "message",
     });
     expect(activity?.type === "message" ? teamsThreadRootActivityId(activity) : "bad").toBeNull();
+  });
+
+  it("puts the conversation's service URL in the default auth, so a tool can address it", () => {
+    const activity = parseTeamsActivity(messageActivity({ conversationType: "channel" }));
+    if (activity?.type !== "message") throw new Error("Expected a message activity.");
+    expect(defaultTeamsAuth(activity).attributes).toMatchObject({
+      conversation_id: "CONV",
+      service_url: "https://smba.example.test/teams",
+    });
   });
 
   it("strips direct bot mentions in channel messages", () => {
