@@ -1,5 +1,5 @@
-import { benchmarkResults, benchmarkRows } from "@/lib/evals/results";
-import { createEvalsOgImage } from "@/lib/evals/og-image";
+import { eveBenchmark, orderedModels } from "@/lib/evals/eve-results";
+import { createBenchmarksOgImage } from "@/lib/evals/og-image";
 
 export const size = {
   width: 1200,
@@ -7,6 +7,9 @@ export const size = {
 };
 export const contentType = "image/png";
 
-const EvalsTwitterImage = () => createEvalsOgImage(benchmarkRows(benchmarkResults));
+const BenchmarksTwitterImage = () => {
+  const dataset = eveBenchmark.datasets["deepswe-lean"];
+  return createBenchmarksOgImage(dataset ? orderedModels(dataset) : []);
+};
 
-export default EvalsTwitterImage;
+export default BenchmarksTwitterImage;

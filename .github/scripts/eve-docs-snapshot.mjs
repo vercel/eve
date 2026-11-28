@@ -2,6 +2,7 @@
 // rendered by the docs site. Keeps only aggregate scores, per-task summaries, overhead, and public
 // run links: the result store is private, so blob URLs and per-trial artifacts never reach the docs.
 import { readFile, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 
 export const SNAPSHOT_SCHEMA_VERSION = 2;
 
@@ -12,6 +13,16 @@ export function modelFamily(modelId) {
   if (typeof modelId !== "string" || modelId.trim() === "") return "unknown";
   const prefix = modelId.trim().split("/")[0]?.toLowerCase() ?? "unknown";
   return prefix || "unknown";
+}
+
+function pickModelInfo(manifest) {
+  const raw = manifest.modelVersion;
+  const id = typeof raw?.id === "string" && raw.id.length > 0 ? raw.id : manifest.model;
+  return {
+    id,
+    ...(typeof raw?.released === "string" ? { released: raw.released } : {}),
+    ...(typeof raw?.knowledge === "string" ? { knowledge: raw.knowledge } : {}),
+  };
 }
 
 /** Returns the dataset model entry for a report, or a reason why it must not be published. */
@@ -32,6 +43,10 @@ export function snapshotFromReport(report) {
   if (!eveResult) {
     return { skip: "report has no eve result" };
   }
+
+  const eveContender = eveResult.contender ?? eveResult.harness;
+  const baselineIsEve =
+    comparison.summary.baseline === undefined || comparison.summary.baseline === eveContender;
 
   const publishedAt = new Map(
     (report.comparison.references ?? []).map((reference) => [
@@ -61,7 +76,7 @@ export function snapshotFromReport(report) {
     passAllCounts.set(contender, { passed: 0, total: 0 });
   }
 
-  const tasks = summaryTasks.map((taskRow) => {
+  const taskMatrix = summaryTasks.map((taskRow) => {
     const cells = {};
     contenders.forEach((contender, index) => {
       const cell = taskRow.cells?.[index];
@@ -78,29 +93,27 @@ export function snapshotFromReport(report) {
         latencyMs: typeof cell.latencyMs === "number" ? Math.round(cell.latencyMs) : null,
         inputTokens: typeof cell.inputTokens === "number" ? Math.round(cell.inputTokens) : null,
         outputTokens: typeof cell.outputTokens === "number" ? Math.round(cell.outputTokens) : null,
-        costUsd: typeof cell.costUsd === "number" ? cell.costUsd : null,
       };
     });
     return { task: taskRow.task, cells };
   });
 
   const effectsByContender = new Map();
-  for (const effect of comparison.summary.effects ?? []) {
-    if (!effect?.contender || !effect?.metric) continue;
-    const map = effectsByContender.get(effect.contender) ?? {};
-    map[effect.metric] = {
-      better: effect.better ?? 0,
-      worse: effect.worse ?? 0,
-      estimate: effect.effect?.estimate ?? null,
-      low: effect.effect?.low ?? null,
-      high: effect.effect?.high ?? null,
-      verdict: effect.verdict ?? "inconclusive",
-    };
-    effectsByContender.set(effect.contender, map);
+  if (baselineIsEve) {
+    for (const effect of comparison.summary.effects ?? []) {
+      if (!effect?.contender || !effect?.metric) continue;
+      const map = effectsByContender.get(effect.contender) ?? {};
+      map[effect.metric] = {
+        better: effect.better ?? 0,
+        worse: effect.worse ?? 0,
+        verdict: effect.verdict ?? "inconclusive",
+      };
+      effectsByContender.set(effect.contender, map);
+    }
   }
 
-  const model = manifest.modelVersion ?? { id: manifest.model };
-  const family = modelFamily(model.id ?? manifest.model);
+  const model = pickModelInfo(manifest);
+  const family = modelFamily(model.id);
   const reasoning =
     eveResult.provenance?.harnessSettings?.reasoning ??
     eveResult.provenance?.harness?.reasoning ??
@@ -137,7 +150,6 @@ export function snapshotFromReport(report) {
           passAllTasks,
           passAllRate,
           costUsd: score.costUsd ?? null,
-          medianCostUsd: score.medianCostUsd ?? null,
           costPerResolvedUsd: score.costPerResolvedUsd ?? null,
           inputTokens: score.inputTokens,
           outputTokens: score.outputTokens,
@@ -155,7 +167,7 @@ export function snapshotFromReport(report) {
             finishedAt(result),
         };
       }),
-      taskMatrix: tasks,
+      taskMatrix,
     },
   };
 }
@@ -174,9 +186,7 @@ function extractOverhead(raw) {
   return {
     firstStepInputTokens: raw.firstStepInputTokens?.median ?? null,
     modelStepsMedian: raw.modelSteps?.median ?? null,
-    modelStepsTotal: raw.modelSteps?.total ?? null,
     toolCallsMedian: raw.toolCalls?.median ?? null,
-    toolCallsTotal: raw.toolCalls?.total ?? null,
     topTools,
   };
 }
@@ -196,26 +206,23 @@ function harnessVersion(harness, provenance) {
 }
 
 /**
- * Replaces one dataset's model entry in an existing snapshot (upgrading v1 snapshots in place).
- * Unchanged model results keep their generatedAt, so rerunning the same report leaves the file
- * byte-identical and commits nothing.
+ * Replaces one model family entry in an existing snapshot (upgrading v1 snapshots in place).
+ * Metadata (dataset version/commit, attempts, tasks, reasoning) is stored per model entry so
+ * refreshing one model family never overwrites untouched siblings. Unchanged model entries keep
+ * their generatedAt, leaving reruns byte-identical.
  */
 export function mergeSnapshot(existing, section, generatedAt) {
   const normalizedDatasets = normalizeExistingDatasets(existing);
   const datasetName = section.dataset.name;
-  const existingDataset = normalizedDatasets[datasetName] ?? {};
-  const existingModels = existingDataset.models ?? {};
+  const existingModels = normalizedDatasets[datasetName]?.models ?? {};
 
-  const { dataset, family, attempts, tasks, reasoning, ...modelPayload } = section;
-
-  const nextModelBody = { family, ...modelPayload };
-  const { generatedAt: previousAt, ...previousModel } = existingModels[family] ?? {};
-  const unchanged = previousAt && JSON.stringify(previousModel) === JSON.stringify(nextModelBody);
+  const { generatedAt: previousAt, ...previousModel } = existingModels[section.family] ?? {};
+  const unchanged = previousAt && JSON.stringify(previousModel) === JSON.stringify(section);
 
   const nextModels = {
     ...existingModels,
-    [family]: {
-      ...nextModelBody,
+    [section.family]: {
+      ...section,
       generatedAt: unchanged ? previousAt : generatedAt,
     },
   };
@@ -225,13 +232,22 @@ export function mergeSnapshot(existing, section, generatedAt) {
     datasets: {
       ...normalizedDatasets,
       [datasetName]: {
-        dataset,
-        attempts,
-        tasks,
-        reasoning,
         models: nextModels,
       },
     },
+  };
+}
+
+function normalizeV1Harness(harness) {
+  return {
+    ...harness,
+    passAllTasks: harness.passAllTasks ?? null,
+    passAllRate: harness.passAllRate ?? null,
+    costUsd: harness.costUsd ?? null,
+    costPerResolvedUsd: harness.costPerResolvedUsd ?? null,
+    cachedShare: harness.cachedShare ?? null,
+    overhead: harness.overhead ?? null,
+    effectsVsEve: harness.effectsVsEve ?? null,
   };
 }
 
@@ -242,24 +258,42 @@ function normalizeExistingDatasets(existing) {
   for (const [name, entry] of Object.entries(raw)) {
     if (!entry || typeof entry !== "object") continue;
     if (entry.models && typeof entry.models === "object") {
-      normalized[name] = entry;
+      const migratedModels = {};
+      for (const [family, modelEntry] of Object.entries(entry.models)) {
+        if (!modelEntry || typeof modelEntry !== "object") continue;
+        migratedModels[family] = {
+          dataset: modelEntry.dataset ?? entry.dataset,
+          family: modelEntry.family ?? family,
+          model: modelEntry.model,
+          attempts: modelEntry.attempts ?? entry.attempts,
+          tasks: modelEntry.tasks ?? entry.tasks,
+          reasoning: modelEntry.reasoning ?? entry.reasoning ?? null,
+          runUrl: modelEntry.runUrl ?? null,
+          harnesses: Array.isArray(modelEntry.harnesses)
+            ? modelEntry.harnesses.map(normalizeV1Harness)
+            : [],
+          taskMatrix: Array.isArray(modelEntry.taskMatrix) ? modelEntry.taskMatrix : [],
+          generatedAt: modelEntry.generatedAt,
+        };
+      }
+      normalized[name] = { models: migratedModels };
       continue;
     }
     if (entry.model && Array.isArray(entry.harnesses)) {
       const family = modelFamily(entry.model.id);
       normalized[name] = {
-        dataset: entry.dataset,
-        attempts: entry.attempts,
-        tasks: entry.tasks,
-        reasoning: entry.reasoning ?? null,
         models: {
           [family]: {
+            dataset: entry.dataset,
             family,
             model: entry.model,
+            attempts: entry.attempts,
+            tasks: entry.tasks,
+            reasoning: entry.reasoning ?? null,
             runUrl:
               entry.harnesses.find((h) => h.harness === "eve" || h.harness === "eve-code")
                 ?.runUrl ?? null,
-            harnesses: entry.harnesses,
+            harnesses: entry.harnesses.map(normalizeV1Harness),
             taskMatrix: [],
             generatedAt: entry.generatedAt,
           },
@@ -306,14 +340,29 @@ async function main(args) {
     process.stdout.write(JSON.stringify(payload));
     return;
   }
-  if (args.length < 2) {
-    throw new Error("Usage: eve-docs-snapshot.mjs <report.json> [...report.json] <snapshot.json>");
+
+  let updatedFile = null;
+  const positional = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--updated-file") {
+      updatedFile = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    positional.push(args[index]);
   }
-  const snapshotPath = args.at(-1);
-  const reportPaths = args.slice(0, -1);
-  let snapshot = JSON.parse(await readFile(snapshotPath, "utf8"));
+
+  if (positional.length < 2) {
+    throw new Error(
+      "Usage: eve-docs-snapshot.mjs [--updated-file <path>] <report.json> [...report.json] <snapshot.json>",
+    );
+  }
+  const snapshotPath = positional.at(-1);
+  const reportPaths = positional.slice(0, -1);
+  const beforeRaw = await readFile(snapshotPath, "utf8");
+  let snapshot = JSON.parse(beforeRaw);
   const generatedAt = new Date().toISOString();
-  const updated = [];
+  const changedFamilies = [];
 
   for (const reportPath of reportPaths) {
     const report = JSON.parse(await readFile(reportPath, "utf8"));
@@ -322,15 +371,31 @@ async function main(args) {
       console.log(`::notice::eve docs snapshot skipped ${reportPath}: ${skip}.`);
       continue;
     }
+    const prevSerialized = JSON.stringify(
+      snapshot?.datasets?.[section.dataset.name]?.models?.[section.family] ?? null,
+    );
     snapshot = mergeSnapshot(snapshot, section, generatedAt);
-    updated.push(`${section.dataset.name}/${section.family}`);
+    const nextSerialized = JSON.stringify(
+      snapshot.datasets[section.dataset.name].models[section.family],
+    );
+    if (prevSerialized !== nextSerialized) {
+      changedFamilies.push(section.family);
+    }
   }
 
-  if (updated.length === 0) return;
-  await writeFile(snapshotPath, `${JSON.stringify(snapshot, null, 2)}\n`);
-  console.log(`Updated ${updated.join(", ")} in ${snapshotPath}.`);
+  if (updatedFile) {
+    await writeFile(
+      updatedFile,
+      changedFamilies.length > 0 ? `${changedFamilies.join("\n")}\n` : "",
+    );
+  }
+
+  const nextRaw = `${JSON.stringify(snapshot, null, 2)}\n`;
+  if (nextRaw === beforeRaw) return;
+  await writeFile(snapshotPath, nextRaw);
+  console.log(`Updated ${changedFamilies.join(", ") || "snapshot"} in ${snapshotPath}.`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await main(process.argv.slice(2));
 }

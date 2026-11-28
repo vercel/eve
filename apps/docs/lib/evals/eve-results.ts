@@ -8,18 +8,13 @@ export interface EveToolUsage {
 export interface EveHarnessOverhead {
   firstStepInputTokens: number | null;
   modelStepsMedian: number | null;
-  modelStepsTotal: number | null;
   toolCallsMedian: number | null;
-  toolCallsTotal: number | null;
   topTools: EveToolUsage[];
 }
 
 export interface EveEffectSummary {
   better: number;
   worse: number;
-  estimate: number | null;
-  low: number | null;
-  high: number | null;
   verdict: "better" | "worse" | "inconclusive";
 }
 
@@ -34,7 +29,6 @@ export interface EveHarnessScore {
   passAllTasks: number | null;
   passAllRate: number | null;
   costUsd: number | null;
-  medianCostUsd: number | null;
   costPerResolvedUsd: number | null;
   inputTokens: number;
   outputTokens: number;
@@ -54,7 +48,6 @@ export interface EveTaskCell {
   latencyMs: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
-  costUsd: number | null;
 }
 
 export interface EveTaskRow {
@@ -63,8 +56,12 @@ export interface EveTaskRow {
 }
 
 export interface EveModelResults {
+  dataset: { name: string; version: string; commit?: string };
   family: string;
   model: { id: string; released?: string; knowledge?: string };
+  attempts: number;
+  tasks: number;
+  reasoning: string | null;
   generatedAt: string;
   runUrl: string | null;
   harnesses: EveHarnessScore[];
@@ -72,10 +69,6 @@ export interface EveModelResults {
 }
 
 export interface EveDatasetResults {
-  dataset: { name: string; version: string; commit?: string };
-  attempts: number;
-  tasks: number;
-  reasoning: string | null;
   models: Record<string, EveModelResults>;
 }
 
@@ -86,19 +79,4 @@ export interface EveBenchmarkSnapshot {
 
 export const eveBenchmark = rawSnapshot as EveBenchmarkSnapshot;
 
-const FAMILY_ORDER = ["openai", "anthropic"];
-
-export function orderedModels(results: EveDatasetResults): EveModelResults[] {
-  return Object.values(results.models).sort((left, right) => {
-    const leftIndex = FAMILY_ORDER.indexOf(left.family);
-    const rightIndex = FAMILY_ORDER.indexOf(right.family);
-    if (leftIndex !== -1 || rightIndex !== -1) {
-      if (leftIndex === -1) return 1;
-      if (rightIndex === -1) return -1;
-      return leftIndex - rightIndex;
-    }
-    return left.family.localeCompare(right.family);
-  });
-}
-
-export { rankedHarnesses } from "./eve-format";
+export { isReferenceHarness, orderedModels, rankedHarnesses } from "./eve-format";

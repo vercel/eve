@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowUpDownIcon, ExternalLinkIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, ExternalLinkIcon } from "lucide-react";
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { EveBenchmark, harnessColor } from "@/components/geistdocs/eve-benchmark";
 import {
@@ -10,20 +10,17 @@ import {
   formatPercent,
   formatTokens,
   formatUsd,
+  isReferenceHarness,
   modelFamilyLabel,
   modelShortName,
+  orderedModels,
   rankedHarnesses,
 } from "@/lib/evals/eve-format";
-import {
-  orderedModels,
-  type EveDatasetResults,
-  type EveHarnessScore,
-  type EveModelResults,
-} from "@/lib/evals/eve-results";
+import type { EveDatasetResults, EveHarnessScore, EveModelResults } from "@/lib/evals/eve-results";
 import type { BenchmarkRow } from "@/lib/evals/results";
 import { ResultsTable } from "./results-table";
 
-type HubView = "harness" | "authoring";
+export type HubView = "harness" | "authoring";
 type TaskMetric = "resolved" | "latency" | "tokens";
 type ScorecardSortKey =
   | "harness"
@@ -43,9 +40,21 @@ interface BenchmarksHubProps {
   authoringRetiredRows: BenchmarkRow[];
   authoringPublishedAt: string | null;
   authoringRevision: string | null;
+  initialView?: HubView;
+  initialFamily?: string;
 }
 
-const REFERENCE_HARNESSES = new Set(["eve", "eve-code"]);
+const FOCUS_RING =
+  "focus-visible:outline-2 focus-visible:outline-blue-700 focus-visible:outline-offset-2";
+
+function bestOf(
+  values: ReadonlyArray<number | null | undefined>,
+  mode: "min" | "max",
+): number | null {
+  const valid = values.filter((v): v is number => v != null && Number.isFinite(v));
+  if (valid.length === 0) return null;
+  return mode === "min" ? Math.min(...valid) : Math.max(...valid);
+}
 
 export const BenchmarksHub = ({
   harnessDataset,
@@ -53,25 +62,43 @@ export const BenchmarksHub = ({
   authoringRetiredRows,
   authoringPublishedAt,
   authoringRevision,
+  initialView = "harness",
+  initialFamily,
 }: BenchmarksHubProps) => {
   const models = useMemo(
     () => (harnessDataset ? orderedModels(harnessDataset) : []),
     [harnessDataset],
   );
-  const [view, setView] = useState<HubView>("harness");
-  const [selectedFamily, setSelectedFamily] = useState<string>(models[0]?.family ?? "openai");
+  const defaultFamily = models[0]?.family ?? "openai";
+  const resolvedInitialFamily =
+    initialFamily && models.some((m) => m.family === initialFamily) ? initialFamily : defaultFamily;
+
+  const [view, setView] = useState<HubView>(initialView);
+  const [selectedFamily, setSelectedFamily] = useState<string>(resolvedInitialFamily);
+  const harnessTabRef = useRef<HTMLButtonElement>(null);
+  const authoringTabRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const paramView = params.get("view");
-    if (paramView === "authoring" || paramView === "harness") {
-      setView(paramView);
-    }
-    const paramModel = params.get("model");
-    if (paramModel && models.some((m) => m.family === paramModel)) {
-      setSelectedFamily(paramModel);
-    }
-  }, [models]);
+    setView(initialView);
+  }, [initialView]);
+
+  useEffect(() => {
+    setSelectedFamily(resolvedInitialFamily);
+  }, [resolvedInitialFamily]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const paramView = params.get("view");
+      setView(paramView === "authoring" ? "authoring" : "harness");
+      const paramModel = params.get("model");
+      setSelectedFamily(
+        paramModel && models.some((m) => m.family === paramModel) ? paramModel : defaultFamily,
+      );
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [defaultFamily, models]);
 
   const syncQuery = (nextView: HubView, nextFamily: string) => {
     const url = new URL(window.location.href);
@@ -80,7 +107,7 @@ export const BenchmarksHub = ({
       url.searchParams.delete("model");
     } else {
       url.searchParams.delete("view");
-      if (nextFamily !== models[0]?.family) {
+      if (nextFamily !== defaultFamily) {
         url.searchParams.set("model", nextFamily);
       } else {
         url.searchParams.delete("model");
@@ -97,6 +124,23 @@ export const BenchmarksHub = ({
   const handleModelChange = (nextFamily: string) => {
     setSelectedFamily(nextFamily);
     syncQuery("harness", nextFamily);
+  };
+
+  const handleSuiteTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      const next: HubView = view === "harness" ? "authoring" : "harness";
+      handleViewChange(next);
+      (next === "harness" ? harnessTabRef : authoringTabRef).current?.focus();
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      handleViewChange("harness");
+      harnessTabRef.current?.focus();
+    } else if (event.key === "End") {
+      event.preventDefault();
+      handleViewChange("authoring");
+      authoringTabRef.current?.focus();
+    }
   };
 
   const activeModel =
@@ -118,27 +162,37 @@ export const BenchmarksHub = ({
           role="tablist"
         >
           <button
+            aria-controls="panel-harness"
             aria-selected={view === "harness"}
-            className={`whitespace-nowrap rounded-lg px-3 py-1.5 transition-colors sm:px-4 ${
+            className={`whitespace-nowrap rounded-lg px-3 py-1.5 transition-colors sm:px-4 ${FOCUS_RING} ${
               view === "harness"
                 ? "bg-gray-200 font-medium text-gray-1000"
-                : "text-gray-800 hover:text-gray-1000"
+                : "text-gray-900 hover:text-gray-1000"
             }`}
+            id="tab-harness"
             onClick={() => handleViewChange("harness")}
+            onKeyDown={handleSuiteTabKeyDown}
+            ref={harnessTabRef}
             role="tab"
+            tabIndex={view === "harness" ? 0 : -1}
             type="button"
           >
             Harness Benchmarks
           </button>
           <button
+            aria-controls="panel-authoring"
             aria-selected={view === "authoring"}
-            className={`whitespace-nowrap rounded-lg px-3 py-1.5 transition-colors sm:px-4 ${
+            className={`whitespace-nowrap rounded-lg px-3 py-1.5 transition-colors sm:px-4 ${FOCUS_RING} ${
               view === "authoring"
                 ? "bg-gray-200 font-medium text-gray-1000"
-                : "text-gray-800 hover:text-gray-1000"
+                : "text-gray-900 hover:text-gray-1000"
             }`}
+            id="tab-authoring"
             onClick={() => handleViewChange("authoring")}
+            onKeyDown={handleSuiteTabKeyDown}
+            ref={authoringTabRef}
             role="tab"
+            tabIndex={view === "authoring" ? 0 : -1}
             type="button"
           >
             Authoring Benchmarks
@@ -146,155 +200,166 @@ export const BenchmarksHub = ({
         </div>
       </section>
 
-      {view === "harness" && harnessDataset && activeModel ? (
-        <div className="space-y-10">
-          <section aria-labelledby="model-overview">
-            <h2 className="sr-only" id="model-overview">
-              Model summary
-            </h2>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {models.map((entry) => (
-                <ModelOverviewCard
-                  isSelected={entry.family === activeModel.family}
-                  key={entry.family}
-                  modelResults={entry}
-                  onSelect={() => handleModelChange(entry.family)}
+      {view === "harness" ? (
+        <div aria-labelledby="tab-harness" id="panel-harness" role="tabpanel">
+          {harnessDataset && activeModel ? (
+            <div className="space-y-10">
+              <section aria-labelledby="model-overview">
+                <h2 className="sr-only" id="model-overview">
+                  Model summary
+                </h2>
+                <div className="grid grid-cols-1 gap-4 min-[768px]:grid-cols-2">
+                  {models.map((entry) => (
+                    <ModelOverviewCard
+                      isSelected={entry.family === activeModel.family}
+                      key={entry.family}
+                      modelResults={entry}
+                      onSelect={() => handleModelChange(entry.family)}
+                    />
+                  ))}
+                </div>
+              </section>
+
+              <SelectedModelMetaBar modelResults={activeModel} />
+
+              <section aria-labelledby="metric-comparison">
+                <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="font-semibold text-gray-1000 text-xl" id="metric-comparison">
+                    Metric Comparison
+                  </h2>
+                  <span className="font-mono text-gray-900 text-xs">
+                    {modelFamilyLabel(activeModel.family)} · {activeModel.model.id}
+                  </span>
+                </div>
+                <EveBenchmark
+                  dataset={activeModel.dataset.name}
+                  family={activeModel.family}
+                  hideModelSwitcher
+                  showHubLink={false}
                 />
-              ))}
+              </section>
+
+              <section aria-labelledby="full-scorecard">
+                <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="font-semibold text-gray-1000 text-xl" id="full-scorecard">
+                    Full Scorecard
+                  </h2>
+                  <span className="text-gray-900 text-xs">
+                    Totals across {activeModel.tasks * activeModel.attempts} attempts; latency, Step
+                    1, and steps/tools are per-attempt medians
+                  </span>
+                </div>
+                <HarnessScorecardTable modelResults={activeModel} />
+                <p className="mt-2.5 text-gray-900 text-xs leading-5">
+                  Billed cost is reported directly by harnesses that surface AI Gateway billing (
+                  <code>eve</code> and <code>opencode</code>); <code>pi</code> and <code>fx</code>{" "}
+                  omit cost, so compare input/output tokens and cache hit rate across all harnesses.{" "}
+                  <code>fx</code> reports tool calls without model step counts or first-step prompt
+                  size.
+                </p>
+              </section>
+
+              {activeModel.taskMatrix.length > 0 ? (
+                <section aria-labelledby="task-breakdown">
+                  <TaskBreakdownSection modelResults={activeModel} />
+                </section>
+              ) : null}
+
+              <section aria-labelledby="overhead-profile">
+                <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="font-semibold text-gray-1000 text-xl" id="overhead-profile">
+                    Overhead & Tool Profile
+                  </h2>
+                  <span className="text-gray-900 text-xs">
+                    System prompt footprint, root-session steps, and top tools called across{" "}
+                    {activeModel.tasks * activeModel.attempts} attempts
+                  </span>
+                </div>
+                <OverheadProfileGrid modelResults={activeModel} />
+              </section>
+
+              <section aria-labelledby="methodology">
+                <h2 className="mb-3 font-semibold text-gray-1000 text-xl" id="methodology">
+                  Methodology & Updates
+                </h2>
+                <div className="grid grid-cols-1 gap-4 min-[768px]:grid-cols-2">
+                  <div className="rounded-xl border border-gray-400 bg-background-100 p-4 text-gray-900 text-sm leading-6">
+                    <h3 className="font-medium text-gray-1000">How the benchmark runs</h3>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-gray-900 text-xs leading-5 sm:text-sm">
+                      <li>
+                        Dataset:{" "}
+                        <code>
+                          {activeModel.dataset.name}@{activeModel.dataset.version}
+                        </code>{" "}
+                        ({activeModel.tasks} feature and bug-fix tasks × {activeModel.attempts}{" "}
+                        attempts each).
+                      </li>
+                      <li>
+                        Stock <code>eve</code> (<code>apps/bench-agent</code> on{" "}
+                        <code>HostSandbox</code>) runs against <code>opencode</code>,{" "}
+                        <code>pi</code>, and{" "}
+                        <a
+                          className={`rounded-xs text-gray-1000 underline underline-offset-4 ${FOCUS_RING}`}
+                          href="https://fx.sh"
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          fx
+                        </a>{" "}
+                        with identical models and{" "}
+                        <code>reasoning: {activeModel.reasoning ?? "high"}</code>.
+                      </li>
+                      <li>
+                        Every attempt gets a fresh Vercel Sandbox with a 20-minute limit. Only
+                        passes verified by the DeepSWE test harness count; crashes and timeouts
+                        score 0.
+                      </li>
+                      <li>
+                        95% intervals use 10,000 task-level bootstrap resamples. Overlapping
+                        intervals indicate a statistical tie on a {activeModel.tasks}-task slice.
+                      </li>
+                    </ul>
+                  </div>
+                  <div className="rounded-xl border border-gray-400 bg-background-100 p-4 text-gray-900 text-sm leading-6">
+                    <h3 className="font-medium text-gray-1000">How results refresh</h3>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-gray-900 text-xs leading-5 sm:text-sm">
+                      <li>
+                        The <code>eve</code> benchmark workflow runs weekly on Mondays at 06:00 UTC
+                        and on manual dispatch from <code>main</code> across both OpenAI and
+                        Anthropic.
+                      </li>
+                      <li>
+                        Complete full-dataset runs automatically refresh{" "}
+                        <code>apps/docs/lib/evals/eve-benchmark.json</code> via a signed bot PR.
+                      </li>
+                      <li>
+                        Every harness entry links directly to the public GitHub Actions run that
+                        produced it.
+                      </li>
+                      <li>
+                        Agents can read all tables directly in Markdown at{" "}
+                        <a
+                          className={`rounded-xs font-mono text-gray-1000 underline underline-offset-4 ${FOCUS_RING}`}
+                          href="/benchmarks.md"
+                        >
+                          /benchmarks.md
+                        </a>
+                        .
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </section>
             </div>
-          </section>
-
-          <SelectedModelMetaBar dataset={harnessDataset} modelResults={activeModel} />
-
-          <section aria-labelledby="metric-comparison">
-            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="font-semibold text-gray-1000 text-xl" id="metric-comparison">
-                Metric Comparison
-              </h2>
-              <span className="font-mono text-gray-800 text-xs">
-                {modelFamilyLabel(activeModel.family)} · {activeModel.model.id}
-              </span>
+          ) : (
+            <div className="rounded-xl border border-gray-400 bg-background-100 p-8 text-center text-gray-900 text-sm">
+              No published harness benchmark results yet.
             </div>
-            <EveBenchmark
-              dataset={harnessDataset.dataset.name}
-              family={activeModel.family}
-              hideModelSwitcher
-              showHubLink={false}
-            />
-          </section>
-
-          <section aria-labelledby="full-scorecard">
-            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="font-semibold text-gray-1000 text-xl" id="full-scorecard">
-                Full Scorecard
-              </h2>
-              <span className="text-gray-800 text-xs">
-                Click any column header to sort · best per metric highlighted
-              </span>
-            </div>
-            <HarnessScorecardTable modelResults={activeModel} />
-            <p className="mt-2.5 text-gray-700 text-xs leading-5">
-              Billed cost is reported directly by harnesses that surface AI Gateway billing (
-              <code>eve</code> and <code>opencode</code>); <code>pi</code> and <code>fx</code> omit
-              cost, so compare input/output tokens and cache hit rate across all four harnesses.{" "}
-              <code>fx</code> reports tool calls without model step counts or first-step prompt
-              size.
-            </p>
-          </section>
-
-          {activeModel.taskMatrix.length > 0 ? (
-            <section aria-labelledby="task-breakdown">
-              <TaskBreakdownSection modelResults={activeModel} />
-            </section>
-          ) : null}
-
-          <section aria-labelledby="overhead-profile">
-            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="font-semibold text-gray-1000 text-xl" id="overhead-profile">
-                Overhead & Tool Profile
-              </h2>
-              <span className="text-gray-800 text-xs">
-                System prompt footprint, root-session steps, and top tools called across all{" "}
-                {harnessDataset.tasks * harnessDataset.attempts} attempts
-              </span>
-            </div>
-            <OverheadProfileGrid modelResults={activeModel} />
-          </section>
-
-          <section aria-labelledby="methodology">
-            <h2 className="mb-3 font-semibold text-gray-1000 text-xl" id="methodology">
-              Methodology & Updates
-            </h2>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="rounded-xl border border-gray-400 bg-background-100 p-4 text-gray-900 text-sm leading-6">
-                <h3 className="font-medium text-gray-1000">How the benchmark runs</h3>
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-gray-800 text-xs leading-5 sm:text-sm">
-                  <li>
-                    Dataset:{" "}
-                    <code>
-                      {harnessDataset.dataset.name}@{harnessDataset.dataset.version}
-                    </code>{" "}
-                    ({harnessDataset.tasks} feature and bug-fix tasks × {harnessDataset.attempts}{" "}
-                    attempts each).
-                  </li>
-                  <li>
-                    Stock <code>eve</code> (<code>apps/bench-agent</code> on{" "}
-                    <code>HostSandbox</code>) runs against <code>opencode</code>, <code>pi</code>,
-                    and{" "}
-                    <a
-                      className="text-gray-1000 underline underline-offset-4"
-                      href="https://fx.sh"
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      fx
-                    </a>{" "}
-                    with identical models and{" "}
-                    <code>reasoning: {harnessDataset.reasoning ?? "high"}</code>.
-                  </li>
-                  <li>
-                    Every attempt gets a fresh Vercel Sandbox with a 20-minute limit. Only passes
-                    verified by the DeepSWE test harness count; crashes and timeouts score 0.
-                  </li>
-                  <li>
-                    95% intervals use 10,000 task-level bootstrap resamples. Overlapping intervals
-                    indicate a statistical tie on a 12-task slice.
-                  </li>
-                </ul>
-              </div>
-              <div className="rounded-xl border border-gray-400 bg-background-100 p-4 text-gray-900 text-sm leading-6">
-                <h3 className="font-medium text-gray-1000">How results refresh</h3>
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-gray-800 text-xs leading-5 sm:text-sm">
-                  <li>
-                    The <code>eve</code> benchmark workflow runs weekly on Mondays at 06:00 UTC and
-                    on manual dispatch from <code>main</code> across both OpenAI and Anthropic.
-                  </li>
-                  <li>
-                    Complete full-dataset runs automatically refresh{" "}
-                    <code>apps/docs/lib/evals/eve-benchmark.json</code> via a signed bot PR.
-                  </li>
-                  <li>
-                    Every harness entry links directly to the public GitHub Actions run that
-                    produced it.
-                  </li>
-                  <li>
-                    Agents can read all tables directly in Markdown at{" "}
-                    <a
-                      className="font-mono text-gray-1000 underline underline-offset-4"
-                      href="/benchmarks.md"
-                    >
-                      /benchmarks.md
-                    </a>
-                    .
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </section>
+          )}
         </div>
       ) : (
-        <div>
-          <div className="mb-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-gray-800 text-sm">
+        <div aria-labelledby="tab-authoring" id="panel-authoring" role="tabpanel">
+          <div className="mb-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-gray-900 text-sm">
             <span>
               Last published:{" "}
               <span className="font-medium text-gray-1000">
@@ -308,7 +373,7 @@ export const BenchmarksHub = ({
               eve revision:{" "}
               {authoringRevision ? (
                 <a
-                  className="font-mono font-medium text-gray-1000 underline underline-offset-4"
+                  className={`rounded-xs font-mono font-medium text-gray-1000 underline underline-offset-4 ${FOCUS_RING}`}
                   href={`https://github.com/vercel/eve/commit/${authoringRevision}`}
                   rel="noreferrer"
                   target="_blank"
@@ -316,7 +381,7 @@ export const BenchmarksHub = ({
                   {authoringRevision.slice(0, 8)}
                 </a>
               ) : (
-                <span className="text-gray-700">N/A</span>
+                <span className="text-gray-900">N/A</span>
               )}
             </span>
           </div>
@@ -339,7 +404,7 @@ export const BenchmarksHub = ({
             </section>
           ) : null}
 
-          <p className="mt-8 text-gray-700 text-sm leading-6">
+          <p className="mt-8 text-gray-900 text-sm leading-6">
             Each model completes the same deterministic eve authoring tasks three times with and
             without the guidance files generated by <code>eve init</code>; success rates include
             every scheduled run, while duration, tokens, and tool calls average valid runs. Cost
@@ -361,21 +426,29 @@ const ModelOverviewCard = ({
   onSelect: () => void;
 }) => {
   const ranked = rankedHarnesses(modelResults);
-  const eveIndex = ranked.findIndex((h) => REFERENCE_HARNESSES.has(h.harness));
+  const eveIndex = ranked.findIndex((h) => isReferenceHarness(h.harness));
   const eve = eveIndex >= 0 ? ranked[eveIndex] : ranked[0];
   if (!eve) return null;
 
   const rank = eveIndex >= 0 ? eveIndex + 1 : 1;
-  const fastestLatency = Math.min(...ranked.map((h) => h.latencyP50Ms));
-  const lowestInput = Math.min(...ranked.map((h) => h.inputTokens));
+  const fastestLatency = bestOf(
+    ranked.map((h) => h.latencyP50Ms),
+    "min",
+  );
+  const lowestInput = bestOf(
+    ranked.map((h) => h.inputTokens),
+    "min",
+  );
   const topHarness = ranked[0]!;
   const isTiedWithLeader =
-    rank > 1 && topHarness.effectsVsEve?.resolveRate?.verdict === "inconclusive";
+    rank > 1 &&
+    (topHarness.resolveRate.estimate === eve.resolveRate.estimate ||
+      topHarness.effectsVsEve?.resolveRate?.verdict === "inconclusive");
 
   return (
     <button
       aria-pressed={isSelected}
-      className={`group flex w-full flex-col rounded-xl border p-5 text-left transition-all ${
+      className={`group flex w-full flex-col rounded-xl border p-5 text-left transition-all ${FOCUS_RING} ${
         isSelected
           ? "border-gray-1000 bg-background-100 shadow-xs ring-1 ring-gray-1000/20"
           : "border-gray-400 bg-background-100 hover:border-gray-700"
@@ -386,11 +459,11 @@ const ModelOverviewCard = ({
       <div className="flex w-full items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-gray-800 text-xs uppercase tracking-wider">
+            <span className="font-medium text-gray-900 text-xs uppercase tracking-wider">
               {modelFamilyLabel(modelResults.family)}
             </span>
             {modelResults.model.released ? (
-              <span className="font-mono text-gray-700 text-xs">{modelResults.model.released}</span>
+              <span className="font-mono text-gray-900 text-xs">{modelResults.model.released}</span>
             ) : null}
           </div>
           <div className="mt-0.5 truncate font-mono font-semibold text-base text-gray-1000 sm:text-lg">
@@ -400,8 +473,8 @@ const ModelOverviewCard = ({
         <span
           className={`shrink-0 rounded-full border px-2.5 py-0.5 font-mono text-xs ${
             rank === 1
-              ? "border-green-700/30 bg-green-500/10 font-medium text-green-700"
-              : "border-gray-400 bg-gray-100 text-gray-900"
+              ? "border-green-400 bg-green-100 font-medium text-green-900"
+              : "border-gray-400 bg-gray-100 text-gray-1000"
           }`}
         >
           {rank === 1
@@ -415,40 +488,45 @@ const ModelOverviewCard = ({
           <span className="font-mono font-semibold text-3xl text-gray-1000">
             {formatPercent(eve.resolveRate.estimate)}
           </span>
-          <span className="ml-2 font-mono text-gray-800 text-sm">
+          <span className="ml-2 font-mono text-gray-900 text-sm">
             {eve.resolved}/{eve.attempts} resolved
           </span>
         </div>
-        <span className="font-mono text-gray-700 text-xs">
-          eve{eve.version ? `@${eve.version}` : ""}
+        <span className="font-mono text-gray-900 text-xs">
+          {eve.harness}
+          {eve.version ? `@${eve.version}` : ""}
         </span>
       </div>
 
       <div className="mt-3 grid w-full grid-cols-3 gap-2 text-xs">
         <div>
-          <div className="text-gray-700">Latency p50</div>
+          <div className="text-gray-900">Latency p50</div>
           <div
             className={`mt-0.5 font-mono font-medium ${
-              eve.latencyP50Ms === fastestLatency ? "text-green-700" : "text-gray-1000"
+              fastestLatency != null && eve.latencyP50Ms === fastestLatency
+                ? "text-green-900"
+                : "text-gray-1000"
             }`}
           >
             {formatDurationMs(eve.latencyP50Ms)}
-            {eve.latencyP50Ms === fastestLatency ? " (#1)" : ""}
+            {fastestLatency != null && eve.latencyP50Ms === fastestLatency ? " (#1)" : ""}
           </div>
         </div>
         <div>
-          <div className="text-gray-700">Input tokens</div>
+          <div className="text-gray-900">Input tokens</div>
           <div
             className={`mt-0.5 font-mono font-medium ${
-              eve.inputTokens === lowestInput ? "text-green-700" : "text-gray-1000"
+              lowestInput != null && eve.inputTokens === lowestInput
+                ? "text-green-900"
+                : "text-gray-1000"
             }`}
           >
             {formatTokens(eve.inputTokens)}
-            {eve.inputTokens === lowestInput ? " (#1)" : ""}
+            {lowestInput != null && eve.inputTokens === lowestInput ? " (#1)" : ""}
           </div>
         </div>
         <div>
-          <div className="text-gray-700">pass^3</div>
+          <div className="text-gray-900">pass^{modelResults.attempts}</div>
           <div className="mt-0.5 font-mono font-medium text-gray-1000">
             {formatPercent(eve.passAllRate)}
           </div>
@@ -457,7 +535,7 @@ const ModelOverviewCard = ({
 
       <div className="mt-4 w-full space-y-1.5">
         {ranked.map((entry, index) => {
-          const isEve = REFERENCE_HARNESSES.has(entry.harness);
+          const isEve = isReferenceHarness(entry.harness);
           return (
             <div
               className="grid grid-cols-[5.5rem_1fr_3rem] items-center gap-2 text-xs"
@@ -465,7 +543,7 @@ const ModelOverviewCard = ({
             >
               <span
                 className={`truncate font-mono ${
-                  isEve ? "font-semibold text-gray-1000" : "text-gray-800"
+                  isEve ? "font-semibold text-gray-1000" : "text-gray-900"
                 }`}
               >
                 {entry.harness}
@@ -480,7 +558,7 @@ const ModelOverviewCard = ({
                   }}
                 />
               </div>
-              <span className="text-right font-mono text-gray-900">
+              <span className="text-right font-mono text-gray-1000">
                 {formatPercent(entry.resolveRate.estimate)}
               </span>
             </div>
@@ -491,36 +569,30 @@ const ModelOverviewCard = ({
   );
 };
 
-const SelectedModelMetaBar = ({
-  dataset,
-  modelResults,
-}: {
-  dataset: EveDatasetResults;
-  modelResults: EveModelResults;
-}) => {
-  const eve = modelResults.harnesses.find((h) => REFERENCE_HARNESSES.has(h.harness));
+const SelectedModelMetaBar = ({ modelResults }: { modelResults: EveModelResults }) => {
+  const eve = modelResults.harnesses.find((h) => isReferenceHarness(h.harness));
   const revision = eve?.source ?? null;
   const runUrl = modelResults.runUrl ?? eve?.runUrl ?? null;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-gray-300 bg-gray-100/70 px-4 py-2.5 text-gray-800 text-xs sm:text-sm">
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-gray-300 bg-gray-100/70 px-4 py-2.5 text-gray-900 text-xs sm:text-sm">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-mono font-medium text-gray-1000">
-          {dataset.dataset.name}@{dataset.dataset.version}
+          {modelResults.dataset.name}@{modelResults.dataset.version}
         </span>
         <span aria-hidden="true" className="text-gray-500">
           ·
         </span>
         <span>
-          {dataset.tasks} tasks × {dataset.attempts} attempts
+          {modelResults.tasks} tasks × {modelResults.attempts} attempts
         </span>
-        {dataset.reasoning ? (
+        {modelResults.reasoning ? (
           <>
             <span aria-hidden="true" className="text-gray-500">
               ·
             </span>
             <span>
-              reasoning: <code className="text-gray-1000">{dataset.reasoning}</code>
+              reasoning: <code className="text-gray-1000">{modelResults.reasoning}</code>
             </span>
           </>
         ) : null}
@@ -532,7 +604,7 @@ const SelectedModelMetaBar = ({
             <span>
               eve:{" "}
               <a
-                className="font-mono font-medium text-gray-1000 underline underline-offset-4"
+                className={`rounded-xs font-mono font-medium text-gray-1000 underline underline-offset-4 ${FOCUS_RING}`}
                 href={`https://github.com/vercel/eve/commit/${revision}`}
                 rel="noreferrer"
                 target="_blank"
@@ -548,7 +620,7 @@ const SelectedModelMetaBar = ({
         <span>Updated {formatLongDate(modelResults.generatedAt)}</span>
         {runUrl ? (
           <a
-            className="inline-flex items-center gap-1 font-medium text-gray-1000 underline underline-offset-4"
+            className={`inline-flex items-center gap-1 rounded-xs font-medium text-gray-1000 underline underline-offset-4 ${FOCUS_RING}`}
             href={runUrl}
             rel="noreferrer"
             target="_blank"
@@ -593,28 +665,28 @@ const HarnessScorecardTable = ({ modelResults }: { modelResults: EveModelResults
         case "resolveRate":
           return row.resolveRate.estimate;
         case "passAllRate":
-          return row.passAllRate;
+          return row.passAllRate ?? null;
         case "latencyP50Ms":
           return row.latencyP50Ms;
         case "inputTokens":
           return row.inputTokens;
         case "cachedShare":
-          return row.cachedShare;
+          return row.cachedShare ?? null;
         case "firstStepInputTokens":
           return row.overhead?.firstStepInputTokens ?? null;
         case "toolCallsMedian":
           return row.overhead?.toolCallsMedian ?? null;
         case "costUsd":
-          return row.costUsd;
+          return row.costUsd ?? null;
       }
     };
 
     return [...modelResults.harnesses].sort((left, right) => {
       const lv = valueOf(left, sort.key);
       const rv = valueOf(right, sort.key);
-      if (lv === null && rv === null) return 0;
-      if (lv === null) return 1;
-      if (rv === null) return -1;
+      if (lv == null && rv == null) return 0;
+      if (lv == null) return 1;
+      if (rv == null) return -1;
       const cmp =
         typeof lv === "string" && typeof rv === "string"
           ? lv.localeCompare(rv)
@@ -624,22 +696,48 @@ const HarnessScorecardTable = ({ modelResults }: { modelResults: EveModelResults
     });
   }, [modelResults.harnesses, sort]);
 
-  const bestResolve = Math.max(...rows.map((r) => r.resolveRate.estimate));
-  const bestPassAll = Math.max(...rows.map((r) => r.passAllRate ?? -1).filter((v) => v >= 0));
-  const bestLatency = Math.min(...rows.map((r) => r.latencyP50Ms));
-  const bestInput = Math.min(...rows.map((r) => r.inputTokens));
-  const bestOutput = Math.min(...rows.map((r) => r.outputTokens));
-  const bestCache = Math.max(...rows.map((r) => r.cachedShare ?? -1).filter((v) => v >= 0));
-  const stepOnes = rows
-    .map((r) => r.overhead?.firstStepInputTokens ?? null)
-    .filter((v): v is number => v !== null);
-  const bestStepOne = stepOnes.length > 0 ? Math.min(...stepOnes) : null;
-  const toolMedians = rows
-    .map((r) => r.overhead?.toolCallsMedian ?? null)
-    .filter((v): v is number => v !== null);
-  const bestTools = toolMedians.length > 0 ? Math.min(...toolMedians) : null;
-  const costs = rows.map((r) => r.costPerResolvedUsd).filter((v): v is number => v !== null);
-  const bestCostPerResolved = costs.length > 0 ? Math.min(...costs) : null;
+  const bestResolve = bestOf(
+    rows.map((r) => r.resolveRate.estimate),
+    "max",
+  );
+  const bestPassAll = bestOf(
+    rows.map((r) => r.passAllRate),
+    "max",
+  );
+  const bestLatency = bestOf(
+    rows.map((r) => r.latencyP50Ms),
+    "min",
+  );
+  const bestInput = bestOf(
+    rows.map((r) => r.inputTokens),
+    "min",
+  );
+  const bestOutput = bestOf(
+    rows.map((r) => r.outputTokens),
+    "min",
+  );
+  const bestCache = bestOf(
+    rows.map((r) => r.cachedShare),
+    "max",
+  );
+  const bestStepOne = bestOf(
+    rows.map((r) => r.overhead?.firstStepInputTokens),
+    "min",
+  );
+  const bestTools = bestOf(
+    rows.map((r) => r.overhead?.toolCallsMedian),
+    "min",
+  );
+  const bestCostUsd = bestOf(
+    rows.map((r) => r.costUsd),
+    "min",
+  );
+  const bestCostPerResolved = bestOf(
+    rows.map((r) => r.costPerResolvedUsd),
+    "min",
+  );
+
+  const taskDenominator = modelResults.taskMatrix.length || modelResults.tasks;
 
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-400 bg-background-100">
@@ -661,7 +759,7 @@ const HarnessScorecardTable = ({ modelResults }: { modelResults: EveModelResults
             />
             <SortableTh
               align="right"
-              label="pass^3"
+              label={`pass^${modelResults.attempts}`}
               onClick={() => toggleSort("passAllRate")}
               sort={sort}
               sortKey="passAllRate"
@@ -712,7 +810,7 @@ const HarnessScorecardTable = ({ modelResults }: { modelResults: EveModelResults
         </thead>
         <tbody>
           {rows.map((row, index) => {
-            const isEve = REFERENCE_HARNESSES.has(row.harness);
+            const isEve = isReferenceHarness(row.harness);
             return (
               <tr
                 className={`border-gray-300 border-t ${isEve ? "bg-gray-100/70" : "hover:bg-gray-100/40"}`}
@@ -726,7 +824,7 @@ const HarnessScorecardTable = ({ modelResults }: { modelResults: EveModelResults
                     />
                     {row.runUrl ? (
                       <a
-                        className="font-medium hover:underline"
+                        className={`rounded-xs font-medium hover:underline ${FOCUS_RING}`}
                         href={row.runUrl}
                         rel="noreferrer"
                         target="_blank"
@@ -745,52 +843,52 @@ const HarnessScorecardTable = ({ modelResults }: { modelResults: EveModelResults
                 <td className="whitespace-nowrap px-3 py-3 text-right font-mono">
                   <div
                     className={
-                      row.resolveRate.estimate === bestResolve
-                        ? "font-semibold text-green-700"
+                      bestResolve != null && row.resolveRate.estimate === bestResolve
+                        ? "font-semibold text-green-900"
                         : "text-gray-1000"
                     }
                   >
                     {formatPercent(row.resolveRate.estimate)} ({row.resolved}/{row.attempts})
                   </div>
-                  <div className="text-gray-700 text-xs">
+                  <div className="text-gray-900 text-xs">
                     {formatPercent(row.resolveRate.low)}–{formatPercent(row.resolveRate.high)}
                   </div>
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-right font-mono">
                   <div
                     className={
-                      row.passAllRate !== null && row.passAllRate === bestPassAll
-                        ? "font-semibold text-green-700"
+                      bestPassAll != null && row.passAllRate === bestPassAll
+                        ? "font-semibold text-green-900"
                         : "text-gray-1000"
                     }
                   >
                     {formatPercent(row.passAllRate)}
                   </div>
-                  {row.passAllTasks !== null ? (
-                    <div className="text-gray-700 text-xs">
-                      {row.passAllTasks}/{modelResults.taskMatrix.length || 12} tasks
+                  {row.passAllTasks != null ? (
+                    <div className="text-gray-900 text-xs">
+                      {row.passAllTasks}/{taskDenominator} tasks
                     </div>
                   ) : null}
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-right font-mono">
                   <div
                     className={
-                      row.latencyP50Ms === bestLatency
-                        ? "font-semibold text-green-700"
+                      bestLatency != null && row.latencyP50Ms === bestLatency
+                        ? "font-semibold text-green-900"
                         : "text-gray-1000"
                     }
                   >
                     {formatDurationMs(row.latencyP50Ms)}
                   </div>
-                  <div className="text-gray-700 text-xs">
+                  <div className="text-gray-900 text-xs">
                     p90 {formatDurationMs(row.latencyP90Ms)}
                   </div>
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-right font-mono">
                   <div
                     className={
-                      row.inputTokens === bestInput
-                        ? "font-semibold text-green-700"
+                      bestInput != null && row.inputTokens === bestInput
+                        ? "font-semibold text-green-900"
                         : "text-gray-1000"
                     }
                   >
@@ -798,9 +896,9 @@ const HarnessScorecardTable = ({ modelResults }: { modelResults: EveModelResults
                   </div>
                   <div
                     className={
-                      row.outputTokens === bestOutput
-                        ? "text-green-700 text-xs"
-                        : "text-gray-700 text-xs"
+                      bestOutput != null && row.outputTokens === bestOutput
+                        ? "font-medium text-green-900 text-xs"
+                        : "text-gray-900 text-xs"
                     }
                   >
                     {formatTokens(row.outputTokens)} out
@@ -808,8 +906,8 @@ const HarnessScorecardTable = ({ modelResults }: { modelResults: EveModelResults
                 </td>
                 <td
                   className={`whitespace-nowrap px-3 py-3 text-right font-mono ${
-                    row.cachedShare !== null && row.cachedShare === bestCache
-                      ? "font-semibold text-green-700"
+                    bestCache != null && row.cachedShare === bestCache
+                      ? "font-semibold text-green-900"
                       : "text-gray-1000"
                   }`}
                 >
@@ -817,8 +915,8 @@ const HarnessScorecardTable = ({ modelResults }: { modelResults: EveModelResults
                 </td>
                 <td
                   className={`whitespace-nowrap px-3 py-3 text-right font-mono ${
-                    bestStepOne !== null && row.overhead?.firstStepInputTokens === bestStepOne
-                      ? "font-semibold text-green-700"
+                    bestStepOne != null && row.overhead?.firstStepInputTokens === bestStepOne
+                      ? "font-semibold text-green-900"
                       : "text-gray-1000"
                   }`}
                 >
@@ -827,8 +925,8 @@ const HarnessScorecardTable = ({ modelResults }: { modelResults: EveModelResults
                 <td className="whitespace-nowrap px-3 py-3 text-right font-mono">
                   <div
                     className={
-                      bestTools !== null && row.overhead?.toolCallsMedian === bestTools
-                        ? "font-semibold text-green-700"
+                      bestTools != null && row.overhead?.toolCallsMedian === bestTools
+                        ? "font-semibold text-green-900"
                         : "text-gray-1000"
                     }
                   >
@@ -837,24 +935,32 @@ const HarnessScorecardTable = ({ modelResults }: { modelResults: EveModelResults
                   </div>
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-right font-mono">
-                  {row.costUsd !== null ? (
+                  {row.costUsd != null ? (
                     <>
                       <div
                         className={
-                          bestCostPerResolved !== null &&
-                          row.costPerResolvedUsd === bestCostPerResolved
-                            ? "font-semibold text-green-700"
+                          bestCostUsd != null && row.costUsd === bestCostUsd
+                            ? "font-semibold text-green-900"
                             : "text-gray-1000"
                         }
                       >
                         {formatUsd(row.costUsd)}
                       </div>
-                      <div className="text-gray-700 text-xs">
-                        {formatUsd(row.costPerResolvedUsd)}/res
-                      </div>
+                      {row.costPerResolvedUsd != null ? (
+                        <div
+                          className={
+                            bestCostPerResolved != null &&
+                            row.costPerResolvedUsd === bestCostPerResolved
+                              ? "font-medium text-green-900 text-xs"
+                              : "text-gray-900 text-xs"
+                          }
+                        >
+                          {formatUsd(row.costPerResolvedUsd)}/res
+                        </div>
+                      ) : null}
                     </>
                   ) : (
-                    <span className="text-gray-700">—</span>
+                    <span className="text-gray-900">—</span>
                   )}
                 </td>
               </tr>
@@ -880,20 +986,30 @@ const SortableTh = ({
   align?: "left" | "right";
 }) => {
   const active = sort.key === sortKey;
+  const SortIcon = !active
+    ? ArrowUpDownIcon
+    : sort.direction === "ascending"
+      ? ArrowUpIcon
+      : ArrowDownIcon;
+
   return (
     <th
       aria-sort={active ? sort.direction : "none"}
       className={`whitespace-nowrap px-3 py-3 font-medium ${align === "right" ? "text-right" : "text-left"}`}
+      scope="col"
     >
       <button
-        className={`inline-flex items-center gap-1 hover:text-gray-1000 ${
-          active ? "text-gray-1000" : "text-gray-800"
+        className={`inline-flex items-center gap-1 rounded-xs hover:text-gray-1000 ${FOCUS_RING} ${
+          active ? "font-semibold text-gray-1000" : "text-gray-900"
         }`}
         onClick={onClick}
         type="button"
       >
         <span>{label}</span>
-        <ArrowUpDownIcon aria-hidden="true" className="size-3 opacity-60" />
+        <SortIcon
+          aria-hidden="true"
+          className={`size-3 ${active ? "opacity-100" : "opacity-60"}`}
+        />
       </button>
     </th>
   );
@@ -910,14 +1026,19 @@ const TaskBreakdownSection = ({ modelResults }: { modelResults: EveModelResults 
           <h2 className="font-semibold text-gray-1000 text-xl" id="task-breakdown">
             Per-Task Breakdown
           </h2>
-          <p className="mt-0.5 text-gray-800 text-xs">
-            All {modelResults.taskMatrix.length} DeepSWE-lean tasks across every harness
+          <p className="mt-0.5 text-gray-900 text-xs">
+            All {modelResults.taskMatrix.length} {modelResults.dataset.name} tasks ·{" "}
+            {taskMetric === "resolved"
+              ? `resolved out of ${modelResults.attempts} attempts`
+              : taskMetric === "latency"
+                ? "median duration per attempt"
+                : "mean input / output tokens per attempt"}
           </p>
         </div>
         <div
           aria-label="Task metric"
           className="inline-flex rounded-lg border border-gray-400 p-0.5 text-xs"
-          role="tablist"
+          role="group"
         >
           {(
             [
@@ -927,15 +1048,14 @@ const TaskBreakdownSection = ({ modelResults }: { modelResults: EveModelResults 
             ] as const
           ).map(([key, label]) => (
             <button
-              aria-selected={taskMetric === key}
-              className={`rounded-md px-2.5 py-1 ${
+              aria-pressed={taskMetric === key}
+              className={`rounded-md px-2.5 py-1 ${FOCUS_RING} ${
                 taskMetric === key
                   ? "bg-gray-200 font-medium text-gray-1000"
-                  : "text-gray-800 hover:text-gray-1000"
+                  : "text-gray-900 hover:text-gray-1000"
               }`}
               key={key}
               onClick={() => setTaskMetric(key)}
-              role="tab"
               type="button"
             >
               {label}
@@ -948,11 +1068,14 @@ const TaskBreakdownSection = ({ modelResults }: { modelResults: EveModelResults 
         <table className="w-full min-w-[640px] border-collapse text-left text-sm">
           <thead className="bg-gray-100 text-gray-900 text-xs">
             <tr>
-              <th className="px-3.5 py-3 font-medium">Task</th>
+              <th className="px-3.5 py-3 font-medium" scope="col">
+                Task
+              </th>
               {harnesses.map((h, index) => (
                 <th
                   className="whitespace-nowrap px-3.5 py-3 text-right font-mono font-medium"
                   key={h.harness}
+                  scope="col"
                 >
                   <span className="inline-flex items-center justify-end gap-1.5">
                     <span
@@ -967,14 +1090,14 @@ const TaskBreakdownSection = ({ modelResults }: { modelResults: EveModelResults 
           </thead>
           <tbody>
             {modelResults.taskMatrix.map((row) => {
-              const latencies = harnesses
-                .map((h) => row.cells[h.harness]?.latencyMs ?? null)
-                .filter((v): v is number => v !== null);
-              const bestLatency = latencies.length > 0 ? Math.min(...latencies) : null;
-              const inputs = harnesses
-                .map((h) => row.cells[h.harness]?.inputTokens ?? null)
-                .filter((v): v is number => v !== null);
-              const bestInput = inputs.length > 0 ? Math.min(...inputs) : null;
+              const bestLatency = bestOf(
+                harnesses.map((h) => row.cells[h.harness]?.latencyMs),
+                "min",
+              );
+              const bestInput = bestOf(
+                harnesses.map((h) => row.cells[h.harness]?.inputTokens),
+                "min",
+              );
 
               return (
                 <tr className="border-gray-300 border-t hover:bg-gray-100/40" key={row.task}>
@@ -986,7 +1109,7 @@ const TaskBreakdownSection = ({ modelResults }: { modelResults: EveModelResults 
                     if (!cell) {
                       return (
                         <td
-                          className="px-3.5 py-2.5 text-right font-mono text-gray-700 text-xs"
+                          className="px-3.5 py-2.5 text-right font-mono text-gray-900 text-xs"
                           key={h.harness}
                         >
                           —
@@ -997,10 +1120,10 @@ const TaskBreakdownSection = ({ modelResults }: { modelResults: EveModelResults 
                       const ratio = cell.attempts > 0 ? cell.resolved / cell.attempts : 0;
                       const pillClass =
                         ratio === 1
-                          ? "bg-green-500/12 text-green-700 font-semibold"
+                          ? "bg-green-200 text-green-900 font-semibold"
                           : ratio > 0
-                            ? "bg-amber-500/12 text-amber-700 font-medium"
-                            : "bg-gray-200 text-gray-700";
+                            ? "bg-amber-200 text-amber-900 font-medium"
+                            : "bg-gray-200 text-gray-900";
                       return (
                         <td className="px-3.5 py-2.5 text-right font-mono text-xs" key={h.harness}>
                           <span className={`inline-block rounded-md px-2 py-0.5 ${pillClass}`}>
@@ -1010,11 +1133,11 @@ const TaskBreakdownSection = ({ modelResults }: { modelResults: EveModelResults 
                       );
                     }
                     if (taskMetric === "latency") {
-                      const isBest = bestLatency !== null && cell.latencyMs === bestLatency;
+                      const isBest = bestLatency != null && cell.latencyMs === bestLatency;
                       return (
                         <td
                           className={`whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-xs ${
-                            isBest ? "font-semibold text-green-700" : "text-gray-900"
+                            isBest ? "font-semibold text-green-900" : "text-gray-1000"
                           }`}
                           key={h.harness}
                         >
@@ -1022,16 +1145,18 @@ const TaskBreakdownSection = ({ modelResults }: { modelResults: EveModelResults 
                         </td>
                       );
                     }
-                    const isBest = bestInput !== null && cell.inputTokens === bestInput;
+                    const isBest = bestInput != null && cell.inputTokens === bestInput;
                     return (
                       <td
                         className={`whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-xs ${
-                          isBest ? "font-semibold text-green-700" : "text-gray-900"
+                          isBest ? "font-semibold text-green-900" : "text-gray-1000"
                         }`}
                         key={h.harness}
                       >
-                        {formatTokens(cell.inputTokens)}↑{" "}
-                        <span className="text-gray-700">{formatTokens(cell.outputTokens)}↓</span>
+                        {formatTokens(cell.inputTokens)} in{" "}
+                        <span className="text-gray-900">
+                          / {formatTokens(cell.outputTokens)} out
+                        </span>
                       </td>
                     );
                   })}
@@ -1049,7 +1174,7 @@ const OverheadProfileGrid = ({ modelResults }: { modelResults: EveModelResults }
   const harnesses = rankedHarnesses(modelResults);
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
       {harnesses.map((entry, index) => {
         const overhead = entry.overhead;
         const color = harnessColor(entry.harness, index);
@@ -1067,25 +1192,25 @@ const OverheadProfileGrid = ({ modelResults }: { modelResults: EveModelResults }
                 <span className="truncate">{entry.harness}</span>
               </span>
               {entry.version ? (
-                <span className="shrink-0 font-mono text-gray-700 text-xs">{entry.version}</span>
+                <span className="shrink-0 font-mono text-gray-900 text-xs">{entry.version}</span>
               ) : null}
             </div>
 
             <div className="mt-3 grid grid-cols-3 gap-2 border-gray-300 border-b pb-3 text-xs">
               <div>
-                <div className="text-gray-700">Step 1</div>
+                <div className="text-gray-900">Step 1</div>
                 <div className="mt-0.5 font-mono font-medium text-gray-1000">
                   {formatTokens(overhead?.firstStepInputTokens ?? null)}
                 </div>
               </div>
               <div>
-                <div className="text-gray-700">Steps</div>
+                <div className="text-gray-900">Steps</div>
                 <div className="mt-0.5 font-mono font-medium text-gray-1000">
                   {formatMedianCount(overhead?.modelStepsMedian ?? null)}
                 </div>
               </div>
               <div>
-                <div className="text-gray-700">Tools</div>
+                <div className="text-gray-900">Tools</div>
                 <div className="mt-0.5 font-mono font-medium text-gray-1000">
                   {formatMedianCount(overhead?.toolCallsMedian ?? null)}
                 </div>
@@ -1093,13 +1218,13 @@ const OverheadProfileGrid = ({ modelResults }: { modelResults: EveModelResults }
             </div>
 
             <div className="mt-3 space-y-2">
-              <div className="text-gray-700 text-xs">Top tools (36 trials)</div>
+              <div className="text-gray-900 text-xs">Top tools ({entry.attempts} attempts)</div>
               {topTools.length > 0 ? (
                 topTools.map((tool) => (
                   <div className="space-y-0.5" key={tool.name}>
                     <div className="flex items-center justify-between gap-2 font-mono text-xs">
-                      <span className="truncate text-gray-900">{tool.name}</span>
-                      <span className="shrink-0 text-gray-700">{tool.count}</span>
+                      <span className="truncate text-gray-1000">{tool.name}</span>
+                      <span className="shrink-0 text-gray-900">{tool.count}</span>
                     </div>
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
                       <div
@@ -1114,7 +1239,7 @@ const OverheadProfileGrid = ({ modelResults }: { modelResults: EveModelResults }
                   </div>
                 ))
               ) : (
-                <p className="text-gray-700 text-xs">No tool breakdown reported.</p>
+                <p className="text-gray-900 text-xs">No tool breakdown reported.</p>
               )}
             </div>
           </div>

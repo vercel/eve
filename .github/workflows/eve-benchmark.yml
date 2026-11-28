@@ -202,16 +202,14 @@ jobs:
           TITLE: "chore: refresh eve benchmark results"
         run: |
           set -euo pipefail
-          families=$(node -e 'for (const m of JSON.parse(process.env.MODELS_JSON)) console.log(m.family)')
+          mapfile -t families < <(node -e 'for (const m of JSON.parse(process.env.MODELS_JSON)) console.log(m.family)')
           reports=()
-          refreshed=()
-          for family in $families; do
+          for family in "${families[@]}"; do
             artifact="${ARTIFACT_PREFIX}-${family}"
             dir="$RUNNER_TEMP/bench-${family}"
             if gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n "$artifact" -D "$dir" &&
               [ -f "$dir/report.json" ]; then
               reports+=("$dir/report.json")
-              refreshed+=("$family")
             else
               echo "::notice::eve docs snapshot skipped $artifact: report.json not uploaded."
             fi
@@ -224,7 +222,7 @@ jobs:
           head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" -q .object.sha)
           gh api "repos/$GITHUB_REPOSITORY/contents/$FILE?ref=$head" -H "Accept: application/vnd.github.raw" > "$FILE"
           cp "$FILE" "$RUNNER_TEMP/before.json"
-          node .github/scripts/eve-docs-snapshot.mjs "${reports[@]}" "$FILE"
+          node .github/scripts/eve-docs-snapshot.mjs --updated-file "$RUNNER_TEMP/updated.txt" "${reports[@]}" "$FILE"
           if cmp -s "$FILE" "$RUNNER_TEMP/before.json"; then exit 0; fi
 
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" > /dev/null 2>&1; then
@@ -236,7 +234,7 @@ jobs:
           gh api graphql --input "$RUNNER_TEMP/commit.json" -q .data.createCommitOnBranch.commit.url
 
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          families_list=$(IFS=", "; echo "${refreshed[*]}")
+          families_list=$(node -e 'const fs = require("node:fs"); console.log(fs.readFileSync(process.argv[1], "utf8").trim().split("\n").filter(Boolean).join(", "));' "$RUNNER_TEMP/updated.txt")
           cat > "$RUNNER_TEMP/body.md" <<EOF
           Refreshes \`$FILE\` from the deepswe-lean ($families_list) reports of $run_url.
 

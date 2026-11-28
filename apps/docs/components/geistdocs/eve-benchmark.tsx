@@ -7,19 +7,15 @@ import {
   formatDurationMs,
   formatMedianCount,
   formatPercent,
+  formatSignedDelta,
   formatTokens,
+  isReferenceHarness,
   modelFamilyLabel,
   modelShortName,
+  orderedModels,
   rankedHarnesses,
 } from "@/lib/evals/eve-format";
-import {
-  eveBenchmark,
-  orderedModels,
-  type EveHarnessScore,
-  type EveModelResults,
-} from "@/lib/evals/eve-results";
-
-const REFERENCE_HARNESSES = new Set(["eve", "eve-code"]);
+import { eveBenchmark, type EveHarnessScore, type EveModelResults } from "@/lib/evals/eve-results";
 
 export const HARNESS_COLORS: Record<string, string> = {
   eve: "#4f6bed",
@@ -52,10 +48,8 @@ interface Metric {
   footnote: string;
 }
 
-const signed = (value: number, unit: string) =>
-  `${value > 0 ? "+" : value < 0 ? "−" : "±"}${Math.abs(Math.round(value))}${unit}`;
 const relative = (value: number, reference: number) =>
-  reference === 0 ? "—" : signed((value / reference - 1) * 100, "%");
+  reference === 0 ? "—" : formatSignedDelta((value / reference - 1) * 100, "%");
 
 const METRICS: Record<MetricKey, Metric> = {
   correctness: {
@@ -65,7 +59,7 @@ const METRICS: Record<MetricKey, Metric> = {
     value: (score) => score.resolveRate.estimate,
     range: (score) => [score.resolveRate.low, score.resolveRate.high],
     format: (value) => formatPercent(value),
-    delta: (value, reference) => signed((value - reference) * 100, " pp"),
+    delta: (value, reference) => formatSignedDelta((value - reference) * 100, " pp"),
     max: 1,
     footnote: "Lines are 95% intervals; overlapping lines are not a measured difference.",
   },
@@ -83,7 +77,7 @@ const METRICS: Record<MetricKey, Metric> = {
     label: "input / attempt",
     effectKey: "inputTokens",
     higherIsBetter: false,
-    value: (score) => score.inputTokens / score.attempts,
+    value: (score) => (score.attempts > 0 ? score.inputTokens / score.attempts : null),
     format: (value) => formatTokens(value),
     delta: relative,
     footnote: "Mean input tokens per attempt (including cached tokens).",
@@ -91,7 +85,7 @@ const METRICS: Record<MetricKey, Metric> = {
   "output tokens": {
     label: "output / attempt",
     higherIsBetter: false,
-    value: (score) => score.outputTokens / score.attempts,
+    value: (score) => (score.attempts > 0 ? score.outputTokens / score.attempts : null),
     format: (value) => formatTokens(value),
     delta: relative,
     footnote: "Mean output tokens per attempt (including reasoning tokens).",
@@ -139,13 +133,13 @@ export const EveBenchmark = ({
 
   const metric = METRICS[metricKey];
   const rows = rankedHarnesses(activeModel);
-  const reference = rows.find((score) => REFERENCE_HARNESSES.has(score.harness));
+  const reference = rows.find((score) => isReferenceHarness(score.harness));
   const numericValues = rows
     .map((score) => metric.value(score))
-    .filter((value): value is number => value !== null);
+    .filter((value): value is number => value != null);
   const rangePeaks = rows
     .map((score) => metric.range?.(score)?.[1] ?? metric.value(score))
-    .filter((value): value is number => value !== null);
+    .filter((value): value is number => value != null);
   const max = metric.max ?? (rangePeaks.length > 0 ? niceCeiling(Math.max(...rangePeaks)) : 1);
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((fraction) => fraction * max);
   const best =
@@ -157,25 +151,28 @@ export const EveBenchmark = ({
   const sorted = [...rows].sort((left, right) => {
     const lv = metric.value(left);
     const rv = metric.value(right);
-    if (lv === null && rv === null) return 0;
-    if (lv === null) return 1;
-    if (rv === null) return -1;
+    if (lv == null && rv == null) return 0;
+    if (lv == null) return 1;
+    if (rv == null) return -1;
     return metric.higherIsBetter ? rv - lv : lv - rv;
   });
 
   const referenceValue = reference ? metric.value(reference) : null;
+  const hasSignificantDiff = sorted.some((score) => {
+    const effect = metric.effectKey ? score.effectsVsEve?.[metric.effectKey] : undefined;
+    return effect != null && effect.verdict !== "inconclusive";
+  });
 
   return (
     <figure className="not-prose my-6 rounded-xl border border-gray-400 bg-background-100 p-4 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <figcaption className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <span className="font-mono font-medium text-gray-1000">
-            {datasetResults.dataset.name}@{datasetResults.dataset.version} ·{" "}
+            {activeModel.dataset.name}@{activeModel.dataset.version} ·{" "}
             {modelShortName(activeModel.model.id)}
           </span>
-          <span className="text-gray-800 text-xs sm:text-sm">
-            {rows.length} harnesses · {datasetResults.tasks} tasks × {datasetResults.attempts}{" "}
-            attempts
+          <span className="text-gray-900 text-xs sm:text-sm">
+            {rows.length} harnesses · {activeModel.tasks} tasks × {activeModel.attempts} attempts
             {runs > 0 ? ` · ${runs} run${runs === 1 ? "" : "s"}` : ""}
           </span>
         </figcaption>
@@ -184,21 +181,20 @@ export const EveBenchmark = ({
           <div
             aria-label="Model"
             className="inline-flex flex-wrap rounded-lg border border-gray-400 p-0.5 text-xs"
-            role="tablist"
+            role="group"
           >
             {models.map((entry) => {
               const selected = entry.family === activeModel.family;
               return (
                 <button
-                  aria-selected={selected}
-                  className={`rounded-md px-2.5 py-1 transition-colors ${
+                  aria-pressed={selected}
+                  className={`rounded-md px-2.5 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-blue-700 focus-visible:outline-offset-2 ${
                     selected
                       ? "bg-gray-200 font-medium text-gray-1000"
-                      : "text-gray-800 hover:text-gray-1000"
+                      : "text-gray-900 hover:text-gray-1000"
                   }`}
                   key={entry.family}
                   onClick={() => setSelectedFamily(entry.family)}
-                  role="tab"
                   type="button"
                 >
                   {modelFamilyLabel(entry.family)} · {modelShortName(entry.model.id)}
@@ -212,40 +208,50 @@ export const EveBenchmark = ({
       <div
         aria-label="Metric"
         className="mt-3 inline-flex flex-wrap rounded-lg border border-gray-400 p-0.5"
-        role="tablist"
+        role="group"
       >
-        {METRIC_KEYS.map((key) => (
-          <button
-            aria-selected={key === metricKey}
-            className={`rounded-md px-2.5 py-1 text-xs sm:px-3 sm:text-sm ${
-              key === metricKey
-                ? "bg-gray-200 font-medium text-gray-1000"
-                : "text-gray-800 hover:text-gray-1000"
-            }`}
-            key={key}
-            onClick={() => setMetricKey(key)}
-            role="tab"
-            type="button"
-          >
-            {key}
-          </button>
-        ))}
+        {METRIC_KEYS.map((key) => {
+          const selected = key === metricKey;
+          return (
+            <button
+              aria-pressed={selected}
+              className={`rounded-md px-2.5 py-1 text-xs focus-visible:outline-2 focus-visible:outline-blue-700 focus-visible:outline-offset-2 sm:px-3 sm:text-sm ${
+                selected
+                  ? "bg-gray-200 font-medium text-gray-1000"
+                  : "text-gray-900 hover:text-gray-1000"
+              }`}
+              key={key}
+              onClick={() => setMetricKey(key)}
+              type="button"
+            >
+              {key}
+            </button>
+          );
+        })}
       </div>
 
-      <div className="mt-4 overflow-x-auto" role="tabpanel">
+      <div className="mt-4 overflow-x-auto">
         <div className="min-w-[560px]">
-          <div className="grid grid-cols-[10.5rem_1fr_7.25rem_5rem] items-end gap-x-3 pb-1 text-gray-800 text-xs sm:text-sm">
+          <div className="grid grid-cols-[10.5rem_1fr_7.25rem_5rem] items-end gap-x-3 pb-1 text-gray-900 text-xs sm:text-sm">
             <span>{metric.higherIsBetter ? "higher is better" : "lower is better"}</span>
             <div className="relative h-5 font-mono text-xs">
-              {ticks.map((tick) => (
-                <span
-                  className="absolute -translate-x-1/2 whitespace-nowrap"
-                  key={tick}
-                  style={{ left: position(tick) }}
-                >
-                  {metric.format(tick)}
-                </span>
-              ))}
+              {ticks.map((tick, index) => {
+                const alignClass =
+                  index === 0
+                    ? "translate-x-0"
+                    : index === ticks.length - 1
+                      ? "-translate-x-full"
+                      : "-translate-x-1/2";
+                return (
+                  <span
+                    className={`absolute whitespace-nowrap ${alignClass}`}
+                    key={tick}
+                    style={{ left: position(tick) }}
+                  >
+                    {metric.format(tick)}
+                  </span>
+                );
+              })}
             </div>
             <span className="text-right">{metric.label}</span>
             <span className="text-right">vs eve</span>
@@ -255,9 +261,9 @@ export const EveBenchmark = ({
             const value = metric.value(score);
             const color = harnessColor(score.harness, index);
             const range = metric.range?.(score);
-            const isReference = REFERENCE_HARNESSES.has(score.harness);
+            const isReference = isReferenceHarness(score.harness);
             const effect = metric.effectKey ? score.effectsVsEve?.[metric.effectKey] : undefined;
-            const isSignificant = effect && effect.verdict !== "inconclusive";
+            const isSignificant = effect != null && effect.verdict !== "inconclusive";
 
             return (
               <div
@@ -271,7 +277,7 @@ export const EveBenchmark = ({
                   <span className="truncate">
                     {score.runUrl ? (
                       <a
-                        className="hover:underline"
+                        className="rounded-xs hover:underline focus-visible:outline-2 focus-visible:outline-blue-700 focus-visible:outline-offset-2"
                         href={score.runUrl}
                         rel="noreferrer"
                         target="_blank"
@@ -304,7 +310,7 @@ export const EveBenchmark = ({
                       }}
                     />
                   ) : null}
-                  {value !== null ? (
+                  {value != null ? (
                     <span
                       aria-label={`${score.harness}: ${metric.format(value)}${range ? `, interval ${metric.format(range[0])} to ${metric.format(range[1])}` : ""}`}
                       className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-background-100 transition-[left] duration-300"
@@ -316,12 +322,12 @@ export const EveBenchmark = ({
 
                 <span
                   className={`text-right font-mono ${
-                    value !== null && best !== null && value === best
-                      ? "font-medium text-green-700"
+                    value != null && best != null && value === best
+                      ? "font-semibold text-green-900"
                       : "text-gray-1000"
                   }`}
                 >
-                  {value === null
+                  {value == null
                     ? "—"
                     : metricKey === "correctness"
                       ? `${metric.format(value)} (${score.resolved}/${score.attempts})`
@@ -331,18 +337,18 @@ export const EveBenchmark = ({
                 <span
                   className={`text-right font-mono ${
                     isReference
-                      ? "text-gray-700"
+                      ? "text-gray-900"
                       : isSignificant
-                        ? "font-medium text-gray-1000"
-                        : "text-gray-800"
+                        ? "font-semibold text-gray-1000"
+                        : "text-gray-900"
                   }`}
                   title={
                     effect
-                      ? `Paired task bootstrap vs eve: ${effect.better} better, ${effect.worse} worse (${effect.verdict})`
+                      ? `${score.harness} vs eve: ${effect.better} tasks better, ${effect.worse} tasks worse (${effect.verdict})`
                       : undefined
                   }
                 >
-                  {isReference || referenceValue === null || value === null
+                  {isReference || referenceValue == null || value == null
                     ? isReference
                       ? "ref"
                       : "—"
@@ -354,11 +360,15 @@ export const EveBenchmark = ({
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-gray-700 text-xs">
-        <p className="m-0">{metric.footnote} Click a contender to open its run.</p>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-gray-900 text-xs">
+        <p className="m-0">
+          {metric.footnote}
+          {hasSignificantDiff ? " Bold deltas are statistically significant vs eve." : ""}
+          {runs > 0 ? " Click a contender to open its run." : ""}
+        </p>
         {showHubLink ? (
           <Link
-            className="font-medium text-gray-1000 underline underline-offset-4 hover:text-gray-800"
+            className="rounded-xs font-medium text-gray-1000 underline underline-offset-4 hover:text-gray-800 focus-visible:outline-2 focus-visible:outline-blue-700 focus-visible:outline-offset-2"
             href="/benchmarks"
             prefetch={true}
           >
