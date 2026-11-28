@@ -1,105 +1,1559 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "datasets": {
     "deepswe-lean": {
       "dataset": {
         "name": "deepswe-lean",
-        "version": "v1"
-      },
-      "model": {
-        "id": "anthropic/claude-sonnet-5.5",
-        "released": "2026-09-28",
-        "knowledge": "2026-06"
+        "version": "v1",
+        "commit": "0b9fabbb63b9104d678fe965e1632f2dd9eaa2ea"
       },
       "attempts": 3,
       "tasks": 12,
-      "harnesses": [
-        {
-          "harness": "eve",
-          "version": "87718dc",
-          "resolved": 27,
-          "attempts": 36,
-          "resolveRate": {
-            "estimate": 0.75,
-            "low": 0.5277777777777778,
-            "high": 0.9444444444444443
+      "reasoning": "high",
+      "models": {
+        "anthropic": {
+          "family": "anthropic",
+          "model": {
+            "id": "anthropic/claude-sonnet-5.5",
+            "released": "2026-09-28",
+            "knowledge": "2026-06"
           },
-          "costUsd": 16.701644800000004,
-          "costPerResolvedUsd": 0.6185794370370372,
-          "inputTokens": 28666416,
-          "outputTokens": 921423,
-          "cachedShare": 0.932825994013343,
-          "latencyP50Ms": 253336,
-          "latencyP90Ms": 359943.5,
-          "source": "87718dc33a232563d3a5705b3dbd6030740a44fe",
           "runUrl": "https://github.com/vercel/eve/actions/runs/46112773927",
-          "measuredAt": "2026-11-28T05:52:06.624Z"
+          "harnesses": [
+            {
+              "harness": "eve",
+              "version": "87718dc",
+              "resolved": 27,
+              "attempts": 36,
+              "resolveRate": {
+                "estimate": 0.75,
+                "low": 0.5277777777777778,
+                "high": 0.9444444444444443
+              },
+              "passAllTasks": 7,
+              "passAllRate": 0.5833333333333334,
+              "costUsd": 16.701644800000004,
+              "medianCostUsd": 0.48570150000000006,
+              "costPerResolvedUsd": 0.6185794370370372,
+              "inputTokens": 28666416,
+              "outputTokens": 921423,
+              "cachedShare": 0.932825994013343,
+              "latencyP50Ms": 253336,
+              "latencyP90Ms": 359943.5,
+              "overhead": {
+                "firstStepInputTokens": 3129.5,
+                "modelStepsMedian": 19,
+                "modelStepsTotal": 716,
+                "toolCallsMedian": 19,
+                "toolCallsTotal": 712,
+                "topTools": [
+                  {
+                    "name": "bash",
+                    "count": 708
+                  },
+                  {
+                    "name": "eve__task_wait",
+                    "count": 3
+                  },
+                  {
+                    "name": "write_file",
+                    "count": 1
+                  }
+                ]
+              },
+              "effectsVsEve": null,
+              "source": "87718dc33a232563d3a5705b3dbd6030740a44fe",
+              "runUrl": "https://github.com/vercel/eve/actions/runs/46112773927",
+              "measuredAt": "2026-11-28T05:52:06.624Z"
+            },
+            {
+              "harness": "opencode",
+              "version": "2.4.2",
+              "resolved": 26,
+              "attempts": 36,
+              "resolveRate": {
+                "estimate": 0.7222222222222222,
+                "low": 0.5277777777777778,
+                "high": 0.8888888888888888
+              },
+              "passAllTasks": 6,
+              "passAllRate": 0.5,
+              "costUsd": 21.443070815000002,
+              "medianCostUsd": 0.543602385,
+              "costPerResolvedUsd": 0.8247334928846155,
+              "inputTokens": 45811037,
+              "outputTokens": 1140395,
+              "cachedShare": 0.9500636931663433,
+              "latencyP50Ms": 330321,
+              "latencyP90Ms": 508246,
+              "overhead": {
+                "firstStepInputTokens": 9996.5,
+                "modelStepsMedian": 22.5,
+                "modelStepsTotal": 816,
+                "toolCallsMedian": 22.5,
+                "toolCallsTotal": 829,
+                "topTools": [
+                  {
+                    "name": "shell",
+                    "count": 748
+                  },
+                  {
+                    "name": "bash",
+                    "count": 38
+                  },
+                  {
+                    "name": "write",
+                    "count": 21
+                  },
+                  {
+                    "name": "read",
+                    "count": 8
+                  },
+                  {
+                    "name": "edit",
+                    "count": 7
+                  },
+                  {
+                    "name": "grep",
+                    "count": 4
+                  }
+                ]
+              },
+              "effectsVsEve": {
+                "resolveRate": {
+                  "better": 3,
+                  "worse": 3,
+                  "estimate": -0.027777777777777773,
+                  "low": -0.27777777777777773,
+                  "high": 0.19444444444444442,
+                  "verdict": "inconclusive"
+                },
+                "costUsd": {
+                  "better": 2,
+                  "worse": 10,
+                  "estimate": 1.224129147058823,
+                  "low": 1.0535272058670424,
+                  "high": 1.420121299244804,
+                  "verdict": "worse"
+                },
+                "inputTokens": {
+                  "better": 2,
+                  "worse": 10,
+                  "estimate": 1.4514440418515666,
+                  "low": 1.1670308307804595,
+                  "high": 1.8300906836061142,
+                  "verdict": "worse"
+                },
+                "latencyMs": {
+                  "better": 1,
+                  "worse": 11,
+                  "estimate": 1.2636891450350758,
+                  "low": 1.0969777634990936,
+                  "high": 1.542543330628827,
+                  "verdict": "worse"
+                }
+              },
+              "source": "87718dc33a232563d3a5705b3dbd6030740a44fe",
+              "runUrl": "https://github.com/vercel/eve/actions/runs/46112773927",
+              "measuredAt": "2026-11-28T05:56:37.979Z"
+            },
+            {
+              "harness": "pi",
+              "version": "1.7.0",
+              "resolved": 24,
+              "attempts": 36,
+              "resolveRate": {
+                "estimate": 0.6666666666666666,
+                "low": 0.4444444444444444,
+                "high": 0.861111111111111
+              },
+              "passAllTasks": 5,
+              "passAllRate": 0.4166666666666667,
+              "costUsd": null,
+              "medianCostUsd": null,
+              "costPerResolvedUsd": null,
+              "inputTokens": 25656417,
+              "outputTokens": 904082,
+              "cachedShare": 0.9260996966178091,
+              "latencyP50Ms": 245697,
+              "latencyP90Ms": 418798,
+              "overhead": {
+                "firstStepInputTokens": 2957.5,
+                "modelStepsMedian": 15.5,
+                "modelStepsTotal": 649,
+                "toolCallsMedian": 16,
+                "toolCallsTotal": 655,
+                "topTools": [
+                  {
+                    "name": "bash",
+                    "count": 654
+                  },
+                  {
+                    "name": "write",
+                    "count": 1
+                  }
+                ]
+              },
+              "effectsVsEve": {
+                "resolveRate": {
+                  "better": 3,
+                  "worse": 4,
+                  "estimate": -0.08333333333333333,
+                  "low": -0.3333333333333333,
+                  "high": 0.16666666666666663,
+                  "verdict": "inconclusive"
+                },
+                "costUsd": {
+                  "better": 0,
+                  "worse": 0,
+                  "estimate": null,
+                  "low": null,
+                  "high": null,
+                  "verdict": "inconclusive"
+                },
+                "inputTokens": {
+                  "better": 8,
+                  "worse": 4,
+                  "estimate": 0.8524194232773278,
+                  "low": 0.7371622772198431,
+                  "high": 0.9822249006127721,
+                  "verdict": "inconclusive"
+                },
+                "latencyMs": {
+                  "better": 5,
+                  "worse": 7,
+                  "estimate": 1.0292571823026966,
+                  "low": 0.9530279688039849,
+                  "high": 1.0844982940326642,
+                  "verdict": "inconclusive"
+                }
+              },
+              "source": "87718dc33a232563d3a5705b3dbd6030740a44fe",
+              "runUrl": "https://github.com/vercel/eve/actions/runs/46112773927",
+              "measuredAt": "2026-11-28T05:54:49.539Z"
+            },
+            {
+              "harness": "fx",
+              "version": "0.0.18",
+              "resolved": 28,
+              "attempts": 36,
+              "resolveRate": {
+                "estimate": 0.7777777777777778,
+                "low": 0.5555555555555555,
+                "high": 0.9722222222222222
+              },
+              "passAllTasks": 8,
+              "passAllRate": 0.6666666666666666,
+              "costUsd": null,
+              "medianCostUsd": null,
+              "costPerResolvedUsd": null,
+              "inputTokens": 48055211,
+              "outputTokens": 1245005,
+              "cachedShare": 0.9454788784508719,
+              "latencyP50Ms": 328277.5,
+              "latencyP90Ms": 470438,
+              "overhead": {
+                "firstStepInputTokens": null,
+                "modelStepsMedian": null,
+                "modelStepsTotal": null,
+                "toolCallsMedian": 26,
+                "toolCallsTotal": 967,
+                "topTools": [
+                  {
+                    "name": "shell",
+                    "count": 758
+                  },
+                  {
+                    "name": "read_file",
+                    "count": 123
+                  },
+                  {
+                    "name": "grep_files",
+                    "count": 38
+                  },
+                  {
+                    "name": "write_file",
+                    "count": 29
+                  },
+                  {
+                    "name": "edit_file",
+                    "count": 13
+                  },
+                  {
+                    "name": "glob_files",
+                    "count": 5
+                  }
+                ]
+              },
+              "effectsVsEve": {
+                "resolveRate": {
+                  "better": 2,
+                  "worse": 1,
+                  "estimate": 0.02777777777777779,
+                  "low": -0.2222222222222222,
+                  "high": 0.25000000000000006,
+                  "verdict": "inconclusive"
+                },
+                "costUsd": {
+                  "better": 0,
+                  "worse": 0,
+                  "estimate": null,
+                  "low": null,
+                  "high": null,
+                  "verdict": "inconclusive"
+                },
+                "inputTokens": {
+                  "better": 0,
+                  "worse": 12,
+                  "estimate": 1.723813911457295,
+                  "low": 1.4307344036321656,
+                  "high": 1.9341772456804969,
+                  "verdict": "worse"
+                },
+                "latencyMs": {
+                  "better": 2,
+                  "worse": 10,
+                  "estimate": 1.2524561703620738,
+                  "low": 1.0903935361031456,
+                  "high": 1.4714505668099789,
+                  "verdict": "worse"
+                }
+              },
+              "source": "87718dc33a232563d3a5705b3dbd6030740a44fe",
+              "runUrl": "https://github.com/vercel/eve/actions/runs/46112773927",
+              "measuredAt": "2026-11-28T05:59:54.635Z"
+            }
+          ],
+          "taskMatrix": [
+            {
+              "task": "anko-typed-variable-bindings",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 122761,
+                  "inputTokens": 480902,
+                  "outputTokens": 13561,
+                  "costUsd": 0.27570076666666665
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 142392,
+                  "inputTokens": 604167,
+                  "outputTokens": 15897,
+                  "costUsd": 0.33024995166666665
+                },
+                "pi": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 132109,
+                  "inputTokens": 425369,
+                  "outputTokens": 13662,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 186939,
+                  "inputTokens": 1080601,
+                  "outputTokens": 22176,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "bandit-incremental-cache-control",
+              "cells": {
+                "eve": {
+                  "resolved": 0,
+                  "attempts": 3,
+                  "latencyMs": 240107,
+                  "inputTokens": 1002823,
+                  "outputTokens": 30349,
+                  "costUsd": 0.5584780333333331
+                },
+                "opencode": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 311579,
+                  "inputTokens": 1888353,
+                  "outputTokens": 43567,
+                  "costUsd": 0.829803355
+                },
+                "pi": {
+                  "resolved": 1,
+                  "attempts": 3,
+                  "latencyMs": 236885,
+                  "inputTokens": 1066602,
+                  "outputTokens": 31117,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 318132,
+                  "inputTokens": 1624197,
+                  "outputTokens": 40023,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "cliffy-config-file-parsing",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 306833,
+                  "inputTokens": 1052184,
+                  "outputTokens": 34896,
+                  "costUsd": 0.6254019
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 321897,
+                  "inputTokens": 1150604,
+                  "outputTokens": 35408,
+                  "costUsd": 0.6511566316666668
+                },
+                "pi": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 313754,
+                  "inputTokens": 1086282,
+                  "outputTokens": 35192,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 345064,
+                  "inputTokens": 1709691,
+                  "outputTokens": 44232,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "dateutil-rfc5545-timezone-interop",
+              "cells": {
+                "eve": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 217885,
+                  "inputTokens": 779578,
+                  "outputTokens": 29666,
+                  "costUsd": 0.4995729333333334
+                },
+                "opencode": {
+                  "resolved": 1,
+                  "attempts": 3,
+                  "latencyMs": 239015,
+                  "inputTokens": 806937,
+                  "outputTokens": 32027,
+                  "costUsd": 0.528385815
+                },
+                "pi": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 214016,
+                  "inputTokens": 631843,
+                  "outputTokens": 30414,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 330768,
+                  "inputTokens": 1262874,
+                  "outputTokens": 48285,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "go-genai-streamed-function-args",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 350611,
+                  "inputTokens": 466454,
+                  "outputTokens": 18078,
+                  "costUsd": 0.3150497333333333
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 362771,
+                  "inputTokens": 432418,
+                  "outputTokens": 15839,
+                  "costUsd": 0.28234254333333336
+                },
+                "pi": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 374560,
+                  "inputTokens": 355457,
+                  "outputTokens": 17646,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 299222,
+                  "inputTokens": 816782,
+                  "outputTokens": 23748,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "mnamer-daemon-watch-lifecycle",
+              "cells": {
+                "eve": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 238797,
+                  "inputTokens": 629877,
+                  "outputTokens": 26474,
+                  "costUsd": 0.4494126666666667
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 368956,
+                  "inputTokens": 1429323,
+                  "outputTokens": 40282,
+                  "costUsd": 0.7133174633333333
+                },
+                "pi": {
+                  "resolved": 0,
+                  "attempts": 3,
+                  "latencyMs": 212106,
+                  "inputTokens": 386966,
+                  "outputTokens": 22283,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 208901,
+                  "inputTokens": 632896,
+                  "outputTokens": 27297,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "prometheus-typed-label-sorting",
+              "cells": {
+                "eve": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 231084,
+                  "inputTokens": 297862,
+                  "outputTokens": 19622,
+                  "costUsd": 0.29285696666666666
+                },
+                "opencode": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 554796,
+                  "inputTokens": 391922,
+                  "outputTokens": 19632,
+                  "costUsd": 0.30282293833333335
+                },
+                "pi": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 512126,
+                  "inputTokens": 212481,
+                  "outputTokens": 19927,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 642340,
+                  "inputTokens": 616803,
+                  "outputTokens": 31108,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "returns-validated-error-accumulation",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 254233,
+                  "inputTokens": 844894,
+                  "outputTokens": 23392,
+                  "costUsd": 0.44646143333333327
+                },
+                "opencode": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 310980,
+                  "inputTokens": 1304518,
+                  "outputTokens": 29081,
+                  "costUsd": 0.5701805366666667
+                },
+                "pi": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 254602,
+                  "inputTokens": 609894,
+                  "outputTokens": 23124,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 326044,
+                  "inputTokens": 1638404,
+                  "outputTokens": 32008,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "sql-formatter-bigquery-pipe-formatting",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 236727,
+                  "inputTokens": 843981,
+                  "outputTokens": 26535,
+                  "costUsd": 0.5220543999999999
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 206197,
+                  "inputTokens": 805611,
+                  "outputTokens": 22724,
+                  "costUsd": 0.45881516333333333
+                },
+                "pi": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 158027,
+                  "inputTokens": 496306,
+                  "outputTokens": 18230,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 242949,
+                  "inputTokens": 921258,
+                  "outputTokens": 24255,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "sqlite-utils-safe-import-checkpoints",
+              "cells": {
+                "eve": {
+                  "resolved": 0,
+                  "attempts": 3,
+                  "latencyMs": 317690,
+                  "inputTokens": 1430451,
+                  "outputTokens": 41243,
+                  "costUsd": 0.7254013
+                },
+                "opencode": {
+                  "resolved": 1,
+                  "attempts": 3,
+                  "latencyMs": 497102,
+                  "inputTokens": 2966151,
+                  "outputTokens": 63735,
+                  "costUsd": 1.188110545
+                },
+                "pi": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 346404,
+                  "inputTokens": 1419022,
+                  "outputTokens": 41660,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 0,
+                  "attempts": 3,
+                  "latencyMs": 442685,
+                  "inputTokens": 2447887,
+                  "outputTokens": 57255,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "tengo-destructuring-bindings",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 221089,
+                  "inputTokens": 1305198,
+                  "outputTokens": 27178,
+                  "costUsd": 0.5651764999999999
+                },
+                "opencode": {
+                  "resolved": 0,
+                  "attempts": 3,
+                  "latencyMs": 340854,
+                  "inputTokens": 2631706,
+                  "outputTokens": 41113,
+                  "costUsd": 0.887955975
+                },
+                "pi": {
+                  "resolved": 0,
+                  "attempts": 3,
+                  "latencyMs": 240928,
+                  "inputTokens": 1423604,
+                  "outputTokens": 31700,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 0,
+                  "attempts": 3,
+                  "latencyMs": 314354,
+                  "inputTokens": 2366991,
+                  "outputTokens": 40495,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "testem-per-launcher-reports",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 414654,
+                  "inputTokens": 421267,
+                  "outputTokens": 16147,
+                  "costUsd": 0.2916483
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 458777,
+                  "inputTokens": 858636,
+                  "outputTokens": 20828,
+                  "costUsd": 0.40454935333333336
+                },
+                "pi": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 412663,
+                  "inputTokens": 438314,
+                  "outputTokens": 16405,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 457926,
+                  "inputTokens": 900021,
+                  "outputTokens": 24118,
+                  "costUsd": null
+                }
+              }
+            }
+          ],
+          "generatedAt": "2026-11-28T08:49:17.159Z"
         },
-        {
-          "harness": "opencode",
-          "version": "2.4.2",
-          "resolved": 26,
-          "attempts": 36,
-          "resolveRate": {
-            "estimate": 0.7222222222222222,
-            "low": 0.5277777777777778,
-            "high": 0.8888888888888888
+        "openai": {
+          "family": "openai",
+          "model": {
+            "id": "openai/gpt-6.2-sol",
+            "released": "2026-11-17",
+            "knowledge": "2026-06-01"
           },
-          "costUsd": 21.443070815000002,
-          "costPerResolvedUsd": 0.8247334928846155,
-          "inputTokens": 45811037,
-          "outputTokens": 1140395,
-          "cachedShare": 0.9500636931663433,
-          "latencyP50Ms": 330321,
-          "latencyP90Ms": 508246,
-          "source": "87718dc33a232563d3a5705b3dbd6030740a44fe",
           "runUrl": "https://github.com/vercel/eve/actions/runs/46112773927",
-          "measuredAt": "2026-11-28T05:56:37.979Z"
-        },
-        {
-          "harness": "pi",
-          "version": "1.7.0",
-          "resolved": 24,
-          "attempts": 36,
-          "resolveRate": {
-            "estimate": 0.6666666666666666,
-            "low": 0.4444444444444444,
-            "high": 0.861111111111111
-          },
-          "costUsd": null,
-          "costPerResolvedUsd": null,
-          "inputTokens": 25656417,
-          "outputTokens": 904082,
-          "cachedShare": 0.9260996966178091,
-          "latencyP50Ms": 245697,
-          "latencyP90Ms": 418798,
-          "source": "87718dc33a232563d3a5705b3dbd6030740a44fe",
-          "runUrl": "https://github.com/vercel/eve/actions/runs/46112773927",
-          "measuredAt": "2026-11-28T05:54:49.539Z"
-        },
-        {
-          "harness": "fx",
-          "version": "0.0.18",
-          "resolved": 28,
-          "attempts": 36,
-          "resolveRate": {
-            "estimate": 0.7777777777777778,
-            "low": 0.5555555555555555,
-            "high": 0.9722222222222222
-          },
-          "costUsd": null,
-          "costPerResolvedUsd": null,
-          "inputTokens": 48055211,
-          "outputTokens": 1245005,
-          "cachedShare": 0.9454788784508719,
-          "latencyP50Ms": 328277.5,
-          "latencyP90Ms": 470438,
-          "source": "87718dc33a232563d3a5705b3dbd6030740a44fe",
-          "runUrl": "https://github.com/vercel/eve/actions/runs/46112773927",
-          "measuredAt": "2026-11-28T05:59:54.635Z"
+          "harnesses": [
+            {
+              "harness": "eve",
+              "version": "87718dc",
+              "resolved": 34,
+              "attempts": 36,
+              "resolveRate": {
+                "estimate": 0.9444444444444444,
+                "low": 0.8611111111111112,
+                "high": 1
+              },
+              "passAllTasks": 10,
+              "passAllRate": 0.8333333333333334,
+              "costUsd": 27.333948800000005,
+              "medianCostUsd": 0.7326017999999996,
+              "costPerResolvedUsd": 0.8039396705882355,
+              "inputTokens": 73431985,
+              "outputTokens": 927961,
+              "cachedShare": 0.9392112034013516,
+              "latencyP50Ms": 434938,
+              "latencyP90Ms": 669453,
+              "overhead": {
+                "firstStepInputTokens": 1514.5,
+                "modelStepsMedian": 34,
+                "modelStepsTotal": 1205,
+                "toolCallsMedian": 64,
+                "toolCallsTotal": 2501,
+                "topTools": [
+                  {
+                    "name": "read_file",
+                    "count": 934
+                  },
+                  {
+                    "name": "bash",
+                    "count": 856
+                  },
+                  {
+                    "name": "edit_file",
+                    "count": 601
+                  },
+                  {
+                    "name": "write_file",
+                    "count": 90
+                  },
+                  {
+                    "name": "agent",
+                    "count": 14
+                  },
+                  {
+                    "name": "eve__task_wait",
+                    "count": 6
+                  }
+                ]
+              },
+              "effectsVsEve": null,
+              "source": "87718dc33a232563d3a5705b3dbd6030740a44fe",
+              "runUrl": "https://github.com/vercel/eve/actions/runs/46112773927",
+              "measuredAt": "2026-11-28T06:27:58.910Z"
+            },
+            {
+              "harness": "opencode",
+              "version": "2.4.2",
+              "resolved": 29,
+              "attempts": 36,
+              "resolveRate": {
+                "estimate": 0.8055555555555556,
+                "low": 0.5833333333333334,
+                "high": 1
+              },
+              "passAllTasks": 9,
+              "passAllRate": 0.75,
+              "costUsd": 25.765755250000005,
+              "medianCostUsd": 0.7114033499999999,
+              "costPerResolvedUsd": 0.8884743189655174,
+              "inputTokens": 73573211,
+              "outputTokens": 851624,
+              "cachedShare": 0.9435334825878403,
+              "latencyP50Ms": 410347.5,
+              "latencyP90Ms": 598787,
+              "overhead": {
+                "firstStepInputTokens": 7137.5,
+                "modelStepsMedian": 32.5,
+                "modelStepsTotal": 1157,
+                "toolCallsMedian": 72,
+                "toolCallsTotal": 2694,
+                "topTools": [
+                  {
+                    "name": "read",
+                    "count": 1039
+                  },
+                  {
+                    "name": "shell",
+                    "count": 946
+                  },
+                  {
+                    "name": "grep",
+                    "count": 322
+                  },
+                  {
+                    "name": "patch",
+                    "count": 290
+                  },
+                  {
+                    "name": "glob",
+                    "count": 94
+                  },
+                  {
+                    "name": "webfetch",
+                    "count": 3
+                  }
+                ]
+              },
+              "effectsVsEve": {
+                "resolveRate": {
+                  "better": 1,
+                  "worse": 3,
+                  "estimate": -0.13888888888888887,
+                  "low": -0.3611111111111111,
+                  "high": 0.027777777777777787,
+                  "verdict": "inconclusive"
+                },
+                "costUsd": {
+                  "better": 8,
+                  "worse": 4,
+                  "estimate": 0.9396999115747721,
+                  "low": 0.8499530644627878,
+                  "high": 1.0490473233068813,
+                  "verdict": "inconclusive"
+                },
+                "inputTokens": {
+                  "better": 6,
+                  "worse": 6,
+                  "estimate": 1.0409704115256777,
+                  "low": 0.8781150960369485,
+                  "high": 1.256988608801455,
+                  "verdict": "inconclusive"
+                },
+                "latencyMs": {
+                  "better": 8,
+                  "worse": 4,
+                  "estimate": 0.9055953757721782,
+                  "low": 0.7996908136204951,
+                  "high": 1.0252701077826636,
+                  "verdict": "inconclusive"
+                }
+              },
+              "source": "87718dc33a232563d3a5705b3dbd6030740a44fe",
+              "runUrl": "https://github.com/vercel/eve/actions/runs/46112773927",
+              "measuredAt": "2026-11-28T06:28:36.528Z"
+            },
+            {
+              "harness": "pi",
+              "version": "1.7.0",
+              "resolved": 27,
+              "attempts": 36,
+              "resolveRate": {
+                "estimate": 0.75,
+                "low": 0.5555555555555555,
+                "high": 0.9166666666666666
+              },
+              "passAllTasks": 7,
+              "passAllRate": 0.5833333333333334,
+              "costUsd": null,
+              "medianCostUsd": null,
+              "costPerResolvedUsd": null,
+              "inputTokens": 100201586,
+              "outputTokens": 1542582,
+              "cachedShare": 0.9684629143494795,
+              "latencyP50Ms": 737245,
+              "latencyP90Ms": 1046833,
+              "overhead": {
+                "firstStepInputTokens": 1535.5,
+                "modelStepsMedian": 51,
+                "modelStepsTotal": 1927,
+                "toolCallsMedian": 75.5,
+                "toolCallsTotal": 2937,
+                "topTools": [
+                  {
+                    "name": "read",
+                    "count": 1097
+                  },
+                  {
+                    "name": "bash",
+                    "count": 908
+                  },
+                  {
+                    "name": "edit",
+                    "count": 842
+                  },
+                  {
+                    "name": "write",
+                    "count": 90
+                  }
+                ]
+              },
+              "effectsVsEve": {
+                "resolveRate": {
+                  "better": 0,
+                  "worse": 5,
+                  "estimate": -0.19444444444444442,
+                  "low": -0.36111111111111116,
+                  "high": -0.05555555555555556,
+                  "verdict": "inconclusive"
+                },
+                "costUsd": {
+                  "better": 0,
+                  "worse": 0,
+                  "estimate": null,
+                  "low": null,
+                  "high": null,
+                  "verdict": "inconclusive"
+                },
+                "inputTokens": {
+                  "better": 1,
+                  "worse": 11,
+                  "estimate": 1.3170755632189663,
+                  "low": 1.118456514142947,
+                  "high": 1.53387795579288,
+                  "verdict": "worse"
+                },
+                "latencyMs": {
+                  "better": 0,
+                  "worse": 12,
+                  "estimate": 1.6255165403787792,
+                  "low": 1.3588622324150514,
+                  "high": 1.8666734498449684,
+                  "verdict": "worse"
+                }
+              },
+              "source": "87718dc33a232563d3a5705b3dbd6030740a44fe",
+              "runUrl": "https://github.com/vercel/eve/actions/runs/46112773927",
+              "measuredAt": "2026-11-28T06:45:56.171Z"
+            },
+            {
+              "harness": "fx",
+              "version": "0.0.18",
+              "resolved": 30,
+              "attempts": 36,
+              "resolveRate": {
+                "estimate": 0.8333333333333334,
+                "low": 0.6944444444444445,
+                "high": 0.9444444444444445
+              },
+              "passAllTasks": 7,
+              "passAllRate": 0.5833333333333334,
+              "costUsd": null,
+              "medianCostUsd": null,
+              "costPerResolvedUsd": null,
+              "inputTokens": 78926148,
+              "outputTokens": 810717,
+              "cachedShare": 0.9586354195316867,
+              "latencyP50Ms": 348299.5,
+              "latencyP90Ms": 522872.5,
+              "overhead": {
+                "firstStepInputTokens": null,
+                "modelStepsMedian": null,
+                "modelStepsTotal": null,
+                "toolCallsMedian": 109.5,
+                "toolCallsTotal": 3905,
+                "topTools": [
+                  {
+                    "name": "shell",
+                    "count": 1209
+                  },
+                  {
+                    "name": "read_file",
+                    "count": 1041
+                  },
+                  {
+                    "name": "edit_file",
+                    "count": 762
+                  },
+                  {
+                    "name": "grep_files",
+                    "count": 624
+                  },
+                  {
+                    "name": "glob_files",
+                    "count": 170
+                  },
+                  {
+                    "name": "write_file",
+                    "count": 96
+                  }
+                ]
+              },
+              "effectsVsEve": {
+                "resolveRate": {
+                  "better": 0,
+                  "worse": 4,
+                  "estimate": -0.11111111111111112,
+                  "low": -0.1944444444444445,
+                  "high": -0.02777777777777778,
+                  "verdict": "inconclusive"
+                },
+                "costUsd": {
+                  "better": 0,
+                  "worse": 0,
+                  "estimate": null,
+                  "low": null,
+                  "high": null,
+                  "verdict": "inconclusive"
+                },
+                "inputTokens": {
+                  "better": 5,
+                  "worse": 7,
+                  "estimate": 1.1041005142485443,
+                  "low": 0.9439592319194039,
+                  "high": 1.2292753479722278,
+                  "verdict": "inconclusive"
+                },
+                "latencyMs": {
+                  "better": 11,
+                  "worse": 1,
+                  "estimate": 0.7726927941223365,
+                  "low": 0.7126830882218744,
+                  "high": 0.8599769939193901,
+                  "verdict": "better"
+                }
+              },
+              "source": "87718dc33a232563d3a5705b3dbd6030740a44fe",
+              "runUrl": "https://github.com/vercel/eve/actions/runs/46112773927",
+              "measuredAt": "2026-11-28T06:22:46.603Z"
+            }
+          ],
+          "taskMatrix": [
+            {
+              "task": "anko-typed-variable-bindings",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 360063,
+                  "inputTokens": 1791908,
+                  "outputTokens": 18575,
+                  "costUsd": 0.5926767
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 345605,
+                  "inputTokens": 2303579,
+                  "outputTokens": 20154,
+                  "costUsd": 0.6797506333333333
+                },
+                "pi": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 742485,
+                  "inputTokens": 2915643,
+                  "outputTokens": 38896,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 267666,
+                  "inputTokens": 1759591,
+                  "outputTokens": 18649,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "bandit-incremental-cache-control",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 383510,
+                  "inputTokens": 1885569,
+                  "outputTokens": 25514,
+                  "costUsd": 0.8562630333333332
+                },
+                "opencode": {
+                  "resolved": 0,
+                  "attempts": 3,
+                  "latencyMs": 448390,
+                  "inputTokens": 2178039,
+                  "outputTokens": 29808,
+                  "costUsd": 0.9685149333333332
+                },
+                "pi": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 568829,
+                  "inputTokens": 2726500,
+                  "outputTokens": 35187,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 325107,
+                  "inputTokens": 2032590,
+                  "outputTokens": 24123,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "cliffy-config-file-parsing",
+              "cells": {
+                "eve": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 422121,
+                  "inputTokens": 2538030,
+                  "outputTokens": 26313,
+                  "costUsd": 1.0024651333333334
+                },
+                "opencode": {
+                  "resolved": 1,
+                  "attempts": 3,
+                  "latencyMs": 407480,
+                  "inputTokens": 2484190,
+                  "outputTokens": 26830,
+                  "costUsd": 0.9226701333333333
+                },
+                "pi": {
+                  "resolved": 1,
+                  "attempts": 3,
+                  "latencyMs": 1083665,
+                  "inputTokens": 5226803,
+                  "outputTokens": 66980,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 349796,
+                  "inputTokens": 2423890,
+                  "outputTokens": 21374,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "dateutil-rfc5545-timezone-interop",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 572898,
+                  "inputTokens": 2693704,
+                  "outputTokens": 38171,
+                  "costUsd": 0.8993230999999998
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 455326,
+                  "inputTokens": 1868414,
+                  "outputTokens": 27695,
+                  "costUsd": 0.6948044333333333
+                },
+                "pi": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 747793,
+                  "inputTokens": 3125429,
+                  "outputTokens": 47090,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 439103,
+                  "inputTokens": 3326036,
+                  "outputTokens": 29832,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "go-genai-streamed-function-args",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 642163,
+                  "inputTokens": 1496572,
+                  "outputTokens": 27752,
+                  "costUsd": 0.7818477333333332
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 461202,
+                  "inputTokens": 1872149,
+                  "outputTokens": 24106,
+                  "costUsd": 0.6815679
+                },
+                "pi": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 823910,
+                  "inputTokens": 1773606,
+                  "outputTokens": 38424,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 436193,
+                  "inputTokens": 2219085,
+                  "outputTokens": 22427,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "mnamer-daemon-watch-lifecycle",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 404659,
+                  "inputTokens": 1511007,
+                  "outputTokens": 31342,
+                  "costUsd": 0.6531357333333333
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 338107,
+                  "inputTokens": 985050,
+                  "outputTokens": 24875,
+                  "costUsd": 0.4879393
+                },
+                "pi": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 649949,
+                  "inputTokens": 1627668,
+                  "outputTokens": 53127,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 321068,
+                  "inputTokens": 1409798,
+                  "outputTokens": 23688,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "prometheus-typed-label-sorting",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 490966,
+                  "inputTokens": 1035567,
+                  "outputTokens": 22858,
+                  "costUsd": 0.5874623
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 392621,
+                  "inputTokens": 1400358,
+                  "outputTokens": 20181,
+                  "costUsd": 0.5403881999999999
+                },
+                "pi": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 812538,
+                  "inputTokens": 1116495,
+                  "outputTokens": 38433,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 319776,
+                  "inputTokens": 1430682,
+                  "outputTokens": 19671,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "returns-validated-error-accumulation",
+              "cells": {
+                "eve": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 761881,
+                  "inputTokens": 2713348,
+                  "outputTokens": 25784,
+                  "costUsd": 1.0417834666666668
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 727981,
+                  "inputTokens": 2603447,
+                  "outputTokens": 21731,
+                  "costUsd": 0.88546705
+                },
+                "pi": {
+                  "resolved": 1,
+                  "attempts": 3,
+                  "latencyMs": 837227,
+                  "inputTokens": 2843296,
+                  "outputTokens": 28682,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 1,
+                  "attempts": 3,
+                  "latencyMs": 522582,
+                  "inputTokens": 2502851,
+                  "outputTokens": 24555,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "sql-formatter-bigquery-pipe-formatting",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 243768,
+                  "inputTokens": 933750,
+                  "outputTokens": 13866,
+                  "costUsd": 0.3836108
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 330301,
+                  "inputTokens": 1289576,
+                  "outputTokens": 15731,
+                  "costUsd": 0.5028244000000001
+                },
+                "pi": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 492827,
+                  "inputTokens": 1296652,
+                  "outputTokens": 27442,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 223158,
+                  "inputTokens": 1241009,
+                  "outputTokens": 13010,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "sqlite-utils-safe-import-checkpoints",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 460742,
+                  "inputTokens": 3662435,
+                  "outputTokens": 35347,
+                  "costUsd": 1.0308758000000002
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 472385,
+                  "inputTokens": 2943266,
+                  "outputTokens": 31187,
+                  "costUsd": 0.8655078
+                },
+                "pi": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 650044,
+                  "inputTokens": 3341556,
+                  "outputTokens": 48682,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 523163,
+                  "inputTokens": 4164128,
+                  "outputTokens": 32323,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "tengo-destructuring-bindings",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 318233,
+                  "inputTokens": 2293615,
+                  "outputTokens": 20298,
+                  "costUsd": 0.6408862333333335
+                },
+                "opencode": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 322868,
+                  "inputTokens": 1927819,
+                  "outputTokens": 18005,
+                  "costUsd": 0.6027255999999999
+                },
+                "pi": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 695619,
+                  "inputTokens": 3652305,
+                  "outputTokens": 49024,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 277380,
+                  "inputTokens": 1477002,
+                  "outputTokens": 18958,
+                  "costUsd": null
+                }
+              }
+            },
+            {
+              "task": "testem-per-launcher-reports",
+              "cells": {
+                "eve": {
+                  "resolved": 3,
+                  "attempts": 3,
+                  "latencyMs": 564221,
+                  "inputTokens": 1921822,
+                  "outputTokens": 23501,
+                  "costUsd": 0.6409862333333333
+                },
+                "opencode": {
+                  "resolved": 1,
+                  "attempts": 3,
+                  "latencyMs": 341580,
+                  "inputTokens": 2668515,
+                  "outputTokens": 23572,
+                  "costUsd": 0.7564247000000002
+                },
+                "pi": {
+                  "resolved": 0,
+                  "attempts": 3,
+                  "latencyMs": 740418,
+                  "inputTokens": 3754576,
+                  "outputTokens": 42227,
+                  "costUsd": null
+                },
+                "fx": {
+                  "resolved": 2,
+                  "attempts": 3,
+                  "latencyMs": 347069,
+                  "inputTokens": 2322055,
+                  "outputTokens": 21630,
+                  "costUsd": null
+                }
+              }
+            }
+          ],
+          "generatedAt": "2026-11-28T08:49:17.159Z"
         }
-      ],
-      "generatedAt": "2026-11-28T06:47:24.304Z"
+      }
     }
   }
 }

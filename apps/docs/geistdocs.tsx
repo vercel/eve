@@ -26,6 +26,10 @@ export const nav = [
     href: templateGalleryUrl,
   },
   {
+    label: "Benchmarks",
+    href: "/benchmarks",
+  },
+  {
     label: "Changelog",
     href: "/changelog",
   },
@@ -44,6 +48,12 @@ export const suggestions = [
 
 export const agent = {
   links: [
+    {
+      label: "Benchmarks",
+      href: "/benchmarks.md",
+      description:
+        "Latest stock eve harness benchmarks across OpenAI and Anthropic models and eve authoring benchmarks as Markdown.",
+    },
     {
       label: "Changelog",
       href: "/changelog.md",

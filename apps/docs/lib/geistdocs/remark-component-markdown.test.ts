@@ -59,7 +59,7 @@ describe("component Markdown export", () => {
     expect(markdown).toContain("`/workspace`");
     expect(markdown).toContain("`from agent/sandbox/workspace/**`");
     expect(markdown).toContain(
-      "| Harness | Resolved | 95% interval | Median latency | p90 latency | Measured |",
+      "| Harness | Resolved | 95% interval | pass^3 | Latency (p50 / p90) | Tokens (in / out) | Cache hit | Step 1 prompt | Steps / tools | Cost |",
     );
     expect(markdown).toContain("<Callout>");
     expect(markdown).toContain("Keep this content.");
@@ -169,7 +169,7 @@ describe("component Markdown export", () => {
     });
 
     expect(markdown).toContain(
-      "| Harness | Resolved | 95% interval | Median latency | p90 latency | Measured |",
+      "| Harness | Resolved | 95% interval | pass^3 | Latency (p50 / p90) | Tokens (in / out) | Cache hit | Step 1 prompt | Steps / tools | Cost |",
     );
     expect(markdown).toContain("No published not-published results yet.");
     expect(markdown).toContain("<Callout>Keep this content.</Callout>");
