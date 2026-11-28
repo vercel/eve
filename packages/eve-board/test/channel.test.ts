@@ -89,6 +89,11 @@ function noteRecorder() {
   return { board: board as never, notes };
 }
 
+test("the wake route lives under /eve/v1, the only prefix eve/next and Vercel services forward to the agent", () => {
+  const wake = compiled().routes.map((route) => `${route.method} ${route.path}`);
+  assert.deepEqual(wake, ["POST /board/wake"]);
+});
+
 test("the wake route answers at once and drains matches in the background, one drain at a time", async () => {
   const { as } = await startBoard();
   await createWatch({
